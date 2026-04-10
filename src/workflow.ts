@@ -2,6 +2,12 @@ import { Effect } from "effect";
 import type { Layer } from "effect";
 import { Workflow } from "effect/unstable/workflow";
 
+// ── Re-exports ────────────────────────────────────────────────────────────
+
+export { DurableDeferred, Activity } from "effect/unstable/workflow";
+
+// ── WorkflowDefinition ───────────────────────────────────────────────────
+
 export interface WorkflowDefinition<Name extends string = string> {
   readonly _tag: "WorkflowDefinition";
   readonly name: Name;
@@ -22,6 +28,8 @@ export const makeWorkflowReceipt = <Type extends string>(
   workflowName,
   executionId,
 });
+
+// ── workflow constructor ──────────────────────────────────────────────────
 
 export const workflow = <const Name extends string>(
   name: Name,
@@ -48,6 +56,8 @@ export const workflow = <const Name extends string>(
     workflow: wf,
   };
 };
+
+// ── WorkflowRef ──────────────────────────────────────────────────────────
 
 export type WorkflowRef<Name extends string = string> = {
   readonly call: (payload: unknown) => Effect.Effect<unknown, unknown>;
@@ -76,6 +86,8 @@ export const workflowClient = <Name extends string>(
     resume: () => wf.resume(_executionId) as Effect.Effect<void>,
   });
 };
+
+// ── workflowPoll ─────────────────────────────────────────────────────────
 
 export const workflowPoll = <Name extends string>(
   def: WorkflowDefinition<Name>,
@@ -112,6 +124,8 @@ export const workflowPoll = <Name extends string>(
     never
   >;
 };
+
+// ── workflowHandlers ─────────────────────────────────────────────────────
 
 export const workflowHandlers = <Name extends string>(
   def: WorkflowDefinition<Name>,

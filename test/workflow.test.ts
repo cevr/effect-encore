@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Effect, Schema } from "effect";
-import { WorkflowEngine } from "effect/unstable/workflow";
+import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
 import { Workflow as WF } from "../src/index.js";
 
 const Greeter = WF.workflow("Greeter", {
@@ -91,9 +91,114 @@ describe("Workflow peek", () => {
 });
 
 describe("DurableDeferred integration", () => {
-  it.todo("ref.token(deferred) returns a Token for external completion", () => {});
-  it.todo("DurableDeferred.succeed resumes a suspended workflow", () => {});
-  it.todo("token can be generated before workflow starts via tokenFromPayload", () => {});
+  const ApprovalDeferred = WF.DurableDeferred.make("approval", {
+    success: Schema.String,
+  });
+
+  const ApprovalWorkflow = WF.workflow("Approval", {
+    payload: { name: Schema.String },
+    idempotencyKey: (p) => (p as Record<string, string>)["name"] ?? "",
+    success: Schema.String,
+  });
+
+  const approvalHandler = WF.workflowHandlers(
+    ApprovalWorkflow,
+    Effect.fn("approvalHandler")(function* (payload: { name: string }) {
+      const result = yield* DurableDeferred.await(ApprovalDeferred);
+      return `${payload.name} approved: ${result}`;
+    }),
+  );
+
+  it("DurableDeferred re-exports are available from Workflow module", () => {
+    expect(WF.DurableDeferred).toBeDefined();
+    expect(WF.DurableDeferred.make).toBeDefined();
+    expect(WF.DurableDeferred.token).toBeDefined();
+    expect(WF.DurableDeferred.tokenFromPayload).toBeDefined();
+    expect(WF.DurableDeferred.succeed).toBeDefined();
+  });
+
+  it("Activity re-exports are available from Workflow module", () => {
+    expect(WF.Activity).toBeDefined();
+    expect(WF.Activity.make).toBeDefined();
+    expect(WF.Activity.retry).toBeDefined();
+  });
+
+  it("DurableDeferred.succeed resumes a suspended workflow", async () => {
+    const result = await Effect.gen(function* () {
+      // Get token before workflow starts
+      const token = yield* DurableDeferred.tokenFromPayload(ApprovalDeferred, {
+        workflow: ApprovalWorkflow.workflow,
+        payload: { name: "test" },
+      });
+
+      // Cast workflow (fire-and-forget)
+      const ref = WF.workflowClient(ApprovalWorkflow)("approval-1");
+      const receipt = yield* ref.cast({ name: "test" });
+
+      // Wait a bit for workflow to start and suspend on deferred
+      yield* Effect.sleep("100 millis");
+
+      // Complete the deferred externally
+      yield* DurableDeferred.succeed(ApprovalDeferred, {
+        token,
+        value: "yes",
+      });
+
+      // Wait for workflow to complete
+      yield* Effect.sleep("100 millis");
+
+      // Poll for result
+      return yield* WF.workflowPoll(ApprovalWorkflow, receipt.executionId);
+    }).pipe(
+      Effect.provide(approvalHandler),
+      Effect.provide(WorkflowEngine.layerMemory),
+      Effect.scoped,
+      Effect.timeout("5 seconds"),
+      Effect.runPromise,
+    );
+
+    expect(result?._tag).toBe("Success");
+    if (result?._tag === "Success") {
+      expect(result.value).toBe("test approved: yes");
+    }
+  });
+
+  it("Activity.make creates a durable checkpointed step", async () => {
+    let activityCallCount = 0;
+
+    const ActivityWorkflow = WF.workflow("ActivityTest", {
+      payload: { x: Schema.Number },
+      idempotencyKey: (p) => String((p as Record<string, number>)["x"] ?? 0),
+      success: Schema.Number,
+    });
+
+    const activityHandler = WF.workflowHandlers(
+      ActivityWorkflow,
+      Effect.fn("activityHandler")(function* (payload: { x: number }) {
+        const activity = WF.Activity.make({
+          name: "double",
+          success: Schema.Number,
+          execute: Effect.sync(() => {
+            activityCallCount++;
+            return payload.x * 2;
+          }),
+        });
+        return yield* activity;
+      }),
+    );
+
+    const result = await Effect.gen(function* () {
+      const ref = WF.workflowClient(ActivityWorkflow)("activity-1");
+      return yield* ref.call({ x: 21 });
+    }).pipe(
+      Effect.provide(activityHandler),
+      Effect.provide(WorkflowEngine.layerMemory),
+      Effect.runPromise,
+    );
+
+    expect(result).toBe(42);
+    expect(activityCallCount).toBeGreaterThan(0);
+  });
 });
 
 describe("Workflow lifecycle", () => {
