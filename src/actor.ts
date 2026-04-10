@@ -1,17 +1,20 @@
 import type { Entity as ClusterEntity } from "effect/unstable/cluster";
 import { ClusterSchema, Entity } from "effect/unstable/cluster";
+import * as DeliverAt from "effect/unstable/cluster/DeliverAt";
 import type { Rpc } from "effect/unstable/rpc";
 import { Rpc as RpcMod } from "effect/unstable/rpc";
-import type { Schema } from "effect";
+import { PrimaryKey, Schema } from "effect";
+import type { DateTime } from "effect";
 
 // ── Operation DSL ──────────────────────────────────────────────────────────
 
 export interface OperationConfig {
-  readonly payload?: Schema.Struct.Fields;
+  readonly payload?: Schema.Top | Schema.Struct.Fields;
   readonly success?: Schema.Top;
   readonly error?: Schema.Top;
   readonly persisted?: boolean;
   readonly primaryKey?: (payload: never) => string;
+  readonly deliverAt?: (payload: never) => DateTime.DateTime;
 }
 
 export type OperationConfigs = Record<string, OperationConfig>;
@@ -22,10 +25,14 @@ export type OperationConfigs = Record<string, OperationConfig>;
 // tells TypeScript what those Rpcs would be.
 
 type PayloadOf<C extends OperationConfig> = C extends {
-  readonly payload: infer P extends Schema.Struct.Fields;
+  readonly payload: infer P extends Schema.Top;
 }
-  ? Schema.Struct<P>
-  : typeof Schema.Void;
+  ? P
+  : C extends {
+        readonly payload: infer F extends Schema.Struct.Fields;
+      }
+    ? Schema.Struct<F>
+    : typeof Schema.Void;
 
 type SuccessOf<C extends OperationConfig> = C extends {
   readonly success: infer S extends Schema.Top;
@@ -77,15 +84,47 @@ export interface SingleActorDefinition<
 
 // ── Compile runtime ────────────────────────────────────────────────────────
 
-const compileRpc = (tag: string, config: OperationConfig): Rpc.Any => {
+const compileRpc = (actorName: string, tag: string, config: OperationConfig): Rpc.Any => {
   const options: Record<string, unknown> = {};
 
-  if (config["payload"]) options["payload"] = config["payload"];
+  if (config["payload"]) {
+    if (Schema.isSchema(config["payload"])) {
+      // Pre-built schema (Schema.Class, Schema.Struct, etc.) — use as-is.
+      // PrimaryKey/DeliverAt symbols are already on the class if needed.
+      options["payload"] = config["payload"];
+    } else {
+      // Raw struct fields — generate a Schema.Class.
+      // Conditionally attach PrimaryKey.symbol and/or DeliverAt.symbol.
+      const fields = config["payload"] as Schema.Struct.Fields;
+      const pkFn = config["primaryKey"];
+      const daFn = config["deliverAt"];
+
+      const Base = Schema.Class<Record<string, unknown>>(
+        `effect-actors/Actor/${actorName}/${tag}/Payload`,
+      )(fields);
+
+      class PayloadClass extends Base {}
+
+      const proto = PayloadClass.prototype as Record<string | symbol, unknown>;
+
+      if (pkFn) {
+        proto[PrimaryKey.symbol] = function (this: unknown) {
+          return (pkFn as Function)(this) as string;
+        };
+      }
+
+      if (daFn) {
+        proto[DeliverAt.symbol] = function (this: unknown) {
+          return (daFn as Function)(this) as DateTime.DateTime;
+        };
+      }
+
+      options["payload"] = PayloadClass;
+    }
+  }
+
   if (config["success"]) options["success"] = config["success"];
   if (config["error"]) options["error"] = config["error"];
-  if (config["primaryKey"] && config["payload"]) {
-    options["primaryKey"] = config["primaryKey"];
-  }
 
   let rpc: Rpc.Any = (RpcMod.make as Function)(tag, options) as Rpc.Any;
 
@@ -106,7 +145,7 @@ export const make = <const Name extends string, const Ops extends OperationConfi
   operations: Ops,
 ): ActorDefinition<Name, Ops> => {
   const rpcs = Object.entries(operations).map(([tag, config]) =>
-    compileRpc(tag, config as OperationConfig),
+    compileRpc(name, tag, config as OperationConfig),
   ) as unknown as ReadonlyArray<ActorRpcs<Ops>>;
 
   return {
@@ -121,7 +160,7 @@ export const single = <const Name extends string, const C extends OperationConfi
   name: Name,
   operation: C,
 ): SingleActorDefinition<Name, C> => {
-  const rpc = compileRpc(name, operation);
+  const rpc = compileRpc(name, name, operation);
   const entity = Entity.make(name, [rpc]) as unknown as ClusterEntity.Entity<
     Name,
     OperationRpc<Name, C>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "effect-bun-test";
+import { Effect, Ref, Schema } from "effect";
 import type { Layer } from "effect";
-import { Effect, Schema } from "effect";
 import { ShardingConfig } from "effect/unstable/cluster";
 import { Actor, Testing } from "../src/index.js";
 
@@ -72,5 +72,33 @@ describe("Actor.testClient", () => {
       const ref = yield* makeRef("s-1");
       const result = yield* ref.call({ msg: "hi" });
       expect(result).toBe("single: hi");
+    }));
+
+  test("testClient preserves layer requirements for side-effect observation", () =>
+    Effect.gen(function* () {
+      const calls = yield* Ref.make<Array<string>>([]);
+
+      const Tracker = Actor.make("Tracker", {
+        Track: {
+          payload: { item: Schema.String },
+          success: Schema.String,
+        },
+      });
+
+      // Handler that records calls to a Ref — observable from outside
+      const trackerHandlers = Tracker.entity.toLayer({
+        Track: (req) =>
+          Ref.update(calls, (arr) => [...arr, req.payload.item]).pipe(
+            Effect.andThen(Effect.succeed(`tracked: ${req.payload.item}`)),
+          ),
+      }) as unknown as Layer.Layer<never>;
+
+      const makeRef = yield* Testing.testClient(Tracker, trackerHandlers);
+      const ref = yield* makeRef("t-1");
+      const result = yield* ref["Track"]!.call({ item: "widget" });
+      expect(result).toBe("tracked: widget");
+
+      const recorded = yield* Ref.get(calls);
+      expect(recorded).toEqual(["widget"]);
     }));
 });

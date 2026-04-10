@@ -1,7 +1,8 @@
 import { describe, expect, it, test } from "effect-bun-test";
 import type { Layer } from "effect";
-import { Context, Effect, Schema } from "effect";
+import { Context, DateTime, Effect, PrimaryKey, Schema } from "effect";
 import { ClusterSchema, ShardingConfig } from "effect/unstable/cluster";
+import * as DeliverAt from "effect/unstable/cluster/DeliverAt";
 import { Actor, Testing } from "../src/index.js";
 
 const TestShardingConfig = ShardingConfig.layer({
@@ -125,4 +126,150 @@ describe("Actor.client", () => {
       expect(ref["GetCount"]?.call).toBeDefined();
     }),
   );
+});
+
+describe("deliverAt", () => {
+  test("attaches DeliverAt.symbol to payload instances when deliverAt is configured", () => {
+    const Delayed = Actor.make("Delayed", {
+      Process: {
+        payload: { id: Schema.String, deliverAt: Schema.DateTimeUtc },
+        success: Schema.Void,
+        persisted: true,
+        primaryKey: (p: { id: string }) => p.id,
+        deliverAt: (p: { deliverAt: DateTime.DateTime }) => p.deliverAt,
+      },
+    });
+
+    // Get the compiled Rpc's payload schema and instantiate it
+    const rpc = Delayed.entity.protocol.requests.get("Process")!;
+    const payloadSchema = rpc.payloadSchema;
+    const now = DateTime.makeUnsafe(Date.now());
+    const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
+      id: "test-123",
+      deliverAt: now,
+    });
+
+    // DeliverAt.symbol should be on the instance
+    expect(DeliverAt.isDeliverAt(instance)).toBe(true);
+    expect(DeliverAt.toMillis(instance)).toBe(now.epochMilliseconds);
+  });
+
+  test("attaches PrimaryKey.symbol to payload instances when primaryKey is configured", () => {
+    const WithPK = Actor.make("WithPKPayload", {
+      Op: {
+        payload: { id: Schema.String },
+        success: Schema.Void,
+        primaryKey: (p: { id: string }) => p.id,
+      },
+    });
+
+    const rpc = WithPK.entity.protocol.requests.get("Op")!;
+    const payloadSchema = rpc.payloadSchema;
+    const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
+      id: "abc",
+    }) as { [PrimaryKey.symbol](): string };
+
+    expect(typeof instance[PrimaryKey.symbol]).toBe("function");
+    expect(instance[PrimaryKey.symbol]()).toBe("abc");
+  });
+
+  test("payload instances without primaryKey or deliverAt have neither symbol", () => {
+    const Plain = Actor.make("Plain", {
+      Op: {
+        payload: { value: Schema.String },
+        success: Schema.Void,
+      },
+    });
+
+    const rpc = Plain.entity.protocol.requests.get("Op")!;
+    const payloadSchema = rpc.payloadSchema;
+    const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
+      value: "hello",
+    });
+
+    expect(DeliverAt.isDeliverAt(instance)).toBe(false);
+    expect(PrimaryKey.symbol in (instance as object)).toBe(false);
+  });
+
+  test("deliverAt without primaryKey is valid (delayed but not deduped)", () => {
+    const DelayedOnly = Actor.make("DelayedOnly", {
+      Fire: {
+        payload: { when: Schema.DateTimeUtc },
+        success: Schema.Void,
+        persisted: true,
+        deliverAt: (p: { when: DateTime.DateTime }) => p.when,
+      },
+    });
+
+    const rpc = DelayedOnly.entity.protocol.requests.get("Fire")!;
+    const payloadSchema = rpc.payloadSchema;
+    const now = DateTime.makeUnsafe(Date.now());
+    const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
+      when: now,
+    });
+
+    expect(DeliverAt.isDeliverAt(instance)).toBe(true);
+    expect(PrimaryKey.symbol in (instance as object)).toBe(false);
+  });
+
+  test("accepts pre-built Schema.Class as payload — uses it directly", () => {
+    class CustomPayload extends Schema.Class<CustomPayload>("test/CustomPayload")({
+      id: Schema.String,
+      value: Schema.Number,
+    }) {
+      [PrimaryKey.symbol](): string {
+        return this.id;
+      }
+    }
+
+    const WithCustom = Actor.make("WithCustom", {
+      Process: {
+        payload: CustomPayload,
+        success: Schema.String,
+        persisted: true,
+      },
+    });
+
+    // The Rpc should use CustomPayload directly
+    const rpc = WithCustom.entity.protocol.requests.get("Process")!;
+    const instance = new CustomPayload({ id: "xyz", value: 42 });
+
+    // PrimaryKey should work since it's on the class
+    expect(instance[PrimaryKey.symbol]()).toBe("xyz");
+
+    // The schema used by the Rpc should be the original class
+    expect(rpc.payloadSchema).toBe(CustomPayload);
+  });
+
+  test("pre-built Schema.Class with DeliverAt works", () => {
+    class ScheduledPayload extends Schema.Class<ScheduledPayload>("test/ScheduledPayload")({
+      id: Schema.String,
+      when: Schema.DateTimeUtc,
+    }) {
+      [PrimaryKey.symbol](): string {
+        return this.id;
+      }
+      [DeliverAt.symbol](): DateTime.DateTime {
+        return this.when;
+      }
+    }
+
+    const Scheduled = Actor.make("Scheduled", {
+      Run: {
+        payload: ScheduledPayload,
+        success: Schema.Void,
+        persisted: true,
+      },
+    });
+
+    const now = DateTime.makeUnsafe(Date.now());
+    const instance = new ScheduledPayload({ id: "s-1", when: now });
+
+    expect(instance[PrimaryKey.symbol]()).toBe("s-1");
+    expect(DeliverAt.isDeliverAt(instance)).toBe(true);
+    expect(DeliverAt.toMillis(instance)).toBe(now.epochMilliseconds);
+
+    const rpc = Scheduled.entity.protocol.requests.get("Run")!;
+    expect(rpc.payloadSchema).toBe(ScheduledPayload);
+  });
 });

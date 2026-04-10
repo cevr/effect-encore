@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import type { Layer, Scope } from "effect";
-import { Entity } from "@effect/cluster";
-import type { Rpc, RpcClient } from "@effect/rpc";
+import { Entity, type ShardingConfig, type Sharding } from "@effect/cluster";
+import type { Rpc } from "@effect/rpc";
 import type {
   ActorDefinition,
   ActorRpcs,
@@ -17,16 +17,22 @@ export const testClient = <
   Name extends string,
   Ops extends OperationConfigs,
   Rpcs extends Rpc.Any = ActorRpcs<Ops>,
+  LA = never,
+  LE = never,
+  LR = never,
 >(
   actor: ActorDefinition<Name, Ops, Rpcs>,
-  handlerLayer: Layer.Layer<never>,
-): Effect.Effect<(entityId: string) => Effect.Effect<Ref<Rpcs>>, never, Scope.Scope> =>
+  handlerLayer: Layer.Layer<LA, LE, LR>,
+): Effect.Effect<
+  (entityId: string) => Effect.Effect<Ref<Rpcs>>,
+  LE,
+  | Scope.Scope
+  | ShardingConfig.ShardingConfig
+  | Exclude<LR, Sharding.Sharding>
+  | Rpc.MiddlewareClient<Rpcs>
+> =>
   Effect.map(
-    Entity.makeTestClient(actor.entity, handlerLayer as Layer.Layer<never>) as Effect.Effect<
-      (entityId: string) => Effect.Effect<RpcClient.RpcClient<Rpcs>>,
-      never,
-      Scope.Scope
-    >,
+    Entity.makeTestClient(actor.entity, handlerLayer),
     (makeClient) =>
       (entityId: string): Effect.Effect<Ref<Rpcs>> =>
         Effect.map(makeClient(entityId), (rpcClient) =>
@@ -38,16 +44,22 @@ export const testSingleClient = <
   Name extends string,
   C extends OperationConfig,
   R extends Rpc.Any = OperationRpc<Name, C>,
+  LA = never,
+  LE = never,
+  LR = never,
 >(
   actor: SingleActorDefinition<Name, C, R>,
-  handlerLayer: Layer.Layer<never>,
-): Effect.Effect<(entityId: string) => Effect.Effect<SingleRef<R>>, never, Scope.Scope> =>
+  handlerLayer: Layer.Layer<LA, LE, LR>,
+): Effect.Effect<
+  (entityId: string) => Effect.Effect<SingleRef<R>>,
+  LE,
+  | Scope.Scope
+  | ShardingConfig.ShardingConfig
+  | Exclude<LR, Sharding.Sharding>
+  | Rpc.MiddlewareClient<R>
+> =>
   Effect.map(
-    Entity.makeTestClient(actor.entity, handlerLayer as Layer.Layer<never>) as Effect.Effect<
-      (entityId: string) => Effect.Effect<RpcClient.RpcClient<R>>,
-      never,
-      Scope.Scope
-    >,
+    Entity.makeTestClient(actor.entity, handlerLayer),
     (makeClient) =>
       (entityId: string): Effect.Effect<SingleRef<R>> =>
         Effect.map(makeClient(entityId), (rpcClient) =>
