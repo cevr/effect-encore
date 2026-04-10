@@ -9,4 +9,5 @@ export default defineConfig({
   platform: "neutral",
   target: "esnext",
   outDir: "dist",
+  external: [/^@effect\//, /^effect/],
 });
