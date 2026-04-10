@@ -45,9 +45,6 @@
     "version": "changeset version",
     "prepare": "lefthook install"
   },
-  "dependencies": {
-    "effect": "4.0.0-beta.46"
-  },
   "devDependencies": {
     "@changesets/changelog-github": "^0.6.0",
     "@changesets/cli": "^2.30.0",
@@ -66,17 +63,14 @@
   "peerDependencies": {
     "@effect/cluster": "*",
     "@effect/rpc": "*",
-    "effect": ">=3.19.16"
+    "effect": ">=4.0.0-beta.1"
   },
   "peerDependenciesMeta": {
-    "effect": {
-      "optional": false
-    },
     "@effect/cluster": {
-      "optional": false
+      "optional": true
     },
     "@effect/rpc": {
-      "optional": false
+      "optional": true
     }
   },
   "overrides": {
