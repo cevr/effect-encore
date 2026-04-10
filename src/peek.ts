@@ -46,7 +46,7 @@ export const peek = <Name extends string, Ops extends OperationConfigs>(
     const shardId = sharding.getShardId(entityId, group);
 
     const address = EntityAddress.make({
-      entityType: EntityType.make(receipt.actorType),
+      entityType: EntityType.make(actor.name),
       entityId,
       shardId,
     });
