@@ -1,8 +1,27 @@
-export * as Actor from "./actor.js";
-export * as Client from "./client.js";
-export * as Receipt from "./receipt.js";
-export * as Peek from "./peek.js";
-export * as Handlers from "./handlers.js";
-export * as Testing from "./testing.js";
+export { Actor, fromRpcs } from "./actor.js";
+export type {
+  ActorObject,
+  ActorRef,
+  OperationBrand,
+  OperationOutput,
+  OperationError,
+  OperationDef,
+  OperationDefs,
+  HandlerOptions,
+} from "./actor.js";
+export { CastReceipt, makeCastReceipt } from "./receipt.js";
+export type { PeekResult } from "./receipt.js";
+export {
+  Pending,
+  Success,
+  Failure,
+  Interrupted,
+  Defect,
+  isPending,
+  isSuccess,
+  isFailure,
+  isTerminal,
+} from "./receipt.js";
+export { peek, watch, NoPrimaryKeyError } from "./peek.js";
 export * as Observability from "./observability.js";
 export * as Workflow from "./workflow.js";

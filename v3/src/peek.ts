@@ -3,7 +3,7 @@ import { EntityAddress, EntityId, MessageStorage, Sharding } from "@effect/clust
 import type { EntityType } from "@effect/cluster";
 import type { MalformedMessage, PersistenceError } from "@effect/cluster/ClusterError";
 import type { Rpc } from "@effect/rpc";
-import type { ActorDefinition, OperationConfigs } from "./actor.js";
+import type { ActorObject, OperationDefs } from "./actor.js";
 import type { CastReceipt, PeekResult } from "./receipt.js";
 import { Defect, Failure, Interrupted, isTerminal, Pending, Success } from "./receipt.js";
 
@@ -19,15 +19,15 @@ export class NoPrimaryKeyError {
 
 // ── peek ──────────────────────────────────────────────────────────────────
 
-export const peek = <Name extends string, Ops extends OperationConfigs>(
-  actor: ActorDefinition<Name, Ops>,
+export const peek = <Name extends string, Defs extends OperationDefs>(
+  actor: ActorObject<Name, Defs>,
   receipt: CastReceipt,
 ): Effect.Effect<
   PeekResult,
   PersistenceError | MalformedMessage | NoPrimaryKeyError,
   MessageStorage.MessageStorage | Sharding.Sharding
 > => {
-  const op = actor.operations[receipt.operation];
+  const op = actor.definitions[receipt.operation];
   if (!op || !op["primaryKey"] || !receipt.primaryKey) {
     return Effect.fail(new NoPrimaryKeyError(receipt));
   }
@@ -71,8 +71,8 @@ export const peek = <Name extends string, Ops extends OperationConfigs>(
 
 // ── watch ─────────────────────────────────────────────────────────────────
 
-export const watch = <Name extends string, Ops extends OperationConfigs>(
-  actor: ActorDefinition<Name, Ops>,
+export const watch = <Name extends string, Defs extends OperationDefs>(
+  actor: ActorObject<Name, Defs>,
   receipt: CastReceipt,
   options?: { readonly interval?: Duration.DurationInput },
 ): Stream.Stream<
@@ -96,8 +96,6 @@ const peekResultEquals = (a: PeekResult, b: PeekResult): boolean => {
 };
 
 // ── v3 CauseEncoded → PeekResult mapping ─────────────────────────────────
-// v3's CauseEncoded is a recursive tree (Empty|Fail|Die|Interrupt|Sequential|Parallel)
-// v4 uses a flat array. We walk the tree to find the first meaningful cause.
 
 type CauseEncodedShape =
   | { readonly _tag: "Empty" }

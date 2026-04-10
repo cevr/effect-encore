@@ -8,7 +8,7 @@ import {
 } from "effect/unstable/cluster";
 import type { MalformedMessage, PersistenceError } from "effect/unstable/cluster/ClusterError";
 import type { RpcMessage } from "effect/unstable/rpc";
-import type { ActorDefinition, OperationConfigs } from "./actor.js";
+import type { ActorObject, OperationDefs } from "./actor.js";
 import type { CastReceipt, PeekResult } from "./receipt.js";
 import { Defect, Failure, Interrupted, isTerminal, Pending, Success } from "./receipt.js";
 
@@ -24,15 +24,15 @@ export class NoPrimaryKeyError {
 
 // ── peek ──────────────────────────────────────────────────────────────────
 
-export const peek = <Name extends string, Ops extends OperationConfigs>(
-  actor: ActorDefinition<Name, Ops>,
+export const peek = <Name extends string, Defs extends OperationDefs>(
+  actor: ActorObject<Name, Defs>,
   receipt: CastReceipt,
 ): Effect.Effect<
   PeekResult,
   PersistenceError | MalformedMessage | NoPrimaryKeyError,
   MessageStorage.MessageStorage | Sharding.Sharding
 > => {
-  const op = actor.operations[receipt.operation];
+  const op = actor.definitions[receipt.operation];
   if (!op || !op["primaryKey"] || !receipt.primaryKey) {
     return Effect.fail(new NoPrimaryKeyError(receipt));
   }
@@ -76,8 +76,8 @@ export const peek = <Name extends string, Ops extends OperationConfigs>(
 
 // ── watch ─────────────────────────────────────────────────────────────────
 
-export const watch = <Name extends string, Ops extends OperationConfigs>(
-  actor: ActorDefinition<Name, Ops>,
+export const watch = <Name extends string, Defs extends OperationDefs>(
+  actor: ActorObject<Name, Defs>,
   receipt: CastReceipt,
   options?: { readonly interval?: Duration.Input },
 ): Stream.Stream<
