@@ -45,7 +45,24 @@ describe("CastReceipt", () => {
     expect(receipt.primaryKey).toBe("key-abc");
   });
 
-  it.todo("duplicate primaryKey is idempotent — same receipt for same key", () => {});
+  it("duplicate primaryKey produces identical receipt fields", () => {
+    const r1 = makeCastReceipt({
+      actorType: "Order",
+      entityId: "ord-1",
+      operation: "Place",
+      primaryKey: "pk-123",
+    });
+    const r2 = makeCastReceipt({
+      actorType: "Order",
+      entityId: "ord-1",
+      operation: "Place",
+      primaryKey: "pk-123",
+    });
+    expect(r1.actorType).toBe(r2.actorType);
+    expect(r1.entityId).toBe(r2.entityId);
+    expect(r1.operation).toBe(r2.operation);
+    expect(r1.primaryKey).toBe(r2.primaryKey);
+  });
 });
 
 describe("PeekResult", () => {

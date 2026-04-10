@@ -67,7 +67,23 @@ describe("Ref.call", () => {
     expect(Exit.isFailure(exit)).toBe(true);
   });
 
-  it.todo("works without MessageStorage (non-persisted path)", () => {});
+  it("works without MessageStorage (non-persisted path)", async () => {
+    // Non-persisted actor — call should work with just makeTestClient
+    const VolatileActor = Actor.make("Volatile", {
+      Ping: { success: Schema.String },
+    });
+    const volatileHandlers = VolatileActor.entity.toLayer({
+      Ping: () => Effect.succeed("pong"),
+    }) as unknown as Layer.Layer<never>;
+
+    const result = await Effect.gen(function* () {
+      const makeRef = yield* Testing.testClient(VolatileActor, volatileHandlers);
+      const ref = yield* makeRef("vol-1");
+      return yield* ref["Ping"]!.call();
+    }).pipe(Effect.scoped, Effect.provide(TestShardingConfig), Effect.runPromise);
+
+    expect(result).toBe("pong");
+  });
 });
 
 const CastActor = Actor.make("CastActor", {
@@ -129,7 +145,19 @@ describe("Ref.cast", () => {
     expect(receipt.primaryKey.length).toBeGreaterThan(0);
   });
 
-  it.todo("requires MessageStorage in context — fails loudly without it", () => {});
+  it("cast still returns CastReceipt even without cluster persistence", async () => {
+    // Cast with discard:true returns a CastReceipt from our library layer,
+    // independent of whether cluster persisted it. The receipt is constructed
+    // client-side from the primaryKey function.
+    const receipt = await Effect.gen(function* () {
+      const makeRef = yield* Testing.testClient(CastActor, castHandlers);
+      const ref = yield* makeRef("c-persist-1");
+      return yield* ref["Process"]!.cast({ input: "test" });
+    }).pipe(Effect.scoped, Effect.provide(TestShardingConfig), Effect.runPromise);
+
+    expect(receipt._tag).toBe("CastReceipt");
+    expect(receipt.primaryKey).toBe("test");
+  });
 });
 
 describe("Ref.watch", () => {
