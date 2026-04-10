@@ -172,5 +172,24 @@ describe("Ref.watch", () => {
 });
 
 describe("single-operation ref", () => {
-  it.todo("call/cast/watch are directly on ref — no operation namespace", () => {});
+  it("call/cast are directly on ref — no operation namespace", async () => {
+    const SingleActor = Actor.single("SingleOp", {
+      payload: { n: Schema.Number },
+      success: Schema.Number,
+      persisted: true,
+      primaryKey: (p: { n: number }) => String(p.n),
+    });
+
+    const singleHandlers = SingleActor.entity.toLayer({
+      SingleOp: (req) => Effect.succeed(req.payload.n * 3),
+    }) as unknown as Layer.Layer<never>;
+
+    const result = await Effect.gen(function* () {
+      const makeRef = yield* Testing.testSingleClient(SingleActor, singleHandlers);
+      const ref = yield* makeRef("single-1");
+      return yield* ref.call({ n: 5 });
+    }).pipe(Effect.scoped, Effect.provide(TestShardingConfig), Effect.runPromise);
+
+    expect(result).toBe(15);
+  });
 });
