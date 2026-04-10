@@ -1,6 +1,7 @@
 export { Actor, fromRpcs } from "./actor.js";
 export type {
   ActorObject,
+  ActorMeta,
   ActorRef,
   OperationBrand,
   OperationOutput,

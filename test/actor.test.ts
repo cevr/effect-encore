@@ -13,7 +13,7 @@ const TestShardingConfig = ShardingConfig.layer({
 
 const effectTest = it.scopedLive.layer(TestShardingConfig);
 
-const Counter = Actor("Counter", {
+const Counter = Actor.make("Counter", {
   Increment: {
     input: { amount: Schema.Number },
     output: Schema.Number,
@@ -23,53 +23,53 @@ const Counter = Actor("Counter", {
   },
 });
 
-const handlerLayer = Counter.handlers({
+const handlerLayer = Actor.toLayer(Counter, {
   Increment: ({ operation }) => Effect.succeed(operation.amount + 1),
   GetCount: () => Effect.succeed(42),
 });
 
-describe("Actor()", () => {
+describe("Actor.make", () => {
   test("defines a multi-operation actor with typed input/output/error schemas", () => {
-    expect(Counter.name).toBe("Counter");
+    expect(Counter._meta.name).toBe("Counter");
     expect(Counter._tag).toBe("ActorObject");
-    expect(Counter.entity).toBeDefined();
-    expect(Counter.definitions).toBeDefined();
-    expect(Object.keys(Counter.definitions)).toEqual(["Increment", "GetCount"]);
+    expect(Counter._meta.entity).toBeDefined();
+    expect(Counter._meta.definitions).toBeDefined();
+    expect(Object.keys(Counter._meta.definitions)).toEqual(["Increment", "GetCount"]);
   });
 
   test("compiles operations into Entity under the hood", () => {
-    expect(Counter.entity).toBeDefined();
+    expect(Counter._meta.entity).toBeDefined();
   });
 
   test("attaches persisted annotation when persisted: true", () => {
-    const Persisted = Actor("Persisted", {
+    const Persisted = Actor.make("Persisted", {
       Save: {
         input: { data: Schema.String },
         persisted: true,
       },
     });
-    const rpc = Persisted.entity.protocol.requests.get("Save")!;
+    const rpc = Persisted._meta.entity.protocol.requests.get("Save")!;
     const val = Context.get(rpc.annotations, ClusterSchema.Persisted);
     expect(val).toBe(true);
   });
 
   test("attaches primaryKey extractor from definition", () => {
-    const WithPK = Actor("WithPK", {
+    const WithPK = Actor.make("WithPK", {
       Op: {
         input: { id: Schema.String },
         persisted: true,
         primaryKey: (p: { id: string }) => p.id,
       },
     });
-    expect(WithPK.definitions["Op"]!.primaryKey).toBeDefined();
-    const pk = WithPK.definitions["Op"]!.primaryKey!({ id: "abc" } as never);
+    expect(WithPK._meta.definitions["Op"]!.primaryKey).toBeDefined();
+    const pk = WithPK._meta.definitions["Op"]!.primaryKey!({ id: "abc" } as never);
     expect(pk).toBe("abc");
   });
 
   test("operations without explicit persisted: true use cluster default", () => {
-    const rpc = Counter.entity.protocol.requests.get("Increment")!;
+    const rpc = Counter._meta.entity.protocol.requests.get("Increment")!;
     const result = Context.getOption(rpc.annotations, ClusterSchema.Persisted);
-    expect(Counter.definitions["Increment"]!.persisted).toBeUndefined();
+    expect(Counter._meta.definitions["Increment"]!.persisted).toBeUndefined();
     expect(result._tag).toBe("Some");
   });
 
@@ -89,12 +89,20 @@ describe("Actor()", () => {
     expect(Counter.$is("Increment")(op)).toBe(true);
     expect(Counter.$is("GetCount")(op)).toBe(false);
   });
+
+  test("throws on reserved operation names", () => {
+    expect(() =>
+      Actor.make("Bad", {
+        _meta: { output: Schema.String },
+      } as never),
+    ).toThrow(/collides with reserved/);
+  });
 });
 
-describe("Actor.client", () => {
+describe("Actor.Test", () => {
   effectTest("returns a function (entityId) => ActorRef with call/cast", () =>
     Effect.gen(function* () {
-      const makeRef = yield* Counter.testClient(handlerLayer as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(Counter, handlerLayer as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("counter-1");
       expect(ref.call).toBeDefined();
       expect(ref.cast).toBeDefined();
@@ -103,7 +111,7 @@ describe("Actor.client", () => {
 
   effectTest("call dispatches by operation value", () =>
     Effect.gen(function* () {
-      const makeRef = yield* Counter.testClient(handlerLayer as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(Counter, handlerLayer as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("counter-2");
       const result = yield* ref.call(Counter.Increment({ amount: 5 }));
       expect(result).toBe(6);
@@ -112,7 +120,7 @@ describe("Actor.client", () => {
 
   effectTest("call works for zero-input operations", () =>
     Effect.gen(function* () {
-      const makeRef = yield* Counter.testClient(handlerLayer as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(Counter, handlerLayer as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("counter-3");
       const result = yield* ref.call(Counter.GetCount());
       expect(result).toBe(42);
@@ -122,7 +130,7 @@ describe("Actor.client", () => {
 
 describe("deliverAt", () => {
   test("attaches DeliverAt.symbol to payload instances when deliverAt is configured", () => {
-    const Delayed = Actor("Delayed", {
+    const Delayed = Actor.make("Delayed", {
       Process: {
         input: { id: Schema.String, deliverAt: Schema.DateTimeUtc },
         persisted: true,
@@ -131,7 +139,7 @@ describe("deliverAt", () => {
       },
     });
 
-    const rpc = Delayed.entity.protocol.requests.get("Process")!;
+    const rpc = Delayed._meta.entity.protocol.requests.get("Process")!;
     const payloadSchema = rpc.payloadSchema;
     const now = DateTime.makeUnsafe(Date.now());
     const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
@@ -144,14 +152,14 @@ describe("deliverAt", () => {
   });
 
   test("attaches PrimaryKey.symbol to payload instances when primaryKey is configured", () => {
-    const WithPK = Actor("WithPKPayload", {
+    const WithPK = Actor.make("WithPKPayload", {
       Op: {
         input: { id: Schema.String },
         primaryKey: (p: { id: string }) => p.id,
       },
     });
 
-    const rpc = WithPK.entity.protocol.requests.get("Op")!;
+    const rpc = WithPK._meta.entity.protocol.requests.get("Op")!;
     const payloadSchema = rpc.payloadSchema;
     const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
       id: "abc",
@@ -162,13 +170,13 @@ describe("deliverAt", () => {
   });
 
   test("payload instances without primaryKey or deliverAt have neither symbol", () => {
-    const Plain = Actor("Plain", {
+    const Plain = Actor.make("Plain", {
       Op: {
         input: { value: Schema.String },
       },
     });
 
-    const rpc = Plain.entity.protocol.requests.get("Op")!;
+    const rpc = Plain._meta.entity.protocol.requests.get("Op")!;
     const payloadSchema = rpc.payloadSchema;
     const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
       value: "hello",
@@ -179,7 +187,7 @@ describe("deliverAt", () => {
   });
 
   test("deliverAt without primaryKey is valid (delayed but not deduped)", () => {
-    const DelayedOnly = Actor("DelayedOnly", {
+    const DelayedOnly = Actor.make("DelayedOnly", {
       Fire: {
         input: { when: Schema.DateTimeUtc },
         persisted: true,
@@ -187,7 +195,7 @@ describe("deliverAt", () => {
       },
     });
 
-    const rpc = DelayedOnly.entity.protocol.requests.get("Fire")!;
+    const rpc = DelayedOnly._meta.entity.protocol.requests.get("Fire")!;
     const payloadSchema = rpc.payloadSchema;
     const now = DateTime.makeUnsafe(Date.now());
     const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
@@ -208,7 +216,7 @@ describe("deliverAt", () => {
       }
     }
 
-    const WithCustom = Actor("WithCustom", {
+    const WithCustom = Actor.make("WithCustom", {
       Process: {
         input: CustomPayload,
         output: Schema.String,
@@ -216,7 +224,7 @@ describe("deliverAt", () => {
       },
     });
 
-    const rpc = WithCustom.entity.protocol.requests.get("Process")!;
+    const rpc = WithCustom._meta.entity.protocol.requests.get("Process")!;
     const instance = new CustomPayload({ id: "xyz", value: 42 });
 
     expect(instance[PrimaryKey.symbol]()).toBe("xyz");
@@ -236,7 +244,7 @@ describe("deliverAt", () => {
       }
     }
 
-    const Scheduled = Actor("Scheduled", {
+    const Scheduled = Actor.make("Scheduled", {
       Run: {
         input: ScheduledPayload,
         persisted: true,
@@ -250,7 +258,7 @@ describe("deliverAt", () => {
     expect(DeliverAt.isDeliverAt(instance)).toBe(true);
     expect(DeliverAt.toMillis(instance)).toBe(now.epochMilliseconds);
 
-    const rpc = Scheduled.entity.protocol.requests.get("Run")!;
+    const rpc = Scheduled._meta.entity.protocol.requests.get("Run")!;
     expect(rpc.payloadSchema).toBe(ScheduledPayload);
   });
 });

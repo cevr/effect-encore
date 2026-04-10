@@ -32,7 +32,7 @@ export const peek = <Name extends string, Defs extends OperationDefs>(
   PersistenceError | MalformedMessage | NoPrimaryKeyError,
   MessageStorage.MessageStorage | Sharding.Sharding
 > => {
-  const op = actor.definitions[receipt.operation];
+  const op = actor._meta.definitions[receipt.operation];
   if (!op || !op["primaryKey"] || !receipt.primaryKey) {
     return Effect.fail(new NoPrimaryKeyError(receipt));
   }
@@ -44,11 +44,11 @@ export const peek = <Name extends string, Defs extends OperationDefs>(
     const storage = yield* MessageStorage.MessageStorage;
 
     const entityId = EntityId.make(receipt.entityId);
-    const group = actor.entity.getShardGroup(entityId);
+    const group = actor._meta.entity.getShardGroup(entityId);
     const shardId = sharding.getShardId(entityId, group);
 
     const address = EntityAddress.make({
-      entityType: EntityType.make(actor.name),
+      entityType: EntityType.make(actor._meta.name),
       entityId,
       shardId,
     });

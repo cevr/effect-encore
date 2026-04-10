@@ -12,7 +12,7 @@ const TestShardingConfig = ShardingConfig.layer({
 
 const test = it.scopedLive.layer(TestShardingConfig);
 
-const Counter = Actor("Counter", {
+const Counter = Actor.make("Counter", {
   Increment: {
     input: { amount: Schema.Number },
     output: Schema.Number,
@@ -22,15 +22,15 @@ const Counter = Actor("Counter", {
   },
 });
 
-const handlerLayer = Counter.handlers({
+const handlerLayer = Actor.toLayer(Counter, {
   Increment: ({ operation }) => Effect.succeed(operation.amount + 1),
   GetCount: () => Effect.succeed("hello"),
 });
 
-describe("Actor.handlers", () => {
+describe("Actor.toLayer", () => {
   test("wires plain handler functions — call returns handler result", () =>
     Effect.gen(function* () {
-      const makeRef = yield* Counter.testClient(handlerLayer as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(Counter, handlerLayer as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("counter-1");
       const result = yield* ref.call(Counter.Increment({ amount: 5 }));
       expect(result).toBe(6);
@@ -38,7 +38,7 @@ describe("Actor.handlers", () => {
 
   test("handler return value becomes the RPC reply — no explicit .reply()", () =>
     Effect.gen(function* () {
-      const makeRef = yield* Counter.testClient(handlerLayer as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(Counter, handlerLayer as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("counter-1");
       const result = yield* ref.call(Counter.GetCount());
       expect(result).toBe("hello");
@@ -46,21 +46,22 @@ describe("Actor.handlers", () => {
 
   test("supports Effect.succeed for handlers that need deferred construction", () =>
     Effect.gen(function* () {
-      const GenActor = Actor("GenActor", {
+      const GenActor = Actor.make("GenActor", {
         Compute: {
           input: { x: Schema.Number },
           output: Schema.Number,
         },
       });
 
-      const genHandlers = GenActor.handlers(
+      const genHandlers = Actor.toLayer(
+        GenActor,
         Effect.succeed({
           Compute: ({ operation }: { operation: { x: number } }) =>
             Effect.succeed(operation.x * 10),
         } as const),
       );
 
-      const makeRef = yield* GenActor.testClient(genHandlers as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(GenActor, genHandlers as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("gen-1");
       const result = yield* ref.call(GenActor.Compute({ x: 7 }));
       expect(result).toBe(70);
@@ -72,18 +73,18 @@ describe("Actor.handlers", () => {
         reason: Schema.String,
       }) {}
 
-      const ErrActor = Actor("ErrActor", {
+      const ErrActor = Actor.make("ErrActor", {
         Fail: {
           input: { input: Schema.String },
           error: HandlerError,
         },
       });
 
-      const errHandlers = ErrActor.handlers({
+      const errHandlers = Actor.toLayer(ErrActor, {
         Fail: () => Effect.fail(new HandlerError({ reason: "bad" })),
       });
 
-      const makeRef = yield* ErrActor.testClient(errHandlers as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(ErrActor, errHandlers as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("err-1");
       const exit = yield* ref.call(ErrActor.Fail({ input: "test" })).pipe(Effect.exit);
       expect(Exit.isFailure(exit)).toBe(true);
@@ -93,21 +94,22 @@ describe("Actor.handlers", () => {
     Effect.gen(function* () {
       let receivedOperation: unknown = null;
 
-      const InspectActor = Actor("InspectActor", {
+      const InspectActor = Actor.make("InspectActor", {
         Inspect: {
           input: { value: Schema.String },
           output: Schema.String,
         },
       });
 
-      const inspectHandlers = InspectActor.handlers({
+      const inspectHandlers = Actor.toLayer(InspectActor, {
         Inspect: ({ operation }) => {
           receivedOperation = operation;
           return Effect.succeed(`got: ${operation.value}`);
         },
       });
 
-      const makeRef = yield* InspectActor.testClient(
+      const makeRef = yield* Actor.Test(
+        InspectActor,
         inspectHandlers as unknown as Layer.Layer<never>,
       );
       const ref = yield* makeRef("inspect-1");

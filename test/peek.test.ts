@@ -8,7 +8,7 @@ class ProcessError extends Schema.TaggedErrorClass<ProcessError>()("ProcessError
   message: Schema.String,
 }) {}
 
-const PeekableActor = Actor("PeekableActor", {
+const PeekableActor = Actor.make("PeekableActor", {
   Process: {
     input: { input: Schema.String },
     output: Schema.String,
@@ -23,7 +23,7 @@ const PeekableActor = Actor("PeekableActor", {
   },
 });
 
-const peekableHandlers = PeekableActor.handlers({
+const peekableHandlers = Actor.toLayer(PeekableActor, {
   Process: ({ operation }) => Effect.succeed(`processed: ${operation.input}`),
   Fail: () => Effect.fail(new ProcessError({ message: "bad input" })),
 });
@@ -50,7 +50,7 @@ describe("Actor.peek", () => {
 
   it.scopedLive("returns Success with decoded value when handler succeeds", () =>
     Effect.gen(function* () {
-      const makeClient = yield* PeekableActor.entity.client;
+      const makeClient = yield* PeekableActor._meta.entity.client;
       const client = makeClient("e-2");
       yield* client.Process({ input: "hello" });
 
@@ -74,7 +74,7 @@ describe("Actor.peek", () => {
 
   it.scopedLive("returns Failure with decoded error when handler fails", () =>
     Effect.gen(function* () {
-      const makeClient = yield* PeekableActor.entity.client;
+      const makeClient = yield* PeekableActor._meta.entity.client;
       const client = makeClient("e-3");
       yield* client.Fail({ input: "bad" }).pipe(Effect.option);
 
@@ -95,7 +95,7 @@ describe("Actor.peek", () => {
 
   it.scopedLive("dies with NoPrimaryKeyError for operations without primaryKey", () =>
     Effect.gen(function* () {
-      const NoPkActor = Actor("NoPkActor", {
+      const NoPkActor = Actor.make("NoPkActor", {
         Fire: {
           input: { x: Schema.Number },
           output: Schema.Number,

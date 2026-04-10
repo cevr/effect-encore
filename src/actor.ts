@@ -3,8 +3,8 @@ import { ClusterSchema, Entity } from "effect/unstable/cluster";
 import * as DeliverAt from "effect/unstable/cluster/DeliverAt";
 import type { Rpc, RpcClient } from "effect/unstable/rpc";
 import { Rpc as RpcMod } from "effect/unstable/rpc";
-import { Effect, PrimaryKey, Schema } from "effect";
-import type { DateTime, Layer, Scope } from "effect";
+import { Context, Effect, Layer, PrimaryKey, Schema } from "effect";
+import type { DateTime, Scope } from "effect";
 import type { CastReceipt } from "./receipt.js";
 import { makeCastReceipt } from "./receipt.js";
 
@@ -20,6 +20,15 @@ export interface OperationDef {
 }
 
 export type OperationDefs = Record<string, OperationDef>;
+
+// ── Reserved key guard ─────────────────────────────────────────────────────
+
+type ReservedKeys = "_tag" | "_meta" | "$is" | "Context";
+
+type AssertNoReservedKeys<Defs extends OperationDefs> =
+  Extract<keyof Defs, ReservedKeys> extends never ? Defs : never;
+
+const RESERVED_KEYS = new Set<string>(["_tag", "_meta", "$is", "Context"]);
 
 // ── Type-level Rpc mirror ──────────────────────────────────────────────────
 
@@ -134,7 +143,7 @@ type HandlerRequest<Tag extends string, C extends OperationDef> = {
   readonly request: unknown;
 };
 
-type Handlers<Defs extends OperationDefs> = {
+type ActorHandlers<Defs extends OperationDefs> = {
   readonly [Tag in keyof Defs & string]: (req: HandlerRequest<Tag, Defs[Tag]>) => Effect.Effect<
     Schema.Schema.Type<OutputOf<Defs[Tag]>>,
     Schema.Schema.Type<ErrorOf<Defs[Tag]>>,
@@ -150,6 +159,29 @@ export interface HandlerOptions {
   readonly mailboxCapacity?: number | "unbounded";
 }
 
+// ── ActorMeta — internal metadata ──────────────────────────────────────────
+
+export interface ActorMeta<
+  Name extends string,
+  Defs extends OperationDefs,
+  Rpcs extends Rpc.Any = DefRpcs<Defs>,
+> {
+  readonly name: Name;
+  readonly definitions: Defs;
+  readonly entity: ClusterEntity.Entity<Name, Rpcs>;
+}
+
+// ── ActorClientService — phantom type for Context tag ──────────────────────
+
+declare const ActorClientServiceId: unique symbol;
+
+interface ActorClientService<Name extends string, Defs extends OperationDefs> {
+  readonly [ActorClientServiceId]: {
+    readonly name: Name;
+    readonly defs: Defs;
+  };
+}
+
 // ── ActorObject — the unified return type ──────────────────────────────────
 
 type ActorConstructors<Name extends string, Defs extends OperationDefs> = {
@@ -162,32 +194,11 @@ export type ActorObject<
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
 > = ActorConstructors<Name, Defs> & {
   readonly _tag: "ActorObject";
-  readonly name: Name;
-  readonly definitions: Defs;
-  readonly entity: ClusterEntity.Entity<Name, Rpcs>;
-
-  readonly handlers: <RX = never>(
-    build: Handlers<Defs> | Effect.Effect<Handlers<Defs>, never, RX>,
-    options?: HandlerOptions,
-  ) => ReturnType<ClusterEntity.Entity<Name, Rpcs>["toLayer"]>;
-
-  readonly client: Effect.Effect<
-    (entityId: string) => ActorRef<Name, Defs>,
-    never,
-    Scope.Scope | Rpc.MiddlewareClient<Rpcs>
+  readonly _meta: ActorMeta<Name, Defs, Rpcs>;
+  readonly Context: Context.Service<
+    ActorClientService<Name, Defs>,
+    (entityId: string) => ActorRef<Name, Defs>
   >;
-
-  readonly testClient: <LA = never, LE = never, LR = never>(
-    handlerLayer: Layer.Layer<LA, LE, LR>,
-  ) => Effect.Effect<
-    (entityId: string) => Effect.Effect<ActorRef<Name, Defs>>,
-    LE,
-    | Scope.Scope
-    | ShardingConfig.ShardingConfig
-    | Exclude<LR, Sharding.Sharding>
-    | Rpc.MiddlewareClient<Rpcs>
-  >;
-
   readonly $is: <Tag extends keyof Defs & string>(
     tag: Tag,
   ) => (value: unknown) => value is OperationValue<Name, Tag, Defs[Tag]>;
@@ -246,19 +257,26 @@ const compileRpc = (actorName: string, tag: string, def: OperationDef): Rpc.Any 
   return rpc;
 };
 
-// ── Actor() — unified constructor ──────────────────────────────────────────
+// ── Actor.make ─────────────────────────────────────────────────────────────
 
-export const Actor = <const Name extends string, const Defs extends OperationDefs>(
+const make = <const Name extends string, const Defs extends OperationDefs>(
   name: Name,
-  definitions: Defs,
+  definitions: AssertNoReservedKeys<Defs>,
 ): ActorObject<Name, Defs> => {
+  for (const tag of Object.keys(definitions)) {
+    if (RESERVED_KEYS.has(tag)) {
+      throw new Error(
+        `effect-actor: operation "${tag}" collides with reserved property. Reserved: ${[...RESERVED_KEYS].join(", ")}`,
+      );
+    }
+  }
+
   const rpcs = Object.entries(definitions).map(([tag, def]) =>
     compileRpc(name, tag, def as OperationDef),
   );
 
   const entity = Entity.make(name, rpcs as Array<DefRpcs<Defs>>);
 
-  // Build constructors
   const constructors: Record<string, Function> = {};
   for (const tag of Object.keys(definitions)) {
     constructors[tag] = (input?: unknown) => ({
@@ -267,43 +285,11 @@ export const Actor = <const Name extends string, const Defs extends OperationDef
     });
   }
 
-  // Handlers wrapper: transforms { Tag: ({operation}) => ... } to { Tag: (request) => ... }
-  const handlersMethod = (build: unknown, options?: HandlerOptions) => {
-    const transformed = transformHandlers(build);
-    return entity.toLayer(transformed as never, {
-      spanAttributes: options?.spanAttributes,
-      maxIdleTime: options?.maxIdleTime,
-      concurrency: options?.concurrency,
-      mailboxCapacity: options?.mailboxCapacity,
-    });
-  };
+  const contextTag = Context.Service<
+    ActorClientService<Name, Defs>,
+    (entityId: string) => ActorRef<Name, Defs>
+  >(`effect-actor/${name}/Client`);
 
-  // Client
-  const clientEffect = Effect.map(
-    entity.client,
-    (makeClient: Function) =>
-      (entityId: string): ActorRef<Name, Defs> =>
-        buildActorRef(
-          name,
-          entityId,
-          definitions,
-          makeClient(entityId) as RpcClient.RpcClient<Rpc.Any, never>,
-        ),
-  );
-
-  // Test client
-  const testClientMethod = <LA, LE, LR>(handlerLayer: Layer.Layer<LA, LE, LR>) =>
-    Effect.map(
-      Entity.makeTestClient(entity, handlerLayer as never),
-      (makeClient: Function) =>
-        (entityId: string): Effect.Effect<ActorRef<Name, Defs>> =>
-          Effect.map(
-            makeClient(entityId) as Effect.Effect<RpcClient.RpcClient<Rpc.Any, never>>,
-            (rpcClient) => buildActorRef(name, entityId, definitions, rpcClient),
-          ),
-    );
-
-  // $is type guard
   const $is =
     (tag: string) =>
     (value: unknown): boolean =>
@@ -314,18 +300,90 @@ export const Actor = <const Name extends string, const Defs extends OperationDef
 
   const actor = {
     _tag: "ActorObject" as const,
-    name,
-    definitions,
-    entity,
-    handlers: handlersMethod,
-    client: clientEffect,
-    testClient: testClientMethod,
+    _meta: { name, definitions, entity },
+    Context: contextTag,
     $is,
     ...constructors,
   };
 
   return actor as unknown as ActorObject<Name, Defs>;
 };
+
+// ── Actor.toLayer ──────────────────────────────────────────────────────────
+
+const toLayer = <
+  Name extends string,
+  Defs extends OperationDefs,
+  Rpcs extends Rpc.Any = DefRpcs<Defs>,
+  RX = never,
+>(
+  actor: ActorObject<Name, Defs, Rpcs>,
+  build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
+  options?: HandlerOptions,
+): ReturnType<ClusterEntity.Entity<Name, Rpcs>["toLayer"]> => {
+  const transformed = transformHandlers(build);
+  return actor._meta.entity.toLayer(transformed as never, {
+    spanAttributes: options?.spanAttributes,
+    maxIdleTime: options?.maxIdleTime,
+    concurrency: options?.concurrency,
+    mailboxCapacity: options?.mailboxCapacity,
+  });
+};
+
+// ── Actor.Live ─────────────────────────────────────────────────────────────
+
+const Live = <
+  Name extends string,
+  Defs extends OperationDefs,
+  Rpcs extends Rpc.Any = DefRpcs<Defs>,
+>(
+  actor: ActorObject<Name, Defs, Rpcs>,
+): Layer.Layer<ActorClientService<Name, Defs>, never, Scope.Scope | Rpc.MiddlewareClient<Rpcs>> =>
+  Layer.effect(
+    actor.Context,
+    Effect.map(
+      actor._meta.entity.client,
+      (makeClient: Function) =>
+        (entityId: string): ActorRef<Name, Defs> =>
+          buildActorRef(
+            actor._meta.name,
+            entityId,
+            actor._meta.definitions,
+            makeClient(entityId) as RpcClient.RpcClient<Rpc.Any, never>,
+          ),
+    ),
+  ) as Layer.Layer<ActorClientService<Name, Defs>, never, Scope.Scope | Rpc.MiddlewareClient<Rpcs>>;
+
+// ── Actor.Test ─────────────────────────────────────────────────────────────
+
+const Test = <
+  Name extends string,
+  Defs extends OperationDefs,
+  Rpcs extends Rpc.Any = DefRpcs<Defs>,
+  LA = never,
+  LE = never,
+  LR = never,
+>(
+  actor: ActorObject<Name, Defs, Rpcs>,
+  handlerLayer: Layer.Layer<LA, LE, LR>,
+): Effect.Effect<
+  (entityId: string) => Effect.Effect<ActorRef<Name, Defs>>,
+  LE,
+  | Scope.Scope
+  | ShardingConfig.ShardingConfig
+  | Exclude<LR, Sharding.Sharding>
+  | Rpc.MiddlewareClient<Rpcs>
+> =>
+  Effect.map(
+    Entity.makeTestClient(actor._meta.entity, handlerLayer as never),
+    (makeClient: Function) =>
+      (entityId: string): Effect.Effect<ActorRef<Name, Defs>> =>
+        Effect.map(
+          makeClient(entityId) as Effect.Effect<RpcClient.RpcClient<Rpc.Any, never>>,
+          (rpcClient) =>
+            buildActorRef(actor._meta.name, entityId, actor._meta.definitions, rpcClient),
+        ),
+  );
 
 // ── Transform handlers from operation-first to request-first ───────────────
 
@@ -385,6 +443,15 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
     },
   } as ActorRef<Name, Defs>;
 };
+
+// ── Public API ─────────────────────────────────────────────────────────────
+
+export const Actor = {
+  make,
+  toLayer,
+  Live,
+  Test,
+} as const;
 
 // ── Escape hatch: raw Rpc definitions ──────────────────────────────────────
 

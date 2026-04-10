@@ -16,7 +16,7 @@ class ValidationError extends Schema.TaggedErrorClass<ValidationError>()("Valida
   message: Schema.String,
 }) {}
 
-const Validator = Actor("Validator", {
+const Validator = Actor.make("Validator", {
   Validate: {
     input: { input: Schema.String },
     output: Schema.String,
@@ -24,7 +24,7 @@ const Validator = Actor("Validator", {
   },
 });
 
-const validatorHandlers = Validator.handlers({
+const validatorHandlers = Actor.toLayer(Validator, {
   Validate: ({ operation }) =>
     operation.input === "bad"
       ? Effect.fail(new ValidationError({ message: "invalid input" }))
@@ -34,7 +34,8 @@ const validatorHandlers = Validator.handlers({
 describe("Ref.call", () => {
   test("sends message and awaits handler completion — returns success value", () =>
     Effect.gen(function* () {
-      const makeRef = yield* Validator.testClient(
+      const makeRef = yield* Actor.Test(
+        Validator,
         validatorHandlers as unknown as Layer.Layer<never>,
       );
       const ref = yield* makeRef("v-1");
@@ -44,7 +45,8 @@ describe("Ref.call", () => {
 
   test("surfaces handler errors in the error channel", () =>
     Effect.gen(function* () {
-      const makeRef = yield* Validator.testClient(
+      const makeRef = yield* Actor.Test(
+        Validator,
         validatorHandlers as unknown as Layer.Layer<never>,
       );
       const ref = yield* makeRef("v-1");
@@ -54,14 +56,14 @@ describe("Ref.call", () => {
 
   test("surfaces handler defects as defects", () =>
     Effect.gen(function* () {
-      const BoomActor = Actor("Boom", {
+      const BoomActor = Actor.make("Boom", {
         Explode: {},
       });
-      const boomHandlers = BoomActor.handlers({
+      const boomHandlers = Actor.toLayer(BoomActor, {
         Explode: () => Effect.die("kaboom"),
       });
 
-      const makeRef = yield* BoomActor.testClient(boomHandlers as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(BoomActor, boomHandlers as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("b-1");
       const exit = yield* ref.call(BoomActor.Explode()).pipe(Effect.exit);
       expect(Exit.isFailure(exit)).toBe(true);
@@ -69,14 +71,15 @@ describe("Ref.call", () => {
 
   test("works without MessageStorage (non-persisted path)", () =>
     Effect.gen(function* () {
-      const VolatileActor = Actor("Volatile", {
+      const VolatileActor = Actor.make("Volatile", {
         Ping: { output: Schema.String },
       });
-      const volatileHandlers = VolatileActor.handlers({
+      const volatileHandlers = Actor.toLayer(VolatileActor, {
         Ping: () => Effect.succeed("pong"),
       });
 
-      const makeRef = yield* VolatileActor.testClient(
+      const makeRef = yield* Actor.Test(
+        VolatileActor,
         volatileHandlers as unknown as Layer.Layer<never>,
       );
       const ref = yield* makeRef("vol-1");
@@ -85,7 +88,7 @@ describe("Ref.call", () => {
     }));
 });
 
-const CastActor = Actor("CastActor", {
+const CastActor = Actor.make("CastActor", {
   Process: {
     input: { input: Schema.String },
     output: Schema.String,
@@ -94,14 +97,14 @@ const CastActor = Actor("CastActor", {
   },
 });
 
-const castHandlers = CastActor.handlers({
+const castHandlers = Actor.toLayer(CastActor, {
   Process: ({ operation }) => Effect.succeed(`processed: ${operation.input}`),
 });
 
 describe("Ref.cast", () => {
   test("sends persisted message with discard: true — returns CastReceipt immediately", () =>
     Effect.gen(function* () {
-      const makeRef = yield* CastActor.testClient(castHandlers as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(CastActor, castHandlers as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("c-1");
       const receipt = yield* ref.cast(CastActor.Process({ input: "data" }));
       expect(receipt._tag).toBe("CastReceipt");
@@ -109,7 +112,7 @@ describe("Ref.cast", () => {
 
   test("receipt contains actorType, entityId, operation, primaryKey", () =>
     Effect.gen(function* () {
-      const makeRef = yield* CastActor.testClient(castHandlers as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(CastActor, castHandlers as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("c-2");
       const receipt = yield* ref.cast(CastActor.Process({ input: "mykey" }));
       expect(receipt.actorType).toBe("CastActor");
@@ -120,18 +123,19 @@ describe("Ref.cast", () => {
 
   test("cast without primaryKey returns receipt with no primaryKey", () =>
     Effect.gen(function* () {
-      const SimpleActor = Actor("Simple", {
+      const SimpleActor = Actor.make("Simple", {
         Do: {
           input: { x: Schema.Number },
           output: Schema.Number,
           persisted: true,
         },
       });
-      const simpleHandlers = SimpleActor.handlers({
+      const simpleHandlers = Actor.toLayer(SimpleActor, {
         Do: ({ operation }) => Effect.succeed(operation.x * 2),
       });
 
-      const makeRef = yield* SimpleActor.testClient(
+      const makeRef = yield* Actor.Test(
+        SimpleActor,
         simpleHandlers as unknown as Layer.Layer<never>,
       );
       const ref = yield* makeRef("s-1");
@@ -141,7 +145,7 @@ describe("Ref.cast", () => {
 
   test("cast still returns CastReceipt even without cluster persistence", () =>
     Effect.gen(function* () {
-      const makeRef = yield* CastActor.testClient(castHandlers as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(CastActor, castHandlers as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("c-persist-1");
       const receipt = yield* ref.cast(CastActor.Process({ input: "test" }));
       expect(receipt._tag).toBe("CastReceipt");
@@ -152,7 +156,7 @@ describe("Ref.cast", () => {
 describe("Ref.watch", () => {
   it.scopedLive("emits Pending then Success when handler completes, then completes stream", () =>
     Effect.gen(function* () {
-      const makeClient = yield* CastActor.entity.client;
+      const makeClient = yield* CastActor._meta.entity.client;
       const client = makeClient("w-1");
 
       yield* client.Process({ input: "watch-test" }, { discard: true });

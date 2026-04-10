@@ -12,7 +12,7 @@ const TestShardingConfig = ShardingConfig.layer({
 
 const test = it.scopedLive.layer(TestShardingConfig);
 
-const Echo = Actor("Echo", {
+const Echo = Actor.make("Echo", {
   Say: {
     input: { msg: Schema.String },
     output: Schema.String,
@@ -25,21 +25,21 @@ const Echo = Actor("Echo", {
   },
 });
 
-const echoHandlers = Echo.handlers({
+const echoHandlers = Actor.toLayer(Echo, {
   Say: ({ operation }) => Effect.succeed(`echo: ${operation.msg}`),
   Fire: ({ operation }) => Effect.succeed(operation.x * 2),
 });
 
-describe("Actor.testClient", () => {
+describe("Actor.Test", () => {
   test("creates a test client", () =>
     Effect.gen(function* () {
-      const makeRef = yield* Echo.testClient(echoHandlers as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(Echo, echoHandlers as unknown as Layer.Layer<never>);
       expect(typeof makeRef).toBe("function");
     }));
 
   test("call works end-to-end without cluster infrastructure", () =>
     Effect.gen(function* () {
-      const makeRef = yield* Echo.testClient(echoHandlers as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(Echo, echoHandlers as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("test-1");
       const result = yield* ref.call(Echo.Say({ msg: "hello" }));
       expect(result).toBe("echo: hello");
@@ -47,7 +47,7 @@ describe("Actor.testClient", () => {
 
   test("cast returns CastReceipt in test mode", () =>
     Effect.gen(function* () {
-      const makeRef = yield* Echo.testClient(echoHandlers as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(Echo, echoHandlers as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("test-2");
       const receipt = yield* ref.cast(Echo.Fire({ x: 7 }));
       expect(receipt._tag).toBe("CastReceipt");
@@ -61,21 +61,21 @@ describe("Actor.testClient", () => {
     Effect.gen(function* () {
       const calls = yield* Ref.make<Array<string>>([]);
 
-      const Tracker = Actor("Tracker", {
+      const Tracker = Actor.make("Tracker", {
         Track: {
           input: { item: Schema.String },
           output: Schema.String,
         },
       });
 
-      const trackerHandlers = Tracker.handlers({
+      const trackerHandlers = Actor.toLayer(Tracker, {
         Track: ({ operation }) =>
           Ref.update(calls, (arr) => [...arr, operation.item]).pipe(
             Effect.andThen(Effect.succeed(`tracked: ${operation.item}`)),
           ),
       });
 
-      const makeRef = yield* Tracker.testClient(trackerHandlers as unknown as Layer.Layer<never>);
+      const makeRef = yield* Actor.Test(Tracker, trackerHandlers as unknown as Layer.Layer<never>);
       const ref = yield* makeRef("t-1");
       const result = yield* ref.call(Tracker.Track({ item: "widget" }));
       expect(result).toBe("tracked: widget");
