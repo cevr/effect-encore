@@ -1,9 +1,9 @@
 {
-  "name": "effect-actor",
+  "name": "effect-encore",
   "version": "0.1.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cevr/effect-actor.git"
+    "url": "https://github.com/cevr/effect-encore.git"
   },
   "files": [
     "dist",

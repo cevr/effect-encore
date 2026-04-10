@@ -17,5 +17,5 @@ export { CurrentAddress } from "effect/unstable/cluster/Entity";
 
 export const defaultSpanAttributes = (actorName: string): Record<string, string> => ({
   "actor.name": actorName,
-  "actor.library": "effect-actor",
+  "actor.library": "effect-encore",
 });

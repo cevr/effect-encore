@@ -223,7 +223,7 @@ const compileRpc = (actorName: string, tag: string, def: OperationDef): Rpc.Any 
       const fields = payload as Schema.Struct.Fields;
 
       const Base = Schema.Class<Record<string, unknown>>(
-        `effect-actor/${actorName}/${tag}/Payload`,
+        `effect-encore/${actorName}/${tag}/Payload`,
       )(fields);
 
       class PayloadClass extends Base {}
@@ -270,7 +270,7 @@ const make = <const Name extends string, const Defs extends OperationDefs>(
   for (const tag of Object.keys(definitions)) {
     if (RESERVED_KEYS.has(tag)) {
       throw new Error(
-        `effect-actor: operation "${tag}" collides with reserved property. Reserved: ${[...RESERVED_KEYS].join(", ")}`,
+        `effect-encore: operation "${tag}" collides with reserved property. Reserved: ${[...RESERVED_KEYS].join(", ")}`,
       );
     }
   }
@@ -292,7 +292,7 @@ const make = <const Name extends string, const Defs extends OperationDefs>(
   const contextTag = Context.GenericTag<
     ActorClientService<Name, Defs>,
     (entityId: string) => ActorRef<Name, Defs>
-  >(`effect-actor/${name}/Client`);
+  >(`effect-encore/${name}/Client`);
 
   const $is =
     (tag: string) =>

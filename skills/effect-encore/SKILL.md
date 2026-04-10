@@ -1,9 +1,9 @@
 ---
-name: effect-actor
-description: Erlang gen_server semantics over @effect/cluster. Use when building actor/entity definitions with effect-actor, wiring handlers, writing call/cast/peek/watch patterns, testing actors, or migrating from raw @effect/cluster Entity/Rpc/RpcGroup code.
+name: effect-encore
+description: Erlang gen_server semantics over @effect/cluster. Use when building actor/entity definitions with effect-encore, wiring handlers, writing call/cast/peek/watch patterns, testing actors, or migrating from raw @effect/cluster Entity/Rpc/RpcGroup code.
 ---
 
-# effect-actor
+# effect-encore
 
 Thin protocol layer over `@effect/cluster` providing Erlang gen_server semantics.
 
@@ -222,7 +222,7 @@ For integration tests with `TestRunner.layer`, use `TestClock.adjust(1)` before 
 Re-exports from `effect/unstable/workflow`:
 
 ```ts
-import { Workflow } from "effect-actor";
+import { Workflow } from "effect-encore";
 
 const { DurableDeferred, Activity } = Workflow;
 ```
@@ -238,7 +238,7 @@ Pass extra attributes via `HandlerOptions.spanAttributes`. Access current entity
 
 ## v3
 
-Import from `effect-actor/v3`. Same API, different import paths:
+Import from `effect-encore/v3`. Same API, different import paths:
 
 | v4                          | v3                                |
 | --------------------------- | --------------------------------- |
@@ -255,7 +255,7 @@ v3 `CauseEncoded` is a recursive tree (not flat array like v4) — `peek.ts` has
 
 ### From raw @effect/cluster
 
-| Before (raw cluster)                                                | After (effect-actor)                                   |
+| Before (raw cluster)                                                | After (effect-encore)                                  |
 | ------------------------------------------------------------------- | ------------------------------------------------------ |
 | Custom `Schema.Class` with `PrimaryKey.symbol` + `DeliverAt.symbol` | `primaryKey` + `deliverAt` in OperationConfig          |
 | `Rpc.make` + `RpcGroup.make` + `Entity.fromRpcGroup`                | `Actor.make(name, operations)`                         |

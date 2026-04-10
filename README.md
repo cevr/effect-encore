@@ -1,4 +1,4 @@
-# effect-actor
+# effect-encore
 
 Erlang gen_server semantics over `@effect/cluster`.
 
@@ -6,10 +6,10 @@ Erlang gen_server semantics over `@effect/cluster`.
 
 `@effect/cluster` is powerful but low-level. Defining a single entity requires custom `Schema.Class` implementations, `Rpc.make`, `RpcGroup`, `Entity.make`, handler wiring via `entity.toLayer`, and a hand-rolled client service. A typical entity runs 100+ lines before any business logic.
 
-effect-actor compresses this into a declarative DSL:
+effect-encore compresses this into a declarative DSL:
 
 ```ts
-import { Actor } from "effect-actor";
+import { Actor } from "effect-encore";
 import { Schema } from "effect";
 
 const Counter = Actor.make("Counter", {
@@ -117,12 +117,12 @@ const result = yield * ref.Increment.call({ amount: 5 });
 
 ## v3 Support
 
-Import from `effect-actor/v3` for `@effect/cluster` v3 compatibility. Same API, different import paths under the hood.
+Import from `effect-encore/v3` for `@effect/cluster` v3 compatibility. Same API, different import paths under the hood.
 
 ## Install
 
 ```bash
-bun add effect-actor
+bun add effect-encore
 ```
 
 Peer dependencies: `effect`, `@effect/cluster` (v3) or `effect` with `effect/unstable/cluster` (v4).

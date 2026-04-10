@@ -5,7 +5,7 @@ describe("observability", () => {
   test("defaultSpanAttributes returns actor metadata", () => {
     const attrs = Observability.defaultSpanAttributes("MyActor");
     expect(attrs["actor.name"]).toBe("MyActor");
-    expect(attrs["actor.library"]).toBe("effect-actor");
+    expect(attrs["actor.library"]).toBe("effect-encore");
   });
 
   test("re-exports CurrentAddress for custom middleware users", () => {
