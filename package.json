@@ -46,9 +46,7 @@
     "prepare": "lefthook install"
   },
   "dependencies": {
-    "@effect/cluster": "0.58.0",
-    "@effect/rpc": "0.75.0",
-    "effect": "4.0.0-beta.43"
+    "effect": "4.0.0-beta.46"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.6.0",
@@ -82,6 +80,6 @@
     }
   },
   "overrides": {
-    "effect": "4.0.0-beta.43"
+    "effect": "4.0.0-beta.46"
   }
 }
