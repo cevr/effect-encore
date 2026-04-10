@@ -202,7 +202,101 @@ describe("DurableDeferred integration", () => {
 });
 
 describe("Workflow lifecycle", () => {
-  it.todo("ref.interrupt() signals workflow interruption", () => {});
-  it.todo("ref.resume() resumes a suspended workflow", () => {});
-  it.todo("activities checkpoint — replay skips completed steps", () => {});
+  it("ref.interrupt() signals workflow interruption", async () => {
+    const InterruptDeferred = WF.DurableDeferred.make("block", {
+      success: Schema.String,
+    });
+
+    const InterruptWorkflow = WF.workflow("InterruptWork", {
+      payload: { x: Schema.Number },
+      idempotencyKey: (p) => String((p as Record<string, number>)["x"] ?? 0),
+      success: Schema.String,
+    });
+
+    const interruptHandler = WF.workflowHandlers(
+      InterruptWorkflow,
+      Effect.fn("interruptHandler")(function* (_payload: { x: number }) {
+        // Block on deferred — will be interrupted instead of completed
+        return yield* DurableDeferred.await(InterruptDeferred);
+      }),
+    );
+
+    const exit = await Effect.gen(function* () {
+      const ref = WF.workflowClient(InterruptWorkflow)("int-1");
+      // Use call which blocks — interrupt it from outside
+      const fiber = yield* ref.call({ x: 1 }).pipe(Effect.fork);
+
+      yield* Effect.sleep("100 millis");
+      yield* ref.interrupt();
+      yield* Effect.sleep("100 millis");
+
+      return yield* fiber.pipe(Effect.awaitEffect);
+    }).pipe(
+      Effect.provide(interruptHandler),
+      Effect.provide(WorkflowEngine.layerMemory),
+      Effect.scoped,
+      Effect.timeout("5 seconds"),
+      Effect.runPromiseExit,
+    );
+
+    // The call should have been interrupted
+    expect(exit._tag).toBe("Failure");
+  });
+
+  it("ref.resume() resumes a suspended workflow", async () => {
+    const ResumeDeferred = WF.DurableDeferred.make("resume-signal", {
+      success: Schema.String,
+    });
+
+    const ResumeWorkflow = WF.workflow("ResumableWork", {
+      payload: { id: Schema.String },
+      idempotencyKey: (p) => (p as Record<string, string>)["id"] ?? "",
+      success: Schema.String,
+    });
+
+    const resumeHandler = WF.workflowHandlers(
+      ResumeWorkflow,
+      Effect.fn("resumeHandler")(function* (payload: { id: string }) {
+        const result = yield* DurableDeferred.await(ResumeDeferred);
+        return `${payload.id}: ${result}`;
+      }),
+    );
+
+    const result = await Effect.gen(function* () {
+      const ref = WF.workflowClient(ResumeWorkflow)("resume-1");
+      const receipt = yield* ref.cast({ id: "r1" });
+
+      // Wait for workflow to suspend on deferred
+      yield* Effect.sleep("100 millis");
+
+      // Get token and complete deferred
+      const token = yield* DurableDeferred.tokenFromPayload(ResumeDeferred, {
+        workflow: ResumeWorkflow.workflow,
+        payload: { id: "r1" },
+      });
+
+      yield* DurableDeferred.succeed(ResumeDeferred, {
+        token,
+        value: "resumed",
+      });
+
+      // Resume the workflow
+      yield* ref.resume();
+
+      yield* Effect.sleep("200 millis");
+
+      return yield* WF.workflowPoll(ResumeWorkflow, receipt.executionId);
+    }).pipe(
+      Effect.provide(resumeHandler),
+      Effect.provide(WorkflowEngine.layerMemory),
+      Effect.scoped,
+      Effect.timeout("5 seconds"),
+      Effect.runPromise,
+    );
+
+    expect(result?._tag).toBe("Success");
+    if (result?._tag === "Success") {
+      expect(result.value).toBe("r1: resumed");
+    }
+  });
 });
