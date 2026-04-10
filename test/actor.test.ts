@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
+import type { Layer } from "effect";
 import { Effect, Schema } from "effect";
 import { ShardingConfig } from "effect/unstable/cluster";
-import type { ActorDefinition } from "../src/actor.js";
-import { Actor, Handlers, Testing } from "../src/index.js";
+import { Actor, Testing } from "../src/index.js";
 
 const TestShardingConfig = ShardingConfig.layer({
   shardsPerGroup: 300,
@@ -20,18 +20,19 @@ const Counter = Actor.make("Counter", {
   },
 });
 
-const handlerLayer = Handlers.handlers(Counter, {
-  Increment: (request: any) => Effect.succeed(request.payload.amount + 1),
+// Use entity.toLayer directly — it infers handler types from the Rpcs
+const handlerLayer = Counter.entity.toLayer({
+  Increment: (request) => Effect.succeed(request.payload.amount + 1),
   GetCount: () => Effect.succeed(42),
-});
+}) as unknown as Layer.Layer<never>;
 
 describe("Actor.make", () => {
   it("defines a multi-operation actor with typed payload/success/error schemas", () => {
     expect(Counter.name).toBe("Counter");
+    expect(Counter._tag).toBe("ActorDefinition");
     expect(Counter.entity).toBeDefined();
-    expect(Counter.rpcs.size).toBe(2);
-    expect(Counter.rpcs.has("Increment")).toBe(true);
-    expect(Counter.rpcs.has("GetCount")).toBe(true);
+    expect(Counter.operations).toBeDefined();
+    expect(Object.keys(Counter.operations)).toEqual(["Increment", "GetCount"]);
   });
 
   it("compiles operations into Entity under the hood", () => {
@@ -48,10 +49,9 @@ const Ping = Actor.single("Ping", {
   success: Schema.String,
 });
 
-const pingHandlers = Handlers.handlers({ entity: Ping.entity } as unknown as ActorDefinition, {
-  Ping: (request: { payload: { message: string } }) =>
-    Effect.succeed(`pong: ${request.payload.message}`),
-});
+const pingHandlers = Ping.entity.toLayer({
+  Ping: (request) => Effect.succeed(`pong: ${request.payload.message}`),
+}) as unknown as Layer.Layer<never>;
 
 describe("Actor.single", () => {
   it("defines a single-operation actor — no operation namespace on ref", async () => {
@@ -76,10 +76,10 @@ describe("Actor.client", () => {
     const program = Effect.gen(function* () {
       const makeRef = yield* Testing.testClient(Counter, handlerLayer);
       const ref = yield* makeRef("counter-1");
-      expect(ref.Increment).toBeDefined();
-      expect(ref.Increment.call).toBeDefined();
-      expect(ref.GetCount).toBeDefined();
-      expect(ref.GetCount.call).toBeDefined();
+      expect(ref["Increment"]).toBeDefined();
+      expect(ref["Increment"]?.call).toBeDefined();
+      expect(ref["GetCount"]).toBeDefined();
+      expect(ref["GetCount"]?.call).toBeDefined();
     }).pipe(Effect.scoped, Effect.provide(TestShardingConfig));
 
     await Effect.runPromise(program);

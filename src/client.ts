@@ -1,113 +1,92 @@
 import { Effect } from "effect";
-import type { ActorDefinition, OperationDefinition, OperationDefinitions } from "./actor.js";
+import type { Rpc, RpcClient } from "effect/unstable/rpc";
+import type { OperationConfig, OperationConfigs } from "./actor.js";
 import { makeCastReceipt } from "./receipt.js";
 import type { CastReceipt } from "./receipt.js";
 
-export type Ref<Ops extends OperationDefinitions> = {
-  readonly [K in keyof Ops]: {
-    readonly call: Ops[K]["payload"] extends Record<string, unknown>
-      ? (payload: {
-          readonly [F in keyof Ops[K]["payload"]]: unknown;
-        }) => Effect.Effect<unknown, unknown>
-      : () => Effect.Effect<unknown, unknown>;
-    readonly cast: Ops[K]["payload"] extends Record<string, unknown>
-      ? (payload: {
-          readonly [F in keyof Ops[K]["payload"]]: unknown;
-        }) => Effect.Effect<CastReceipt, unknown>
-      : () => Effect.Effect<CastReceipt, unknown>;
-  };
+// ── Ref: typed per-operation handle ────────────────────────────────────────
+
+export type OperationHandle<Current extends Rpc.Any, E = never> = {
+  readonly call: (
+    ...args: [Rpc.Payload<Current>] extends [void] ? [] : [payload: Rpc.PayloadConstructor<Current>]
+  ) => Effect.Effect<Rpc.Success<Current>, Rpc.Error<Current> | E>;
+  readonly cast: (
+    ...args: [Rpc.Payload<Current>] extends [void] ? [] : [payload: Rpc.PayloadConstructor<Current>]
+  ) => Effect.Effect<CastReceipt, Rpc.Error<Current> | E>;
 };
 
-export type SingleRef<Op extends OperationDefinition> = {
-  readonly call: Op["payload"] extends Record<string, unknown>
-    ? (payload: {
-        readonly [F in keyof Op["payload"]]: unknown;
-      }) => Effect.Effect<unknown, unknown>
-    : () => Effect.Effect<unknown, unknown>;
-  readonly cast: Op["payload"] extends Record<string, unknown>
-    ? (payload: {
-        readonly [F in keyof Op["payload"]]: unknown;
-      }) => Effect.Effect<CastReceipt, unknown>
-    : () => Effect.Effect<CastReceipt, unknown>;
+export type Ref<Rpcs extends Rpc.Any, E = never> = {
+  readonly [Current in Rpcs as Current["_tag"]]: OperationHandle<Current, E>;
 };
 
-const makeCallFn = (rpcClient: Record<string, Function>, tag: string, hasPayload: boolean) => {
-  return (payload?: unknown) => {
-    const fn = rpcClient[tag];
-    return hasPayload ? fn?.(payload) : fn?.();
-  };
-};
+export type SingleRef<R extends Rpc.Any, E = never> = OperationHandle<R, E>;
 
-const makeCastFn = (
-  rpcClient: Record<string, Function>,
-  tag: string,
-  hasPayload: boolean,
+// ── Build refs from RpcClient ──────────────────────────────────────────────
+
+export const buildRef = <Rpcs extends Rpc.Any, E>(
   actorName: string,
   entityId: string,
-  primaryKeyFn?: (payload: never) => string,
-) => {
-  return (payload?: unknown) => {
-    const fn = rpcClient[tag];
-    const discardCall = hasPayload ? fn?.(payload, { discard: true }) : fn?.({ discard: true });
-    return Effect.map(discardCall ?? Effect.void, () => {
-      const pk = primaryKeyFn ? primaryKeyFn(payload as never) : crypto.randomUUID();
-      return makeCastReceipt({
-        actorType: actorName,
-        entityId,
-        operation: tag,
-        primaryKey: pk,
-      });
-    });
-  };
-};
-
-export const buildRef = <Ops extends OperationDefinitions>(
-  actorName: string,
-  entityId: string,
-  operations: Ops,
-  rpcClient: Record<string, Function>,
-): Ref<Ops> => {
+  operations: OperationConfigs,
+  rpcClient: RpcClient.RpcClient<Rpcs, E>,
+): Ref<Rpcs, E> => {
+  const client = rpcClient as Record<string, Function>;
   const ref = {} as Record<string, unknown>;
+
   for (const tag of Object.keys(operations)) {
-    const op = operations[tag];
-    const hasPayload = op?.payload !== undefined;
+    const op = operations[tag] as OperationConfig;
+    const hasPayload = op["payload"] !== undefined;
+    const fn = client[tag];
+
     ref[tag] = {
-      call: makeCallFn(rpcClient, tag, hasPayload),
-      cast: makeCastFn(rpcClient, tag, hasPayload, actorName, entityId, op?.primaryKey),
+      call: (payload?: unknown) => (hasPayload ? fn?.(payload) : fn?.()),
+      cast: (payload?: unknown) => {
+        const discardCall = hasPayload
+          ? fn?.(payload, { discard: true })
+          : fn?.(undefined, { discard: true });
+        return Effect.map(discardCall ?? Effect.void, () =>
+          makeCastReceipt({
+            actorType: actorName,
+            entityId,
+            operation: tag,
+            primaryKey: op["primaryKey"]
+              ? (op["primaryKey"] as Function)(payload)
+              : crypto.randomUUID(),
+          }),
+        );
+      },
     };
   }
-  return ref as Ref<Ops>;
+
+  return ref as Ref<Rpcs, E>;
 };
 
-export const buildSingleRef = <Op extends OperationDefinition>(
+export const buildSingleRef = <R extends Rpc.Any, E>(
   actorName: string,
   entityId: string,
   operationTag: string,
-  operation: Op,
-  rpcClient: Record<string, Function>,
-): SingleRef<Op> => {
+  operation: OperationConfig,
+  rpcClient: RpcClient.RpcClient<R, E>,
+): SingleRef<R, E> => {
+  const client = rpcClient as Record<string, Function>;
   const hasPayload = operation["payload"] !== undefined;
+  const fn = client[operationTag];
+
   return {
-    call: makeCallFn(rpcClient, operationTag, hasPayload) as SingleRef<Op>["call"],
-    cast: makeCastFn(
-      rpcClient,
-      operationTag,
-      hasPayload,
-      actorName,
-      entityId,
-      operation["primaryKey"],
-    ) as SingleRef<Op>["cast"],
+    call: ((payload?: unknown) => (hasPayload ? fn?.(payload) : fn?.())) as SingleRef<R, E>["call"],
+    cast: ((payload?: unknown) => {
+      const discardCall = hasPayload
+        ? fn?.(payload, { discard: true })
+        : fn?.(undefined, { discard: true });
+      return Effect.map(discardCall ?? Effect.void, () =>
+        makeCastReceipt({
+          actorType: actorName,
+          entityId,
+          operation: operationTag,
+          primaryKey: operation["primaryKey"]
+            ? (operation["primaryKey"] as Function)(payload)
+            : crypto.randomUUID(),
+        }),
+      );
+    }) as SingleRef<R, E>["cast"],
   };
 };
-
-export const client = <Name extends string, Ops extends OperationDefinitions>(
-  actor: ActorDefinition<Name, Ops>,
-): Effect.Effect<(entityId: string) => Ref<Ops>, never, never> =>
-  Effect.map(
-    (actor.entity as unknown as { client: Effect.Effect<Function> }).client,
-    (makeClient) =>
-      (entityId: string): Ref<Ops> => {
-        const rpcClient = makeClient(entityId) as Record<string, Function>;
-        return buildRef(actor.name, entityId, actor.operations, rpcClient);
-      },
-  ) as Effect.Effect<(entityId: string) => Ref<Ops>, never, never>;

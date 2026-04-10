@@ -1,7 +1,8 @@
 import { describe, expect, it } from "bun:test";
+import type { Layer } from "effect";
 import { Effect, Schema } from "effect";
 import { ShardingConfig } from "effect/unstable/cluster";
-import { Actor, Handlers, Testing } from "../src/index.js";
+import { Actor, Testing } from "../src/index.js";
 
 const TestShardingConfig = ShardingConfig.layer({
   shardsPerGroup: 300,
@@ -19,32 +20,29 @@ const Counter = Actor.make("Counter", {
   },
 });
 
-const handlerLayer = Handlers.handlers(Counter, {
-  Increment: (request: any) => Effect.succeed(request.payload.amount + 1),
+const handlerLayer = Counter.entity.toLayer({
+  Increment: (request) => Effect.succeed(request.payload.amount + 1),
   GetCount: () => Effect.succeed("hello"),
-});
+}) as unknown as Layer.Layer<never>;
 
 describe("Actor.handlers", () => {
   it("wires plain handler functions — call returns handler result", async () => {
-    const program = Effect.gen(function* () {
+    const result = await Effect.gen(function* () {
       const makeRef = yield* Testing.testClient(Counter, handlerLayer);
       const ref = yield* makeRef("counter-1");
-      const result = yield* ref.Increment.call({ amount: 5 });
-      return result;
-    }).pipe(Effect.scoped, Effect.provide(TestShardingConfig));
+      return yield* ref["Increment"]!.call({ amount: 5 });
+    }).pipe(Effect.scoped, Effect.provide(TestShardingConfig), Effect.runPromise);
 
-    const result = await Effect.runPromise(program);
     expect(result).toBe(6);
   });
 
   it("handler return value becomes the RPC reply — no explicit .reply()", async () => {
-    const program = Effect.gen(function* () {
+    const result = await Effect.gen(function* () {
       const makeRef = yield* Testing.testClient(Counter, handlerLayer);
       const ref = yield* makeRef("counter-1");
-      return yield* ref.GetCount.call();
-    }).pipe(Effect.scoped, Effect.provide(TestShardingConfig));
+      return yield* ref["GetCount"]!.call();
+    }).pipe(Effect.scoped, Effect.provide(TestShardingConfig), Effect.runPromise);
 
-    const result = await Effect.runPromise(program);
     expect(result).toBe("hello");
   });
 
