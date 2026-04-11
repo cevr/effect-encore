@@ -2,13 +2,13 @@ import { describe, expect, it } from "effect-bun-test";
 import type { Layer } from "effect";
 import { Effect, Schema } from "effect";
 import { TestRunner } from "effect/unstable/cluster";
-import { Actor, makeCastReceipt, peek } from "../src/index.js";
+import { Actor, makeExecId } from "../src/index.js";
 
 class ProcessError extends Schema.TaggedErrorClass<ProcessError>()("ProcessError", {
   message: Schema.String,
 }) {}
 
-const PeekableActor = Actor.make("PeekableActor", {
+const PeekableActor = Actor.fromEntity("PeekableActor", {
   Process: {
     payload: { input: Schema.String },
     success: Schema.String,
@@ -33,14 +33,8 @@ const TestCluster = TestRunner.layer;
 describe("Actor.peek", () => {
   it.scopedLive("returns Pending when handler has not completed", () =>
     Effect.gen(function* () {
-      const receipt = makeCastReceipt({
-        actorType: "PeekableActor",
-        entityId: "e-1",
-        operation: "Process",
-        primaryKey: "nonexistent",
-      });
-
-      const result = yield* peek(PeekableActor, receipt);
+      const execId = makeExecId("e-1:Process:nonexistent");
+      const result = yield* PeekableActor.peek(execId);
       expect(result._tag).toBe("Pending");
     }).pipe(
       Effect.provide(peekableHandlers as unknown as Layer.Layer<never>),
@@ -54,14 +48,8 @@ describe("Actor.peek", () => {
       const client = makeClient("e-2");
       yield* client.Process({ input: "hello" });
 
-      const receipt = makeCastReceipt({
-        actorType: "PeekableActor",
-        entityId: "e-2",
-        operation: "Process",
-        primaryKey: "hello",
-      });
-
-      const result = yield* peek(PeekableActor, receipt);
+      const execId = makeExecId("e-2:Process:hello");
+      const result = yield* PeekableActor.peek(execId);
       expect(result._tag).toBe("Success");
       if (result._tag === "Success") {
         expect(result.value).toBe("processed: hello");
@@ -78,40 +66,12 @@ describe("Actor.peek", () => {
       const client = makeClient("e-3");
       yield* client.Fail({ input: "bad" }).pipe(Effect.option);
 
-      const receipt = makeCastReceipt({
-        actorType: "PeekableActor",
-        entityId: "e-3",
-        operation: "Fail",
-        primaryKey: "bad",
-      });
-
-      const result = yield* peek(PeekableActor, receipt);
+      const execId = makeExecId("e-3:Fail:bad");
+      const result = yield* PeekableActor.peek(execId);
       expect(result._tag).toBe("Failure");
     }).pipe(
       Effect.provide(peekableHandlers as unknown as Layer.Layer<never>),
       Effect.provide(TestCluster),
     ),
-  );
-
-  it.scopedLive("dies with NoPrimaryKeyError for operations without primaryKey", () =>
-    Effect.gen(function* () {
-      const NoPkActor = Actor.make("NoPkActor", {
-        Fire: {
-          payload: { x: Schema.Number },
-          success: Schema.Number,
-          persisted: true,
-        },
-      });
-
-      const receipt = makeCastReceipt({
-        actorType: "NoPkActor",
-        entityId: "e-1",
-        operation: "Fire",
-        primaryKey: "fake-uuid",
-      });
-
-      const exit = yield* peek(NoPkActor, receipt).pipe(Effect.exit);
-      expect(exit._tag).toBe("Failure");
-    }).pipe(Effect.provide(TestCluster)),
   );
 });

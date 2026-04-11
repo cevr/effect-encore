@@ -2,13 +2,13 @@ import { describe, expect, it } from "effect-bun-test";
 import type { Layer } from "effect";
 import { Effect, Schema } from "effect";
 import { TestRunner } from "effect/unstable/cluster";
-import { Actor, makeCastReceipt, peek } from "../../src/index.js";
+import { Actor, makeExecId } from "../../src/index.js";
 
 class OrderError extends Schema.TaggedErrorClass<OrderError>()("OrderError", {
   message: Schema.String,
 }) {}
 
-const OrderActor = Actor.make("Order", {
+const OrderActor = Actor.fromEntity("Order", {
   Place: {
     payload: { item: Schema.String, qty: Schema.Number },
     success: Schema.String,
@@ -24,6 +24,7 @@ const OrderActor = Actor.make("Order", {
   QuickCheck: {
     payload: { id: Schema.String },
     success: Schema.String,
+    primaryKey: (p: { id: string }) => p.id,
   },
 });
 
@@ -56,14 +57,8 @@ describe("cluster integration", () => {
       yield* client.Place({ item: "gadget", qty: 1 }, { discard: true });
       yield* Effect.sleep("100 millis");
 
-      const receipt = makeCastReceipt({
-        actorType: "Order",
-        entityId: "ord-2",
-        operation: "Place",
-        primaryKey: "gadget-1",
-      });
-
-      const result = yield* peek(OrderActor, receipt);
+      const execId = makeExecId("ord-2:Place:gadget-1");
+      const result = yield* OrderActor.peek(execId);
       expect(result._tag).toBe("Success");
       if (result._tag === "Success") {
         expect(result.value).toBe("order: gadget x1");
@@ -78,20 +73,14 @@ describe("cluster integration", () => {
       const makeClient = yield* OrderActor._meta.entity.client;
       const client = makeClient("ord-3");
 
-      const receipt = makeCastReceipt({
-        actorType: "Order",
-        entityId: "ord-3",
-        operation: "Place",
-        primaryKey: "slow-1",
-      });
-
-      const before = yield* peek(OrderActor, receipt);
+      const execId = makeExecId("ord-3:Place:slow-1");
+      const before = yield* OrderActor.peek(execId);
       expect(before._tag).toBe("Pending");
 
       yield* client.Place({ item: "slow", qty: 1 }, { discard: true });
       yield* Effect.sleep("100 millis");
 
-      const result = yield* peek(OrderActor, receipt);
+      const result = yield* OrderActor.peek(execId);
       expect(result._tag).toBe("Success");
     }).pipe(
       Effect.provide(orderHandlers as unknown as Layer.Layer<never>),
@@ -105,14 +94,8 @@ describe("cluster integration", () => {
 
       yield* client.Cancel({ reason: "test-fail" }).pipe(Effect.option);
 
-      const receipt = makeCastReceipt({
-        actorType: "Order",
-        entityId: "ord-4",
-        operation: "Cancel",
-        primaryKey: "test-fail",
-      });
-
-      const result = yield* peek(OrderActor, receipt);
+      const execId = makeExecId("ord-4:Cancel:test-fail");
+      const result = yield* OrderActor.peek(execId);
       expect(result._tag).toBe("Failure");
     }).pipe(
       Effect.provide(orderHandlers as unknown as Layer.Layer<never>),
@@ -128,14 +111,8 @@ describe("cluster integration", () => {
       yield* client.Place({ item: "dup", qty: 1 }, { discard: true });
       yield* Effect.sleep("100 millis");
 
-      const receipt = makeCastReceipt({
-        actorType: "Order",
-        entityId: "ord-5",
-        operation: "Place",
-        primaryKey: "dup-1",
-      });
-
-      const result = yield* peek(OrderActor, receipt);
+      const execId = makeExecId("ord-5:Place:dup-1");
+      const result = yield* OrderActor.peek(execId);
       expect(result._tag).toBe("Success");
     }).pipe(
       Effect.provide(orderHandlers as unknown as Layer.Layer<never>),

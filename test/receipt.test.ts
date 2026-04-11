@@ -5,63 +5,26 @@ import {
   Interrupted,
   Pending,
   Success,
+  Suspended,
   isFailure,
   isPending,
   isSuccess,
+  isSuspended,
   isTerminal,
-  makeCastReceipt,
+  makeExecId,
 } from "../src/receipt.js";
 
-describe("CastReceipt", () => {
-  test("is serializable — roundtrips through JSON", () => {
-    const receipt = makeCastReceipt({
-      actorType: "MyActor",
-      entityId: "e-1",
-      operation: "DoWork",
-      primaryKey: "pk-1",
-    });
-
-    const json = JSON.stringify(receipt);
-    const parsed = JSON.parse(json);
-    expect(parsed._tag).toBe("CastReceipt");
-    expect(parsed.actorType).toBe("MyActor");
-    expect(parsed.entityId).toBe("e-1");
-    expect(parsed.operation).toBe("DoWork");
-    expect(parsed.primaryKey).toBe("pk-1");
+describe("ExecId", () => {
+  test("is a branded string", () => {
+    const execId = makeExecId("Process:my-key");
+    expect(typeof execId).toBe("string");
+    expect(execId).toBe("Process:my-key");
   });
 
-  test("carries actorType, entityId, operation, primaryKey", () => {
-    const receipt = makeCastReceipt({
-      actorType: "Order",
-      entityId: "ord-123",
-      operation: "Validate",
-      primaryKey: "key-abc",
-    });
-
-    expect(receipt._tag).toBe("CastReceipt");
-    expect(receipt.actorType).toBe("Order");
-    expect(receipt.entityId).toBe("ord-123");
-    expect(receipt.operation).toBe("Validate");
-    expect(receipt.primaryKey).toBe("key-abc");
-  });
-
-  test("duplicate primaryKey produces identical receipt fields", () => {
-    const r1 = makeCastReceipt({
-      actorType: "Order",
-      entityId: "ord-1",
-      operation: "Place",
-      primaryKey: "pk-123",
-    });
-    const r2 = makeCastReceipt({
-      actorType: "Order",
-      entityId: "ord-1",
-      operation: "Place",
-      primaryKey: "pk-123",
-    });
-    expect(r1.actorType).toBe(r2.actorType);
-    expect(r1.entityId).toBe(r2.entityId);
-    expect(r1.operation).toBe(r2.operation);
-    expect(r1.primaryKey).toBe(r2.primaryKey);
+  test("duplicate keys produce identical strings", () => {
+    const r1 = makeExecId("Place:pk-123");
+    const r2 = makeExecId("Place:pk-123");
+    expect(r1).toBe(r2);
   });
 });
 
@@ -103,6 +66,9 @@ describe("PeekResult", () => {
     }
     expect(isTerminal(result)).toBe(true);
   });
-});
 
-// Actor.peek tests moved to test/peek.test.ts
+  test("Suspended is not terminal", () => {
+    expect(isSuspended(Suspended)).toBe(true);
+    expect(isTerminal(Suspended)).toBe(false);
+  });
+});

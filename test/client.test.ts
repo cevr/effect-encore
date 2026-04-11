@@ -1,7 +1,7 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Exit, Layer, Schema, Stream } from "effect";
 import { ShardingConfig, TestRunner } from "effect/unstable/cluster";
-import { Actor, makeCastReceipt, watch } from "../src/index.js";
+import { Actor, makeExecId } from "../src/index.js";
 
 const TestShardingConfig = ShardingConfig.layer({
   shardsPerGroup: 300,
@@ -13,11 +13,12 @@ class ValidationError extends Schema.TaggedErrorClass<ValidationError>()("Valida
   message: Schema.String,
 }) {}
 
-const Validator = Actor.make("Validator", {
+const Validator = Actor.fromEntity("Validator", {
   Validate: {
     payload: { input: Schema.String },
     success: Schema.String,
     error: ValidationError,
+    primaryKey: (p: { input: string }) => p.input,
   },
 });
 
@@ -50,14 +51,21 @@ describe("Ref.call", () => {
 
   it.scopedLive.layer(
     Layer.provide(
-      Actor.toTestLayer(Actor.make("Boom", { Explode: {} }), {
-        Explode: () => Effect.die("kaboom"),
-      }),
+      Actor.toTestLayer(
+        Actor.fromEntity("Boom", {
+          Explode: { primaryKey: () => "boom" },
+        }),
+        {
+          Explode: () => Effect.die("kaboom"),
+        },
+      ),
       TestShardingConfig,
     ),
   )("surfaces handler defects as defects", () =>
     Effect.gen(function* () {
-      const BoomActor = Actor.make("Boom", { Explode: {} });
+      const BoomActor = Actor.fromEntity("Boom", {
+        Explode: { primaryKey: () => "boom" },
+      });
       const ref = yield* BoomActor.actor("b-1");
       const exit = yield* ref.call(BoomActor.Explode()).pipe(Effect.exit);
       expect(Exit.isFailure(exit)).toBe(true);
@@ -66,14 +74,21 @@ describe("Ref.call", () => {
 
   it.scopedLive.layer(
     Layer.provide(
-      Actor.toTestLayer(Actor.make("Volatile", { Ping: { output: Schema.String } }), {
-        Ping: () => Effect.succeed("pong"),
-      }),
+      Actor.toTestLayer(
+        Actor.fromEntity("Volatile", {
+          Ping: { success: Schema.String, primaryKey: () => "ping" },
+        }),
+        {
+          Ping: () => Effect.succeed("pong"),
+        },
+      ),
       TestShardingConfig,
     ),
   )("works without MessageStorage (non-persisted path)", () =>
     Effect.gen(function* () {
-      const VolatileActor = Actor.make("Volatile", { Ping: { output: Schema.String } });
+      const VolatileActor = Actor.fromEntity("Volatile", {
+        Ping: { success: Schema.String, primaryKey: () => "ping" },
+      });
       const ref = yield* VolatileActor.actor("vol-1");
       const result = yield* ref.call(VolatileActor.Ping());
       expect(result).toBe("pong");
@@ -81,7 +96,7 @@ describe("Ref.call", () => {
   );
 });
 
-const CastActor = Actor.make("CastActor", {
+const CastActor = Actor.fromEntity("CastActor", {
   Process: {
     payload: { input: Schema.String },
     success: Schema.String,
@@ -100,52 +115,29 @@ const CastActorTest = Layer.provide(
 const castTest = it.scopedLive.layer(CastActorTest);
 
 describe("Ref.cast", () => {
-  castTest("sends persisted message with discard: true — returns CastReceipt immediately", () =>
+  castTest("sends persisted message with discard: true — returns ExecId", () =>
     Effect.gen(function* () {
       const ref = yield* CastActor.actor("c-1");
-      const receipt = yield* ref.cast(CastActor.Process({ input: "data" }));
-      expect(receipt._tag).toBe("CastReceipt");
+      const execId = yield* ref.cast(CastActor.Process({ input: "data" }));
+      expect(typeof execId).toBe("string");
+      expect(execId).toBe("c-1:Process:data");
     }),
   );
 
-  castTest("receipt contains actorType, entityId, operation, primaryKey", () =>
+  castTest("execId encodes operation tag and primaryKey", () =>
     Effect.gen(function* () {
       const ref = yield* CastActor.actor("c-2");
-      const receipt = yield* ref.cast(CastActor.Process({ input: "mykey" }));
-      expect(receipt.actorType).toBe("CastActor");
-      expect(receipt.entityId).toBe("c-2");
-      expect(receipt.operation).toBe("Process");
-      expect(receipt.primaryKey).toBe("mykey");
+      const execId = yield* ref.cast(CastActor.Process({ input: "mykey" }));
+      expect(execId).toBe("c-2:Process:mykey");
     }),
   );
 
-  it.scopedLive.layer(
-    Layer.provide(
-      Actor.toTestLayer(
-        Actor.make("Simple", {
-          Do: { payload: { x: Schema.Number }, success: Schema.Number, persisted: true },
-        }),
-        { Do: ({ operation }: { operation: { x: number } }) => Effect.succeed(operation.x * 2) },
-      ),
-      TestShardingConfig,
-    ),
-  )("cast without primaryKey returns receipt with no primaryKey", () =>
-    Effect.gen(function* () {
-      const SimpleActor = Actor.make("Simple", {
-        Do: { payload: { x: Schema.Number }, success: Schema.Number, persisted: true },
-      });
-      const ref = yield* SimpleActor.actor("s-1");
-      const receipt = yield* ref.cast(SimpleActor.Do({ x: 5 }));
-      expect(receipt.primaryKey).toBeUndefined();
-    }),
-  );
-
-  castTest("cast still returns CastReceipt even without cluster persistence", () =>
+  castTest("cast returns ExecId for persisted operations", () =>
     Effect.gen(function* () {
       const ref = yield* CastActor.actor("c-persist-1");
-      const receipt = yield* ref.cast(CastActor.Process({ input: "test" }));
-      expect(receipt._tag).toBe("CastReceipt");
-      expect(receipt.primaryKey).toBe("test");
+      const execId = yield* ref.cast(CastActor.Process({ input: "test" }));
+      expect(typeof execId).toBe("string");
+      expect(execId).toBe("c-persist-1:Process:test");
     }),
   );
 });
@@ -162,14 +154,9 @@ describe("Ref.watch", () => {
 
       yield* client.Process({ input: "watch-test" }, { discard: true });
 
-      const receipt = makeCastReceipt({
-        actorType: "CastActor",
-        entityId: "w-1",
-        operation: "Process",
-        primaryKey: "watch-test",
-      });
+      const execId = makeExecId("w-1:Process:watch-test");
 
-      const result = yield* watch(CastActor, receipt, {
+      const result = yield* CastActor.watch(execId, {
         interval: "50 millis",
       }).pipe(Stream.runCollect);
 

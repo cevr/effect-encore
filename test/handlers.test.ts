@@ -9,13 +9,15 @@ const TestShardingConfig = ShardingConfig.layer({
   entityTerminationTimeout: 0,
 });
 
-const Counter = Actor.make("Counter", {
+const Counter = Actor.fromEntity("Counter", {
   Increment: {
     payload: { amount: Schema.Number },
     success: Schema.Number,
+    primaryKey: (p: { amount: number }) => String(p.amount),
   },
   GetCount: {
     success: Schema.String,
+    primaryKey: () => "singleton",
   },
 });
 
@@ -31,10 +33,11 @@ const test = it.scopedLive.layer(CounterTest);
 
 // ── GenActor for deferred construction test ─────────────────────────────
 
-const GenActor = Actor.make("GenActor", {
+const GenActor = Actor.fromEntity("GenActor", {
   Compute: {
     payload: { x: Schema.Number },
     success: Schema.Number,
+    primaryKey: (p: { x: number }) => String(p.x),
   },
 });
 
@@ -54,10 +57,11 @@ class HandlerError extends Schema.TaggedErrorClass<HandlerError>()("HandlerError
   reason: Schema.String,
 }) {}
 
-const ErrActor = Actor.make("ErrActor", {
+const ErrActor = Actor.fromEntity("ErrActor", {
   Fail: {
     payload: { input: Schema.String },
     error: HandlerError,
+    primaryKey: (p: { input: string }) => p.input,
   },
 });
 
@@ -70,10 +74,11 @@ const ErrActorTest = Layer.provide(
 
 // ── InspectActor for operation inspection test ──────────────────────────
 
-const InspectActor = Actor.make("InspectActor", {
+const InspectActor = Actor.fromEntity("InspectActor", {
   Inspect: {
     payload: { value: Schema.String },
     success: Schema.String,
+    primaryKey: (p: { value: string }) => p.value,
   },
 });
 

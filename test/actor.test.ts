@@ -10,13 +10,15 @@ const TestShardingConfig = ShardingConfig.layer({
   entityTerminationTimeout: 0,
 });
 
-const Counter = Actor.make("Counter", {
+const Counter = Actor.fromEntity("Counter", {
   Increment: {
     payload: { amount: Schema.Number },
     success: Schema.Number,
+    primaryKey: (p: { amount: number }) => String(p.amount),
   },
   GetCount: {
     success: Schema.Number,
+    primaryKey: () => "singleton",
   },
 });
 
@@ -30,7 +32,7 @@ const CounterTest = Layer.provide(
 
 const effectTest = it.scopedLive.layer(CounterTest);
 
-describe("Actor.make", () => {
+describe("Actor.fromEntity", () => {
   test("defines a multi-operation actor with typed input/output/error schemas", () => {
     expect(Counter._meta.name).toBe("Counter");
     expect(Counter._tag).toBe("ActorObject");
@@ -44,10 +46,11 @@ describe("Actor.make", () => {
   });
 
   test("attaches persisted annotation when persisted: true", () => {
-    const Persisted = Actor.make("Persisted", {
+    const Persisted = Actor.fromEntity("Persisted", {
       Save: {
         payload: { data: Schema.String },
         persisted: true,
+        primaryKey: (p: { data: string }) => p.data,
       },
     });
     const rpc = Persisted._meta.entity.protocol.requests.get("Save")!;
@@ -56,7 +59,7 @@ describe("Actor.make", () => {
   });
 
   test("attaches primaryKey extractor from definition", () => {
-    const WithPK = Actor.make("WithPK", {
+    const WithPK = Actor.fromEntity("WithPK", {
       Op: {
         payload: { id: Schema.String },
         persisted: true,
@@ -64,7 +67,7 @@ describe("Actor.make", () => {
       },
     });
     expect(WithPK._meta.definitions["Op"]!.primaryKey).toBeDefined();
-    const pk = WithPK._meta.definitions["Op"]!.primaryKey!({ id: "abc" } as never);
+    const pk = WithPK._meta.definitions["Op"]!.primaryKey({ id: "abc" } as never);
     expect(pk).toBe("abc");
   });
 
@@ -94,16 +97,24 @@ describe("Actor.make", () => {
 
   test("throws on reserved operation names", () => {
     expect(() =>
-      Actor.make("Bad", {
-        _meta: { output: Schema.String },
+      Actor.fromEntity("Bad", {
+        _meta: { primaryKey: () => "x" },
       } as never),
     ).toThrow(/collides with reserved/);
   });
 
   test("throws on reserved operation name 'actor'", () => {
     expect(() =>
-      Actor.make("Bad", {
-        actor: { output: Schema.String },
+      Actor.fromEntity("Bad", {
+        actor: { primaryKey: () => "x" },
+      } as never),
+    ).toThrow(/collides with reserved/);
+  });
+
+  test("throws on reserved operation name 'peek'", () => {
+    expect(() =>
+      Actor.fromEntity("Bad", {
+        peek: { primaryKey: () => "x" },
       } as never),
     ).toThrow(/collides with reserved/);
   });
@@ -133,11 +144,20 @@ describe("Actor.toTestLayer", () => {
       expect(result).toBe(42);
     }),
   );
+
+  effectTest("cast returns ExecId string", () =>
+    Effect.gen(function* () {
+      const ref = yield* Counter.actor("counter-4");
+      const execId = yield* ref.cast(Counter.Increment({ amount: 7 }));
+      expect(typeof execId).toBe("string");
+      expect(execId).toBe("counter-4:Increment:7");
+    }),
+  );
 });
 
 describe("deliverAt", () => {
   test("attaches DeliverAt.symbol to payload instances when deliverAt is configured", () => {
-    const Delayed = Actor.make("Delayed", {
+    const Delayed = Actor.fromEntity("Delayed", {
       Process: {
         payload: { id: Schema.String, deliverAt: Schema.DateTimeUtc },
         persisted: true,
@@ -159,7 +179,7 @@ describe("deliverAt", () => {
   });
 
   test("attaches PrimaryKey.symbol to payload instances when primaryKey is configured", () => {
-    const WithPK = Actor.make("WithPKPayload", {
+    const WithPK = Actor.fromEntity("WithPKPayload", {
       Op: {
         payload: { id: Schema.String },
         primaryKey: (p: { id: string }) => p.id,
@@ -176,28 +196,12 @@ describe("deliverAt", () => {
     expect(instance[PrimaryKey.symbol]()).toBe("abc");
   });
 
-  test("payload instances without primaryKey or deliverAt have neither symbol", () => {
-    const Plain = Actor.make("Plain", {
-      Op: {
-        payload: { value: Schema.String },
-      },
-    });
-
-    const rpc = Plain._meta.entity.protocol.requests.get("Op")!;
-    const payloadSchema = rpc.payloadSchema;
-    const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
-      value: "hello",
-    });
-
-    expect(DeliverAt.isDeliverAt(instance)).toBe(false);
-    expect(PrimaryKey.symbol in (instance as object)).toBe(false);
-  });
-
-  test("deliverAt without primaryKey is valid (delayed but not deduped)", () => {
-    const DelayedOnly = Actor.make("DelayedOnly", {
+  test("deliverAt without payload primaryKey symbol is valid (delayed but uses fn primaryKey)", () => {
+    const DelayedOnly = Actor.fromEntity("DelayedOnly", {
       Fire: {
         payload: { when: Schema.DateTimeUtc },
         persisted: true,
+        primaryKey: (p: { when: DateTime.DateTime }) => String(p.when.epochMilliseconds),
         deliverAt: (p: { when: DateTime.DateTime }) => p.when,
       },
     });
@@ -210,7 +214,6 @@ describe("deliverAt", () => {
     });
 
     expect(DeliverAt.isDeliverAt(instance)).toBe(true);
-    expect(PrimaryKey.symbol in (instance as object)).toBe(false);
   });
 
   test("accepts pre-built Schema.Class as input — uses it directly", () => {
@@ -223,11 +226,12 @@ describe("deliverAt", () => {
       }
     }
 
-    const WithCustom = Actor.make("WithCustom", {
+    const WithCustom = Actor.fromEntity("WithCustom", {
       Process: {
         payload: CustomPayload,
         success: Schema.String,
         persisted: true,
+        primaryKey: (p: { id: string }) => p.id,
       },
     });
 
@@ -251,10 +255,11 @@ describe("deliverAt", () => {
       }
     }
 
-    const Scheduled = Actor.make("Scheduled", {
+    const Scheduled = Actor.fromEntity("Scheduled", {
       Run: {
         payload: ScheduledPayload,
         persisted: true,
+        primaryKey: (p: { id: string }) => p.id,
       },
     });
 

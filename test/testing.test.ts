@@ -9,10 +9,11 @@ const TestShardingConfig = ShardingConfig.layer({
   entityTerminationTimeout: 0,
 });
 
-const Echo = Actor.make("Echo", {
+const Echo = Actor.fromEntity("Echo", {
   Say: {
     payload: { msg: Schema.String },
     success: Schema.String,
+    primaryKey: (p: { msg: string }) => p.msg,
   },
   Fire: {
     payload: { x: Schema.Number },
@@ -47,25 +48,23 @@ describe("Actor.toTestLayer", () => {
       expect(result).toBe("echo: hello");
     }));
 
-  test("cast returns CastReceipt in test mode", () =>
+  test("cast returns ExecId string", () =>
     Effect.gen(function* () {
       const ref = yield* Echo.actor("test-2");
-      const receipt = yield* ref.cast(Echo.Fire({ x: 7 }));
-      expect(receipt._tag).toBe("CastReceipt");
-      expect(receipt.actorType).toBe("Echo");
-      expect(receipt.entityId).toBe("test-2");
-      expect(receipt.operation).toBe("Fire");
-      expect(receipt.primaryKey).toBe("7");
+      const execId = yield* ref.cast(Echo.Fire({ x: 7 }));
+      expect(typeof execId).toBe("string");
+      expect(execId).toBe("test-2:Fire:7");
     }));
 
   it.scopedLive("preserves side-effect observation", () =>
     Effect.gen(function* () {
       const calls = yield* Ref.make<Array<string>>([]);
 
-      const Tracker = Actor.make("Tracker", {
+      const Tracker = Actor.fromEntity("Tracker", {
         Track: {
           payload: { item: Schema.String },
           success: Schema.String,
+          primaryKey: (p: { item: string }) => p.item,
         },
       });
 

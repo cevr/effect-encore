@@ -1,12 +1,38 @@
-import type { Entity as ClusterEntity, ShardingConfig } from "@effect/cluster";
-import { ClusterSchema, Entity } from "@effect/cluster";
+import type { Entity as ClusterEntity, EntityType, ShardingConfig } from "@effect/cluster";
+import {
+  ClusterSchema,
+  Entity,
+  EntityAddress,
+  EntityId,
+  MessageStorage,
+  Sharding,
+} from "@effect/cluster";
 import * as DeliverAt from "@effect/cluster/DeliverAt";
+import type { MalformedMessage, PersistenceError } from "@effect/cluster/ClusterError";
 import type { Rpc, RpcClient } from "@effect/rpc";
 import { Rpc as RpcMod } from "@effect/rpc";
-import { Context, Effect, Layer, PrimaryKey, Schema } from "effect";
+import {
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  PrimaryKey,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect";
 import type { DateTime, Scope } from "effect";
-import type { CastReceipt } from "./receipt.js";
-import { makeCastReceipt } from "./receipt.js";
+import type { ExecId, PeekResult } from "./receipt.js";
+import {
+  Defect,
+  Failure,
+  Interrupted,
+  isTerminal,
+  makeExecId,
+  Pending,
+  Success,
+} from "./receipt.js";
 
 // ── Operation DSL ──────────────────────────────────────────────────────────
 
@@ -15,7 +41,7 @@ export interface OperationDef {
   readonly success?: Schema.Schema.Any;
   readonly error?: Schema.Schema.Any;
   readonly persisted?: boolean;
-  readonly primaryKey?: (payload: never) => string;
+  readonly primaryKey: (payload: never) => string;
   readonly deliverAt?: (payload: never) => DateTime.DateTime;
 }
 
@@ -23,12 +49,21 @@ export type OperationDefs = Record<string, OperationDef>;
 
 // ── Reserved key guard ─────────────────────────────────────────────────────
 
-type ReservedKeys = "_tag" | "_meta" | "$is" | "Context" | "actor";
+type ReservedKeys = "_tag" | "_meta" | "$is" | "Context" | "actor" | "peek" | "watch" | "interrupt";
 
 type AssertNoReservedKeys<Defs extends OperationDefs> =
   Extract<keyof Defs, ReservedKeys> extends never ? Defs : never;
 
-const RESERVED_KEYS = new Set<string>(["_tag", "_meta", "$is", "Context", "actor"]);
+const RESERVED_KEYS = new Set<string>([
+  "_tag",
+  "_meta",
+  "$is",
+  "Context",
+  "actor",
+  "peek",
+  "watch",
+  "interrupt",
+]);
 
 // ── Type-level Rpc mirror ──────────────────────────────────────────────────
 
@@ -137,7 +172,9 @@ export interface ActorRef<Name extends string, Defs extends OperationDefs> {
   readonly call: <V extends OperationUnion<Name, Defs>>(
     op: V,
   ) => Effect.Effect<OperationOutput<V>, OperationError<V>>;
-  readonly cast: <V extends OperationUnion<Name, Defs>>(op: V) => Effect.Effect<CastReceipt>;
+  readonly cast: <V extends OperationUnion<Name, Defs>>(
+    op: V,
+  ) => Effect.Effect<ExecId<OperationOutput<V>, OperationError<V>>>;
 }
 
 // ── Handler types ──────────────────────────────────────────────────────────
@@ -207,6 +244,22 @@ export type ActorObject<
   readonly actor: (
     entityId: string,
   ) => Effect.Effect<ActorRef<Name, Defs>, never, ActorClientService<Name, Defs>>;
+  readonly peek: <S, E>(
+    execId: ExecId<S, E>,
+  ) => Effect.Effect<
+    PeekResult<S, E>,
+    PersistenceError | MalformedMessage,
+    MessageStorage.MessageStorage | Sharding.Sharding
+  >;
+  readonly watch: <S, E>(
+    execId: ExecId<S, E>,
+    options?: { readonly interval?: Duration.DurationInput },
+  ) => Stream.Stream<
+    PeekResult<S, E>,
+    PersistenceError | MalformedMessage,
+    MessageStorage.MessageStorage | Sharding.Sharding
+  >;
+  readonly interrupt: (entityId: string) => Effect.Effect<void, never, Sharding.Sharding>;
   readonly $is: <Tag extends keyof Defs & string>(
     tag: Tag,
   ) => (value: unknown) => value is OperationValue<Name, Tag, Defs[Tag]>;
@@ -265,9 +318,154 @@ const compileRpc = (actorName: string, tag: string, def: OperationDef): Rpc.Any 
   return rpc;
 };
 
-// ── Actor.make ─────────────────────────────────────────────────────────────
+// ── peek — internal implementation ───────────────────────────────────────
 
-const make = <const Name extends string, const Defs extends OperationDefs>(
+const peekImpl = (
+  actorName: string,
+  execId: string,
+): Effect.Effect<
+  PeekResult,
+  PersistenceError | MalformedMessage,
+  MessageStorage.MessageStorage | Sharding.Sharding
+> => {
+  // ExecId format: "entityId:tag:primaryKey"
+  const firstSep = execId.indexOf(":");
+  const secondSep = firstSep >= 0 ? execId.indexOf(":", firstSep + 1) : -1;
+  const rawEntityId = firstSep >= 0 ? execId.slice(0, firstSep) : execId;
+  const operationTag =
+    secondSep >= 0
+      ? execId.slice(firstSep + 1, secondSep)
+      : firstSep >= 0
+        ? execId.slice(firstSep + 1)
+        : execId;
+  const primaryKey = secondSep >= 0 ? execId.slice(secondSep + 1) : rawEntityId;
+
+  return Effect.gen(function* () {
+    const sharding = yield* Sharding.Sharding;
+    const storage = yield* MessageStorage.MessageStorage;
+
+    const entityId = EntityId.make(rawEntityId);
+    const entityType = actorName as unknown as EntityType.EntityType;
+    const shardId = sharding.getShardId(entityId, entityType);
+
+    const address = EntityAddress.make({
+      entityType,
+      entityId,
+      shardId,
+    });
+
+    const maybeRequestId = yield* storage.requestIdForPrimaryKey({
+      address,
+      tag: operationTag,
+      id: primaryKey,
+    });
+
+    if (Option.isNone(maybeRequestId)) {
+      return Pending as PeekResult;
+    }
+
+    const replies = yield* storage.repliesForUnfiltered<Rpc.Any>([maybeRequestId.value]);
+    const last = replies[replies.length - 1];
+
+    if (!last || last._tag !== "WithExit") {
+      return Pending as PeekResult;
+    }
+
+    return mapCauseEncodedToPeekResult(last.exit as ExitEncodedShape);
+  });
+};
+
+// ── v3 CauseEncoded → PeekResult mapping ─────────────────────────────────
+
+type CauseEncodedShape =
+  | { readonly _tag: "Empty" }
+  | { readonly _tag: "Fail"; readonly error: unknown }
+  | { readonly _tag: "Die"; readonly defect: unknown }
+  | { readonly _tag: "Interrupt"; readonly fiberId: unknown }
+  | {
+      readonly _tag: "Sequential";
+      readonly left: CauseEncodedShape;
+      readonly right: CauseEncodedShape;
+    }
+  | {
+      readonly _tag: "Parallel";
+      readonly left: CauseEncodedShape;
+      readonly right: CauseEncodedShape;
+    };
+
+type ExitEncodedShape =
+  | { readonly _tag: "Success"; readonly value: unknown }
+  | { readonly _tag: "Failure"; readonly cause: CauseEncodedShape };
+
+const mapCauseEncodedToPeekResult = (exit: ExitEncodedShape): PeekResult => {
+  if (exit._tag === "Success") {
+    return Success(exit.value);
+  }
+
+  const first = findFirstCause(exit.cause);
+  if (!first) return Pending;
+
+  switch (first._tag) {
+    case "Fail":
+      return Failure(first.error);
+    case "Die":
+      return Defect(first.defect);
+    case "Interrupt":
+      return Interrupted;
+    default:
+      return Pending;
+  }
+};
+
+const findFirstCause = (
+  cause: CauseEncodedShape,
+):
+  | { _tag: "Fail"; error: unknown }
+  | { _tag: "Die"; defect: unknown }
+  | { _tag: "Interrupt"; fiberId: unknown }
+  | null => {
+  switch (cause._tag) {
+    case "Fail":
+    case "Die":
+    case "Interrupt":
+      return cause;
+    case "Empty":
+      return null;
+    case "Sequential":
+    case "Parallel":
+      return findFirstCause(cause.left) ?? findFirstCause(cause.right);
+  }
+};
+
+// ── watch — internal implementation ──────────────────────────────────────
+
+const watchImpl = (
+  actorName: string,
+  execId: string,
+  options?: { readonly interval?: Duration.DurationInput },
+): Stream.Stream<
+  PeekResult,
+  PersistenceError | MalformedMessage,
+  MessageStorage.MessageStorage | Sharding.Sharding
+> => {
+  const interval = options?.interval ?? Duration.millis(200);
+  return Stream.repeatEffectWithSchedule(
+    peekImpl(actorName, execId),
+    Schedule.spaced(interval),
+  ).pipe(Stream.changesWith(peekResultEquals), Stream.takeUntil(isTerminal));
+};
+
+const peekResultEquals = (a: PeekResult, b: PeekResult): boolean => {
+  if (a._tag !== b._tag) return false;
+  if (a._tag === "Success" && b._tag === "Success") return a.value === b.value;
+  if (a._tag === "Failure" && b._tag === "Failure") return a.error === b.error;
+  if (a._tag === "Defect" && b._tag === "Defect") return a.cause === b.cause;
+  return true;
+};
+
+// ── Actor.fromEntity ──────────────────────────────────────────────────────
+
+const fromEntity = <const Name extends string, const Defs extends OperationDefs>(
   name: Name,
   definitions: AssertNoReservedKeys<Defs>,
 ): ActorObject<Name, Defs> => {
@@ -308,11 +506,41 @@ const make = <const Name extends string, const Defs extends OperationDefs>(
 
   const actorFn = (entityId: string) => Effect.flatMap(contextTag, (factory) => factory(entityId));
 
+  const peekFn = <S, E>(execId: ExecId<S, E>) =>
+    peekImpl(name, execId) as Effect.Effect<
+      PeekResult<S, E>,
+      PersistenceError | MalformedMessage,
+      MessageStorage.MessageStorage | Sharding.Sharding
+    >;
+
+  const watchFn = <S, E>(
+    execId: ExecId<S, E>,
+    options?: { readonly interval?: Duration.DurationInput },
+  ) =>
+    watchImpl(name, execId, options) as Stream.Stream<
+      PeekResult<S, E>,
+      PersistenceError | MalformedMessage,
+      MessageStorage.MessageStorage | Sharding.Sharding
+    >;
+
+  const interruptFn = (entityId: string) =>
+    Effect.gen(function* () {
+      const sharding = yield* Sharding.Sharding;
+      yield* (
+        sharding as unknown as {
+          passivate: (entityType: string, entityId: string) => Effect.Effect<void>;
+        }
+      ).passivate(name, entityId);
+    });
+
   const actor = {
     _tag: "ActorObject" as const,
     _meta: { name, definitions, entity },
     Context: contextTag,
     actor: actorFn,
+    peek: peekFn,
+    watch: watchFn,
+    interrupt: interruptFn,
     $is,
     ...constructors,
   };
@@ -447,8 +675,8 @@ const transformHandlers = (build: unknown): unknown => {
 // ── buildActorRef — value-dispatch ref ─────────────────────────────────────
 
 const buildActorRef = <Name extends string, Defs extends OperationDefs>(
-  actorName: Name,
-  entityId: string,
+  _actorName: Name,
+  _entityId: string,
   definitions: Defs,
   rpcClient: RpcClient.RpcClient<Rpc.Any, never>,
 ): ActorRef<Name, Defs> => {
@@ -470,16 +698,10 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
       const discardCall = hasPayload
         ? fn?.(op, { discard: true })
         : fn?.(undefined, { discard: true });
-      return Effect.map(discardCall ?? Effect.void, () =>
-        makeCastReceipt({
-          actorType: actorName,
-          entityId,
-          operation: tag,
-          primaryKey: def?.["primaryKey"]
-            ? ((def["primaryKey"] as Function)(op) as string)
-            : undefined,
-        }),
-      );
+      const pkFn = def?.["primaryKey"] as ((p: unknown) => string) | undefined;
+      const primaryKey = pkFn ? pkFn(op) : tag;
+      const execId = `${_entityId}:${tag}:${primaryKey}`;
+      return Effect.map(discardCall ?? Effect.void, () => makeExecId(execId));
     },
   } as ActorRef<Name, Defs>;
 };
@@ -487,7 +709,7 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
 // ── Public API ─────────────────────────────────────────────────────────────
 
 export const Actor = {
-  make,
+  fromEntity,
   toLayer,
   toTestLayer,
 } as const;
