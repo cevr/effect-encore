@@ -22,8 +22,15 @@ const ProcessOrder = Actor.fromWorkflow("ProcessOrder", {
 describe("Actor.fromWorkflow", () => {
   test("creates a workflow actor with Run constructor", () => {
     expect(ProcessOrder._tag).toBe("WorkflowActorObject");
+    expect(ProcessOrder.name).toBe("ProcessOrder");
+    expect(ProcessOrder.type).toBe("Workflow/ProcessOrder");
     expect(ProcessOrder._meta.name).toBe("ProcessOrder");
     expect(ProcessOrder.Run).toBeDefined();
+  });
+
+  test("Actor.isWorkflow returns true for workflow actors", () => {
+    expect(Actor.isWorkflow(ProcessOrder)).toBe(true);
+    expect(Actor.isEntity(ProcessOrder)).toBe(false);
   });
 
   test("Run constructor produces operation value with _tag", () => {
