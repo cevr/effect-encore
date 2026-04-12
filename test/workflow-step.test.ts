@@ -264,7 +264,7 @@ describe("nullary actor() + waitFor", () => {
 
 describe("WorkflowDef annotations", () => {
   test("captureDefects and suspendOnFailure wire through", () => {
-    expect(Annotated._tag).toBe("WorkflowActorObject");
+    expect(Annotated._tag).toBe("WorkflowActor");
     expect(Annotated._meta.name).toBe("Annotated");
   });
 });

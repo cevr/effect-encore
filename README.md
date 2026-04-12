@@ -63,8 +63,8 @@ Order.type; // "Order"
 ProcessOrder.type; // "Workflow/ProcessOrder"
 
 // Type guards
-Actor.isEntity(Order); // true — narrows to EntityActorObject
-Actor.isWorkflow(ProcessOrder); // true — narrows to WorkflowActorObject
+Actor.isEntity(Order); // true — narrows to EntityActor
+Actor.isWorkflow(ProcessOrder); // true — narrows to WorkflowActor
 ```
 
 ### Unified Call Site

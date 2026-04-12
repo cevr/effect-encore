@@ -35,7 +35,7 @@ const effectTest = it.scopedLive.layer(CounterTest);
 describe("Actor.fromEntity", () => {
   test("defines a multi-operation actor with typed input/output/error schemas", () => {
     expect(Counter._meta.name).toBe("Counter");
-    expect(Counter._tag).toBe("EntityActorObject");
+    expect(Counter._tag).toBe("EntityActor");
     expect(Counter.name).toBe("Counter");
     expect(Counter.type).toBe("Counter");
     expect(Counter._meta.entity).toBeDefined();
@@ -391,7 +391,7 @@ describe("Actor.withProtocol", () => {
 
     const transformed = Counter.pipe(Actor.withProtocol((protocol) => protocol));
 
-    expect(transformed._tag).toBe("EntityActorObject");
+    expect(transformed._tag).toBe("EntityActor");
     expect(transformed._meta.name).toBe("Counter");
     // New entity — not the same reference
     expect(transformed._meta.entity).not.toBe(original);
@@ -413,14 +413,14 @@ describe("Actor.withProtocol", () => {
       Actor.withProtocol((protocol) => protocol),
     );
 
-    expect(transformed._tag).toBe("EntityActorObject");
+    expect(transformed._tag).toBe("EntityActor");
     expect(transformed._meta.name).toBe("Counter");
   });
 
   test("data-first form works", () => {
     const transformed = Actor.withProtocol(Counter, (protocol) => protocol);
 
-    expect(transformed._tag).toBe("EntityActorObject");
+    expect(transformed._tag).toBe("EntityActor");
     expect(transformed._meta.name).toBe("Counter");
     expect(transformed._meta.entity).not.toBe(Counter._meta.entity);
   });

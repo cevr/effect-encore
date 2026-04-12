@@ -1,6 +1,9 @@
 export { Actor, fromRpcs, withProtocol } from "./actor.js";
 export type {
-  EntityActorObject,
+  EntityActor,
+  AnyEntityActor,
+  AnyWorkflowActor,
+  AnyActor,
   ActorClientService,
   ActorClientFactory,
   ActorMeta,
@@ -12,7 +15,7 @@ export type {
   OperationDefs,
   HandlerOptions,
   WorkflowDef,
-  WorkflowActorObject,
+  WorkflowActor,
 } from "./actor.js";
 export { makeStepContext, makeSignal } from "./step.js";
 export type {

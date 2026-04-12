@@ -275,19 +275,19 @@ export type ActorClientFactory<Name extends string, Defs extends OperationDefs> 
   entityId: string,
 ) => Effect.Effect<ActorRef<Name, Defs>>;
 
-// ── ActorObject — the unified return type ──────────────────────────────────
+// ── EntityActor — the unified return type ──────────────────────────────────
 
 type ActorConstructors<Name extends string, Defs extends OperationDefs> = {
   readonly [Tag in keyof Defs & string]: OperationConstructor<Name, Tag, Defs[Tag]>;
 };
 
-export type EntityActorObject<
+export type EntityActor<
   Name extends string,
   Defs extends OperationDefs,
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
 > = ActorConstructors<Name, Defs> &
   Pipeable.Pipeable & {
-    readonly _tag: "EntityActorObject";
+    readonly _tag: "EntityActor";
     readonly name: Name;
     readonly type: Name;
     readonly _meta: ActorMeta<Name, Defs, Rpcs>;
@@ -602,7 +602,7 @@ const makeWaitFor = <S, E>(
 const fromEntity = <const Name extends string, const Defs extends OperationDefs>(
   name: Name,
   definitions: AssertNoReservedKeys<Defs>,
-): EntityActorObject<Name, Defs> => {
+): EntityActor<Name, Defs> => {
   for (const tag of Object.keys(definitions)) {
     if (RESERVED_KEYS.has(tag)) {
       throw new Error(
@@ -686,7 +686,7 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     );
 
   const actor = Object.assign(Object.create(Pipeable.Prototype), {
-    _tag: "EntityActorObject" as const,
+    _tag: "EntityActor" as const,
     name,
     type: name,
     _meta: { name, definitions, entity },
@@ -709,7 +709,7 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     ...constructors,
   });
 
-  return actor as EntityActorObject<Name, Defs>;
+  return actor as EntityActor<Name, Defs>;
 };
 
 // ── Actor.toLayer ──────────────────────────────────────────────────────────
@@ -722,7 +722,7 @@ function toLayer<
   Defs extends OperationDefs,
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
 >(
-  actor: EntityActorObject<Name, Defs, Rpcs>,
+  actor: EntityActor<Name, Defs, Rpcs>,
 ): Layer.Layer<ActorClientService<Name, Defs>, never, Scope.Scope | Rpc.MiddlewareClient<Rpcs>>;
 
 function toLayer<
@@ -731,7 +731,7 @@ function toLayer<
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
   RX = never,
 >(
-  actor: EntityActorObject<Name, Defs, Rpcs>,
+  actor: EntityActor<Name, Defs, Rpcs>,
   build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
   options?: HandlerOptions,
   /* eslint-disable typescript-eslint/no-explicit-any -- handler services are open */
@@ -745,7 +745,7 @@ function toLayer<
   Error extends Schema.Top,
   Signals extends SignalDefs,
 >(
-  actor: WorkflowActorObject<Name, Payload, Success, Error, Signals>,
+  actor: WorkflowActor<Name, Payload, Success, Error, Signals>,
   handler: (
     payload: WorkflowPayloadType<Payload>,
     step: WorkflowStepContext<Error>,
@@ -802,7 +802,7 @@ function toTestLayer<
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
   RX = never,
 >(
-  actor: EntityActorObject<Name, Defs, Rpcs>,
+  actor: EntityActor<Name, Defs, Rpcs>,
   build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
   options?: HandlerOptions,
 ): Layer.Layer<ActorClientService<Name, Defs>>;
@@ -815,7 +815,7 @@ function toTestLayer<
   Error extends Schema.Top,
   Signals extends SignalDefs,
 >(
-  actor: WorkflowActorObject<Name, Payload, Success, Error, Signals>,
+  actor: WorkflowActor<Name, Payload, Success, Error, Signals>,
   handler: (
     payload: WorkflowPayloadType<Payload>,
     step: WorkflowStepContext<Error>,
@@ -1007,16 +1007,16 @@ type WorkflowRunDefs<
   };
 };
 
-// ── WorkflowActorObject ───────────────────────────────────────────────────
+// ── WorkflowActor ───────────────────────────────────────────────────
 
-export type WorkflowActorObject<
+export type WorkflowActor<
   Name extends string,
   Payload extends Schema.Struct.Fields,
   Success extends Schema.Top,
   Error extends Schema.Top,
   Signals extends SignalDefs = {},
 > = SignalConstructors<Schema.Struct<Payload>, Signals> & {
-  readonly _tag: "WorkflowActorObject";
+  readonly _tag: "WorkflowActor";
   readonly name: Name;
   readonly type: `Workflow/${Name}`;
   readonly _meta: {
@@ -1070,7 +1070,7 @@ const fromWorkflow = <
 >(
   name: Name,
   def: WorkflowDef<Payload, Success, Error, Signals>,
-): WorkflowActorObject<Name, Payload, Success, Error, Signals> => {
+): WorkflowActor<Name, Payload, Success, Error, Signals> => {
   const workflowOptions: Record<string, unknown> = {
     name,
     payload: def.payload,
@@ -1171,7 +1171,7 @@ const fromWorkflow = <
 
   return {
     ...signals,
-    _tag: "WorkflowActorObject" as const,
+    _tag: "WorkflowActor" as const,
     name,
     type: `Workflow/${name}` as const,
     _meta: { name, workflow: wf },
@@ -1197,21 +1197,21 @@ const fromWorkflow = <
     resume: resumeFn,
     executionId: executionIdFn,
     $is,
-  } as WorkflowActorObject<Name, Payload, Success, Error, Signals>;
+  } as WorkflowActor<Name, Payload, Success, Error, Signals>;
 };
 
 // ── Workflow-aware toLayer/toTestLayer ─────────────────────────────────────
 
 const isWorkflowActor = (
   actor: unknown,
-): actor is WorkflowActorObject<string, Schema.Struct.Fields, Schema.Top, Schema.Top> =>
+): actor is WorkflowActor<string, Schema.Struct.Fields, Schema.Top, Schema.Top> =>
   actor != null &&
   typeof actor === "object" &&
   "_tag" in actor &&
-  (actor as Record<string, unknown>)["_tag"] === "WorkflowActorObject";
+  (actor as Record<string, unknown>)["_tag"] === "WorkflowActor";
 
 /* eslint-disable typescript-eslint/no-explicit-any -- workflow toLayer needs dynamic dispatch */
-const wrapWorkflowHandler = (actor: WorkflowActorObject<any, any, any, any>, handler: Function) => {
+const wrapWorkflowHandler = (actor: WorkflowActor<any, any, any, any>, handler: Function) => {
   const wf = actor._meta.workflow;
   return (payload: any, executionId: string) => {
     const step = makeStepContext(wf, executionId);
@@ -1220,7 +1220,7 @@ const wrapWorkflowHandler = (actor: WorkflowActorObject<any, any, any, any>, han
 };
 
 const workflowToLayer = (
-  actor: WorkflowActorObject<any, any, any, any>,
+  actor: WorkflowActor<any, any, any, any>,
   handler: Function,
 ): Layer.Layer<any, any, any> => {
   const wf = actor._meta.workflow;
@@ -1235,7 +1235,7 @@ const workflowToLayer = (
 };
 
 const workflowToTestLayer = (
-  actor: WorkflowActorObject<any, any, any, any>,
+  actor: WorkflowActor<any, any, any, any>,
   handler: Function,
 ): Layer.Layer<any, any, any> => {
   const wf = actor._meta.workflow;
@@ -1253,7 +1253,7 @@ const workflowToTestLayer = (
 };
 
 const buildWorkflowActorRef = (
-  actor: WorkflowActorObject<any, any, any, any>,
+  actor: WorkflowActor<any, any, any, any>,
   _entityId: string,
 ): ActorRef<any, any> => {
   const wf = actor._meta.workflow;
@@ -1295,13 +1295,13 @@ type WithProtocolDataLast = {
   (
     transform: <Rpcs extends Rpc.Any>(protocol: RpcGroup.RpcGroup<Rpcs>) => RpcGroup.RpcGroup<Rpcs>,
   ): <Name extends string, Defs extends OperationDefs, Rpcs extends Rpc.Any>(
-    actor: EntityActorObject<Name, Defs, Rpcs>,
-  ) => EntityActorObject<Name, Defs, Rpcs>;
+    actor: EntityActor<Name, Defs, Rpcs>,
+  ) => EntityActor<Name, Defs, Rpcs>;
   <RpcsIn extends Rpc.Any, RpcsOut extends Rpc.Any>(
     transform: (protocol: RpcGroup.RpcGroup<RpcsIn>) => RpcGroup.RpcGroup<RpcsOut>,
   ): <Name extends string, Defs extends OperationDefs>(
-    actor: EntityActorObject<Name, Defs, RpcsIn>,
-  ) => EntityActorObject<Name, Defs, RpcsOut>;
+    actor: EntityActor<Name, Defs, RpcsIn>,
+  ) => EntityActor<Name, Defs, RpcsOut>;
 };
 
 type WithProtocolDataFirst = <
@@ -1310,9 +1310,9 @@ type WithProtocolDataFirst = <
   RpcsIn extends Rpc.Any,
   RpcsOut extends Rpc.Any,
 >(
-  actor: EntityActorObject<Name, Defs, RpcsIn>,
+  actor: EntityActor<Name, Defs, RpcsIn>,
   transform: (protocol: RpcGroup.RpcGroup<RpcsIn>) => RpcGroup.RpcGroup<RpcsOut>,
-) => EntityActorObject<Name, Defs, RpcsOut>;
+) => EntityActor<Name, Defs, RpcsOut>;
 
 type WithProtocol = WithProtocolDataLast & WithProtocolDataFirst;
 
@@ -1322,29 +1322,28 @@ const withProtocolImpl = <
   RpcsIn extends Rpc.Any,
   RpcsOut extends Rpc.Any,
 >(
-  actor: EntityActorObject<Name, Defs, RpcsIn>,
+  actor: EntityActor<Name, Defs, RpcsIn>,
   transform: (protocol: RpcGroup.RpcGroup<RpcsIn>) => RpcGroup.RpcGroup<RpcsOut>,
-): EntityActorObject<Name, Defs, RpcsOut> => {
+): EntityActor<Name, Defs, RpcsOut> => {
   const newEntity = Entity.fromRpcGroup(actor._meta.name, transform(actor._meta.entity.protocol));
   return Object.assign(Object.create(Pipeable.Prototype), actor, {
     _meta: { ...actor._meta, entity: newEntity },
-  }) as EntityActorObject<Name, Defs, RpcsOut>;
+  }) as EntityActor<Name, Defs, RpcsOut>;
 };
 
 export const withProtocol: WithProtocol = dual(2, withProtocolImpl);
 
-// ── Type Guards ────────────────────────────────────────────────────────────
+// ── Any types + Type Guards ───────────────────────────────────────────────
 
 // eslint-disable-next-line typescript-eslint/no-explicit-any
-type AnyEntityActor = EntityActorObject<any, any, any>;
+export type AnyEntityActor = EntityActor<any, any, any>;
 // eslint-disable-next-line typescript-eslint/no-explicit-any
-type AnyWorkflowActor = WorkflowActorObject<any, any, any, any, any>;
-type AnyActor = AnyEntityActor | AnyWorkflowActor;
+export type AnyWorkflowActor = WorkflowActor<any, any, any, any, any>;
+export type AnyActor = AnyEntityActor | AnyWorkflowActor;
 
-const isEntity = (actor: AnyActor): actor is AnyEntityActor => actor._tag === "EntityActorObject";
+const isEntity = (actor: AnyActor): actor is AnyEntityActor => actor._tag === "EntityActor";
 
-const isWorkflow = (actor: AnyActor): actor is AnyWorkflowActor =>
-  actor._tag === "WorkflowActorObject";
+const isWorkflow = (actor: AnyActor): actor is AnyWorkflowActor => actor._tag === "WorkflowActor";
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
