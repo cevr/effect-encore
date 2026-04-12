@@ -1,5 +1,17 @@
 # effect-encore
 
+## 0.6.0
+
+### Minor Changes
+
+- [`c27a8f8`](https://github.com/cevr/effect-encore/commit/c27a8f82a8ac033e4210eb1b4fe5065fb00e5c54) Thanks [@cevr](https://github.com/cevr)! - Rename `ActorObject` to `EntityActor`, `WorkflowActorObject` to `WorkflowActor`. Add first-class identity and type guards.
+  - `actor.name` — the actor's name (e.g. `"VectorUpdate"`)
+  - `actor.type` — the cluster entity type (e.g. `"VectorUpdate"` for entities, `"Workflow/GeocodeLocation"` for workflows)
+  - `Actor.isEntity(actor)` — type guard narrowing to `EntityActor`
+  - `Actor.isWorkflow(actor)` — type guard narrowing to `WorkflowActor`
+  - `AnyEntityActor`, `AnyWorkflowActor`, `AnyActor` convenience types
+  - `_tag` values: `"EntityActor"` / `"WorkflowActor"`
+
 ## 0.5.0
 
 ### Minor Changes
