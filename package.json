@@ -32,7 +32,7 @@
     "typecheck:v3": "tsgo --noEmit -p v3/tsconfig.json",
     "lint": "concurrently -n ox,effect -c yellow,blue \"oxlint\" \"bun run lint:effect\"",
     "lint:ox": "oxlint",
-    "lint:effect": "effect-language-service diagnostics --project tsconfig.lsp.json --lspconfig \"$(cat .effect-lsp.json)\"",
+    "lint:effect": "effect-language-service diagnostics --project tsconfig.json --lspconfig \"$(cat .effect-lsp.json)\" --severity error",
     "lint:fix": "oxlint --fix",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
