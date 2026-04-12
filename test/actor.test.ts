@@ -187,7 +187,9 @@ describe("Actor.toTestLayer", () => {
   );
 
   test("executionId computes ExecId without executing", () => {
-    const execId = Counter.executionId("my-entity", Counter.Increment({ amount: 5 }));
+    const execId = Effect.runSync(
+      Counter.executionId("my-entity", Counter.Increment({ amount: 5 })),
+    );
     expect(String(execId)).toBe("my-entity\x00Increment\x005");
   });
 });

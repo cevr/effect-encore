@@ -280,7 +280,7 @@ export type ActorObject<
   readonly executionId: <V extends OperationUnion<Name, Defs>>(
     entityId: string,
     op: V,
-  ) => ExecId<OperationOutput<V>, OperationError<V>>;
+  ) => Effect.Effect<ExecId<OperationOutput<V>, OperationError<V>>>;
   readonly interrupt: (entityId: string) => Effect.Effect<void, never, Sharding.Sharding>;
   readonly $is: <Tag extends keyof Defs & string>(
     tag: Tag,
@@ -609,7 +609,7 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     const pkFn = def?.["primaryKey"] as ((p: unknown) => string) | undefined;
     const pkInput = def?.payload && isOpaquePayload(def.payload) ? op["_payload"] : op;
     const primaryKey = pkFn ? pkFn(pkInput) : tag;
-    return makeExecId(`${entityId}\x00${tag}\x00${primaryKey}`);
+    return Effect.succeed(makeExecId(`${entityId}\x00${tag}\x00${primaryKey}`));
   };
 
   const interruptFn = (_entityId: string) =>
