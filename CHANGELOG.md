@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.4.1
+
+### Patch Changes
+
+- [`73fabc1`](https://github.com/cevr/effect-encore/commit/73fabc1c0427322c77df6211e9b6d691048e88fe) Thanks [@cevr](https://github.com/cevr)! - Export `ActorClientService` and `ActorClientFactory` types from both v3 and v4 entry points. These were internal-only, causing TS4023 errors when consumers exported `Actor.toLayer` results.
+
 ## 0.4.0
 
 ### Minor Changes
