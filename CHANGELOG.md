@@ -1,5 +1,17 @@
 # effect-encore
 
+## 0.4.0
+
+### Minor Changes
+
+- [`f284a99`](https://github.com/cevr/effect-encore/commit/f284a9976ae8a13691b6b89099ef5adb0767a8d6) Thanks [@cevr](https://github.com/cevr)! - Workflow step DSL, caller API cleanup, and declarative signals.
+
+  **Breaking:** `ref.call` → `ref.execute`, `ref.cast` → `ref.send`. Workflow `actor(entityId)` → `actor()` (nullary). Workflow handler receives `(payload, step)` instead of `(payload, executionId)`. `step.signal()` and `WorkflowActorObject.signal()` removed — signals are now declared on `WorkflowDef.signals` and become typed properties on the actor.
+
+  **New:** `WorkflowStepContext` with `step.run`, `step.sleep`, `step.race`, `step.attempt`, `step.suspend`, `step.executionId`, `step.idempotencyKey`, `step.scope`, `step.provideScope`, `step.addFinalizer`, `step.raceSignals`. Declarative `signals` on `WorkflowDef` — `SignalDef`, `SignalDefs` types. `WorkflowSignal` properties on the actor for external resolution. `waitFor` on both entity and workflow actors. `WorkflowDef` absorbs `suspendedRetrySchedule`, `captureDefects`, `suspendOnFailure`.
+
+- [`d100b39`](https://github.com/cevr/effect-encore/commit/d100b39a104ccfb170c768228073c9ea6ae9c3c7) Thanks [@cevr](https://github.com/cevr)! - Add `Actor.withProtocol` for transforming the underlying RpcGroup protocol (middleware, annotations), make `ActorObject` pipeable, and add `PeekResultSchema` generic schema factory for encoding/decoding `PeekResult` values.
+
 ## 0.3.0
 
 ### Minor Changes
