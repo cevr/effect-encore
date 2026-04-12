@@ -187,6 +187,47 @@ describe("Actor.toTestLayer", () => {
   );
 });
 
+describe("scalar payload", () => {
+  const Echo = Actor.fromEntity("Echo", {
+    Say: {
+      payload: Schema.String,
+      success: Schema.String,
+      primaryKey: (msg: string) => msg,
+    },
+  });
+
+  const EchoTest = Layer.provide(
+    Actor.toTestLayer(Echo, {
+      Say: ({ operation }) => Effect.succeed(`echo: ${operation._payload}`),
+    }),
+    TestShardingConfig,
+  );
+
+  const scalarTest = it.scopedLive.layer(EchoTest);
+
+  test("constructor produces operation with _payload key", () => {
+    const op = Echo.Say("hello");
+    expect(op._tag).toBe("Say");
+    expect(op._payload).toBe("hello");
+  });
+
+  scalarTest("call round-trips scalar payload through handler", () =>
+    Effect.gen(function* () {
+      const ref = yield* Echo.actor("s-1");
+      const result = yield* ref.call(Echo.Say("world"));
+      expect(result).toBe("echo: world");
+    }),
+  );
+
+  scalarTest("cast returns ExecId with scalar primaryKey", () =>
+    Effect.gen(function* () {
+      const ref = yield* Echo.actor("s-2");
+      const execId = yield* ref.cast(Echo.Say("test"));
+      expect(String(execId)).toBe("s-2\x00Say\x00test");
+    }),
+  );
+});
+
 describe("deliverAt", () => {
   test("attaches DeliverAt.symbol to payload instances when deliverAt is configured", () => {
     const Delayed = Actor.fromEntity("Delayed", {

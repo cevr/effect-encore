@@ -41,6 +41,11 @@ import {
   Success,
 } from "./receipt.js";
 
+// ── Payload classification ─────────────────────────────────────────────────
+// Schema.Class has `fields`; scalars like Schema.String don't.
+const isOpaquePayload = (payload: unknown): boolean =>
+  Schema.isSchema(payload) && !("fields" in (payload as object));
+
 // ── Operation DSL ──────────────────────────────────────────────────────────
 
 export interface OperationDef {
@@ -137,13 +142,18 @@ type OperationValue<Name extends string, Tag extends string, C extends Operation
 } & PayloadFieldsType<C> &
   OperationBrand<Name, Tag, Schema.Schema.Type<SuccessOf<C>>, Schema.Schema.Type<ErrorOf<C>>>;
 
+// Fieldful schema (Schema.Class) has a `fields` property
+type FieldfulSchema = Schema.Top & { readonly fields: Schema.Struct.Fields };
+
 type PayloadFieldsType<C extends OperationDef> = C extends {
   readonly payload: infer F extends Schema.Struct.Fields;
 }
   ? { readonly [K in keyof F]: Schema.Schema.Type<F[K] extends Schema.Top ? F[K] : never> }
-  : C extends { readonly payload: infer P extends Schema.Top }
+  : C extends { readonly payload: infer P extends FieldfulSchema }
     ? Schema.Schema.Type<P>
-    : {};
+    : C extends { readonly payload: infer P extends Schema.Top }
+      ? { readonly _payload: Schema.Schema.Type<P> }
+      : {};
 
 type OperationConstructorPayload<C extends OperationDef> = C extends {
   readonly payload: infer F extends Schema.Struct.Fields;
@@ -155,9 +165,11 @@ type OperationConstructorPayload<C extends OperationDef> = C extends {
           readonly [K in keyof F]: Schema.Schema.Type<F[K] extends Schema.Top ? F[K] : never>;
         },
       ]
-  : C extends { readonly payload: infer _P extends Schema.Top }
-    ? [payload: unknown]
-    : [];
+  : C extends { readonly payload: infer P extends FieldfulSchema }
+    ? [payload: Schema.Schema.Type<P>]
+    : C extends { readonly payload: infer P extends Schema.Top }
+      ? [payload: Schema.Schema.Type<P>]
+      : [];
 
 type OperationConstructor<Name extends string, Tag extends string, C extends OperationDef> = (
   ...args: OperationConstructorPayload<C>
@@ -495,10 +507,12 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
 
   const constructors: Record<string, Function> = {};
   for (const tag of Object.keys(definitions)) {
-    constructors[tag] = (input?: unknown) => ({
-      _tag: tag,
-      ...(input != null && typeof input === "object" ? input : {}),
-    });
+    const def = definitions[tag] as OperationDef;
+    const opaque = def.payload !== undefined && isOpaquePayload(def.payload);
+    constructors[tag] = (input?: unknown) =>
+      opaque
+        ? { _tag: tag, _payload: input }
+        : { _tag: tag, ...(input != null && typeof input === "object" ? input : {}) };
   }
 
   const contextTag = Context.Service<
@@ -625,7 +639,7 @@ function toLayer(
     return clientLayer;
   }
 
-  const transformed = transformHandlers(build);
+  const transformed = transformHandlers(build, actor._meta.definitions);
   const handlerLayer = actor._meta.entity.toLayer(transformed as never, {
     spanAttributes: options?.spanAttributes,
     maxIdleTime: options?.maxIdleTime,
@@ -675,7 +689,7 @@ function toTestLayer(
     return workflowToTestLayer(actor, build as Function);
   }
 
-  const transformed = transformHandlers(build);
+  const transformed = transformHandlers(build, actor._meta.definitions);
   const handlerLayer = actor._meta.entity.toLayer(transformed as never, {
     spanAttributes: options?.spanAttributes,
     maxIdleTime: options?.maxIdleTime,
@@ -700,21 +714,26 @@ function toTestLayer(
 
 // ── Transform handlers from operation-first to request-first ───────────────
 
-const transformHandlers = (build: unknown): unknown => {
+const transformHandlers = (build: unknown, definitions?: OperationDefs): unknown => {
   if (build != null && typeof build === "object" && !Effect.isEffect(build)) {
     const handlers = build as Record<string, Function>;
     const transformed: Record<string, Function> = {};
     for (const tag of Object.keys(handlers)) {
       const handler = handlers[tag];
       if (!handler) continue;
+      const def = definitions?.[tag];
+      const opaque = def?.payload !== undefined && isOpaquePayload(def.payload);
       transformed[tag] = (request: Record<string, unknown>) => {
-        const operation = { _tag: tag, ...((request["payload"] ?? {}) as object) };
+        const raw = request["payload"];
+        const operation = opaque
+          ? { _tag: tag, _payload: raw }
+          : { _tag: tag, ...((raw ?? {}) as object) };
         return handler({ operation, request });
       };
     }
     return transformed;
   }
-  return Effect.map(build as Effect.Effect<unknown>, transformHandlers);
+  return Effect.map(build as Effect.Effect<unknown>, (b) => transformHandlers(b, definitions));
 };
 
 // ── buildActorRef — value-dispatch ref ─────────────────────────────────────
@@ -727,6 +746,15 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
 ): ActorRef<Name, Defs> => {
   const client = rpcClient as unknown as Record<string, Function>;
 
+  const rpcArg = (
+    op: { readonly _tag: string; readonly [key: string]: unknown },
+    def: OperationDef | undefined,
+  ) => {
+    if (!def?.payload) return undefined;
+    if (isOpaquePayload(def.payload)) return op["_payload"];
+    return op;
+  };
+
   return {
     call: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
       const tag = op["_tag"];
@@ -736,8 +764,8 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
           new Error(`effect-encore: unknown operation "${tag}" on actor "${_actorName}"`),
         );
       const def = definitions[tag] as OperationDef | undefined;
-      const hasPayload = def?.["payload"] !== undefined;
-      return hasPayload ? fn(op) : fn();
+      const arg = rpcArg(op, def);
+      return arg !== undefined ? fn(arg) : fn();
     },
     cast: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
       const tag = op["_tag"];
@@ -747,10 +775,12 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
           new Error(`effect-encore: unknown operation "${tag}" on actor "${_actorName}"`),
         );
       const def = definitions[tag] as OperationDef | undefined;
-      const hasPayload = def?.["payload"] !== undefined;
-      const discardCall = hasPayload ? fn(op, { discard: true }) : fn(undefined, { discard: true });
+      const arg = rpcArg(op, def);
+      const discardCall =
+        arg !== undefined ? fn(arg, { discard: true }) : fn(undefined, { discard: true });
       const pkFn = def?.["primaryKey"] as ((p: unknown) => string) | undefined;
-      const primaryKey = pkFn ? pkFn(op) : tag;
+      const pkInput = def?.payload && isOpaquePayload(def.payload) ? op["_payload"] : op;
+      const primaryKey = pkFn ? pkFn(pkInput) : tag;
       const execId = `${_entityId}\x00${tag}\x00${primaryKey}`;
       return Effect.map(discardCall ?? Effect.void, () => makeExecId(execId));
     },
