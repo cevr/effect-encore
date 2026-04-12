@@ -48,27 +48,27 @@ const GreeterTest = Actor.toTestLayer(Greeter, (payload) =>
   Effect.succeed(`hello ${payload.name}`),
 );
 
-describe("Actor.fromWorkflow — call/cast", () => {
-  it.scopedLive.layer(GreeterTest)("call executes workflow and returns result", () =>
+describe("Actor.fromWorkflow — execute/send", () => {
+  it.scopedLive.layer(GreeterTest)("execute runs workflow and returns result", () =>
     Effect.gen(function* () {
-      const ref = yield* Greeter.actor("g-1");
-      const result = yield* ref.call(Greeter.Run({ name: "world" }));
+      const ref = yield* Greeter.actor();
+      const result = yield* ref.execute(Greeter.Run({ name: "world" }));
       expect(result).toBe("hello world");
     }),
   );
 
-  it.scopedLive.layer(GreeterTest)("cast returns ExecId string", () =>
+  it.scopedLive.layer(GreeterTest)("send returns ExecId string", () =>
     Effect.gen(function* () {
-      const ref = yield* Greeter.actor("g-2");
-      const execId = yield* ref.cast(Greeter.Run({ name: "cast-test" }));
+      const ref = yield* Greeter.actor();
+      const execId = yield* ref.send(Greeter.Run({ name: "cast-test" }));
       expect(typeof execId).toBe("string");
     }),
   );
 
-  it.scopedLive.layer(GreeterTest)("peek returns Success after call", () =>
+  it.scopedLive.layer(GreeterTest)("peek returns Success after send", () =>
     Effect.gen(function* () {
-      const ref = yield* Greeter.actor("g-3");
-      const execId = yield* ref.cast(Greeter.Run({ name: "peek-test" }));
+      const ref = yield* Greeter.actor();
+      const execId = yield* ref.send(Greeter.Run({ name: "peek-test" }));
 
       yield* Effect.sleep("50 millis");
       const result = yield* Greeter.peek(execId);
@@ -100,10 +100,10 @@ const FailingTest = Actor.toTestLayer(FailingWorkflow, () =>
 );
 
 describe("Actor.fromWorkflow — errors", () => {
-  it.scopedLive.layer(FailingTest)("call surfaces workflow errors", () =>
+  it.scopedLive.layer(FailingTest)("execute surfaces workflow errors", () =>
     Effect.gen(function* () {
-      const ref = yield* FailingWorkflow.actor("f-1");
-      const exit = yield* ref.call(FailingWorkflow.Run({ input: "bad" })).pipe(Effect.exit);
+      const ref = yield* FailingWorkflow.actor();
+      const exit = yield* ref.execute(FailingWorkflow.Run({ input: "bad" })).pipe(Effect.exit);
       expect(Exit.isFailure(exit)).toBe(true);
     }),
   );
@@ -112,8 +112,8 @@ describe("Actor.fromWorkflow — errors", () => {
     "peek returns Failure with user's typed error, not raw Cause",
     () =>
       Effect.gen(function* () {
-        const ref = yield* FailingWorkflow.actor("f-peek");
-        const execId = yield* ref.cast(FailingWorkflow.Run({ input: "peek-fail" }));
+        const ref = yield* FailingWorkflow.actor();
+        const execId = yield* ref.send(FailingWorkflow.Run({ input: "peek-fail" }));
 
         yield* Effect.sleep("50 millis");
         const result = yield* FailingWorkflow.peek(execId);
@@ -139,8 +139,8 @@ const DefectTest = Actor.toTestLayer(DefectWorkflow, () => Effect.die("unexpecte
 describe("Actor.fromWorkflow — defects", () => {
   it.scopedLive.layer(DefectTest)("peek returns Defect for die, not Failure", () =>
     Effect.gen(function* () {
-      const ref = yield* DefectWorkflow.actor("d-1");
-      const execId = yield* ref.cast(DefectWorkflow.Run({ input: "boom" }));
+      const ref = yield* DefectWorkflow.actor();
+      const execId = yield* ref.send(DefectWorkflow.Run({ input: "boom" }));
 
       yield* Effect.sleep("50 millis");
       const result = yield* DefectWorkflow.peek(execId);
@@ -173,9 +173,9 @@ describe("Actor.fromWorkflow — lifecycle", () => {
 describe("Actor.fromWorkflow — idempotency", () => {
   it.scopedLive.layer(GreeterTest)("same payload yields same ExecId", () =>
     Effect.gen(function* () {
-      const ref = yield* Greeter.actor("g-idem");
-      const id1 = yield* ref.cast(Greeter.Run({ name: "same" }));
-      const id2 = yield* ref.cast(Greeter.Run({ name: "same" }));
+      const ref = yield* Greeter.actor();
+      const id1 = yield* ref.send(Greeter.Run({ name: "same" }));
+      const id2 = yield* ref.send(Greeter.Run({ name: "same" }));
       expect(id1).toBe(id2);
     }),
   );

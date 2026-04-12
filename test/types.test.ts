@@ -52,25 +52,23 @@ type _PeekResultHasSuspended = Assert<
 >;
 
 describe("type-level tests", () => {
-  test("entity cast returns ExecId with correct phantom types", () => {
-    // This test verifies at compile time that cast returns ExecId<Success, Error>
-    // The actual runtime behavior is tested elsewhere
+  test("entity send returns ExecId with correct phantom types", () => {
     const _check = (_ref: {
-      cast: (op: ReturnType<typeof Order.Place>) => Effect.Effect<ExecId<string, OrderError>>;
+      send: (op: ReturnType<typeof Order.Place>) => Effect.Effect<ExecId<string, OrderError>>;
     }) => {};
     void _check;
   });
 
-  test("entity cast for void-success returns ExecId<void, never>", () => {
+  test("entity send for void-success returns ExecId<void, never>", () => {
     const _check = (_ref: {
-      cast: (op: ReturnType<typeof Order.Count>) => Effect.Effect<ExecId<number, never>>;
+      send: (op: ReturnType<typeof Order.Count>) => Effect.Effect<ExecId<number, never>>;
     }) => {};
     void _check;
   });
 
-  test("workflow cast returns ExecId with correct phantom types", () => {
+  test("workflow send returns ExecId with correct phantom types", () => {
     const _check = (_ref: {
-      cast: (op: ReturnType<typeof Greeter.Run>) => Effect.Effect<ExecId<string, never>>;
+      send: (op: ReturnType<typeof Greeter.Run>) => Effect.Effect<ExecId<string, never>>;
     }) => {};
     void _check;
   });
@@ -105,16 +103,16 @@ describe("type-level tests", () => {
     // const _noResume = Order.resume; // Property 'resume' does not exist
   });
 
-  test("ExecId phantom types flow through cast → peek", () => {
-    // This is the key inference test: cast produces ExecId<S, E>, peek consumes it
+  test("ExecId phantom types flow through send → peek", () => {
+    // send produces ExecId<S, E>, peek consumes it
     // and returns PeekResult<S, E> — all without the user specifying generics
     const _pipeline = Effect.gen(function* () {
       // In a real test this would have the actor context, but we're testing types
       const ref = null as unknown as {
-        cast: (op: ReturnType<typeof Order.Place>) => Effect.Effect<ExecId<string, OrderError>>;
+        send: (op: ReturnType<typeof Order.Place>) => Effect.Effect<ExecId<string, OrderError>>;
       };
 
-      const execId = yield* ref.cast(Order.Place({ item: "widget" }));
+      const execId = yield* ref.send(Order.Place({ item: "widget" }));
       // execId: ExecId<string, OrderError>
 
       const result = yield* Order.peek(execId);

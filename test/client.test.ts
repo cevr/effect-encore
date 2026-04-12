@@ -34,18 +34,18 @@ const ValidatorTest = Layer.provide(
 
 const test = it.scopedLive.layer(ValidatorTest);
 
-describe("Ref.call", () => {
+describe("Ref.execute", () => {
   test("sends message and awaits handler completion — returns success value", () =>
     Effect.gen(function* () {
       const ref = yield* Validator.actor("v-1");
-      const result = yield* ref.call(Validator.Validate({ input: "good" }));
+      const result = yield* ref.execute(Validator.Validate({ input: "good" }));
       expect(result).toBe("validated: good");
     }));
 
   test("surfaces handler errors in the error channel", () =>
     Effect.gen(function* () {
       const ref = yield* Validator.actor("v-1");
-      const exit = yield* ref.call(Validator.Validate({ input: "bad" })).pipe(Effect.exit);
+      const exit = yield* ref.execute(Validator.Validate({ input: "bad" })).pipe(Effect.exit);
       expect(Exit.isFailure(exit)).toBe(true);
     }));
 
@@ -67,7 +67,7 @@ describe("Ref.call", () => {
         Explode: { primaryKey: () => "boom" },
       });
       const ref = yield* BoomActor.actor("b-1");
-      const exit = yield* ref.call(BoomActor.Explode()).pipe(Effect.exit);
+      const exit = yield* ref.execute(BoomActor.Explode()).pipe(Effect.exit);
       expect(Exit.isFailure(exit)).toBe(true);
     }),
   );
@@ -90,7 +90,7 @@ describe("Ref.call", () => {
         Ping: { success: Schema.String, primaryKey: () => "ping" },
       });
       const ref = yield* VolatileActor.actor("vol-1");
-      const result = yield* ref.call(VolatileActor.Ping());
+      const result = yield* ref.execute(VolatileActor.Ping());
       expect(result).toBe("pong");
     }),
   );
@@ -114,11 +114,11 @@ const CastActorTest = Layer.provide(
 
 const castTest = it.scopedLive.layer(CastActorTest);
 
-describe("Ref.cast", () => {
-  castTest("sends persisted message with discard: true — returns ExecId", () =>
+describe("Ref.send", () => {
+  castTest("send dispatches persisted message with discard: true — returns ExecId", () =>
     Effect.gen(function* () {
       const ref = yield* CastActor.actor("c-1");
-      const execId = yield* ref.cast(CastActor.Process({ input: "data" }));
+      const execId = yield* ref.send(CastActor.Process({ input: "data" }));
       expect(typeof execId).toBe("string");
       expect(String(execId)).toBe("c-1\x00Process\x00data");
     }),
@@ -127,15 +127,15 @@ describe("Ref.cast", () => {
   castTest("execId encodes operation tag and primaryKey", () =>
     Effect.gen(function* () {
       const ref = yield* CastActor.actor("c-2");
-      const execId = yield* ref.cast(CastActor.Process({ input: "mykey" }));
+      const execId = yield* ref.send(CastActor.Process({ input: "mykey" }));
       expect(String(execId)).toBe("c-2\x00Process\x00mykey");
     }),
   );
 
-  castTest("cast returns ExecId for persisted operations", () =>
+  castTest("send returns ExecId for persisted operations", () =>
     Effect.gen(function* () {
       const ref = yield* CastActor.actor("c-persist-1");
-      const execId = yield* ref.cast(CastActor.Process({ input: "test" }));
+      const execId = yield* ref.send(CastActor.Process({ input: "test" }));
       expect(typeof execId).toBe("string");
       expect(String(execId)).toBe("c-persist-1\x00Process\x00test");
     }),

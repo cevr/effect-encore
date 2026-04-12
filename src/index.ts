@@ -12,6 +12,13 @@ export type {
   WorkflowDef,
   WorkflowActorObject,
 } from "./actor.js";
+export { makeStepContext, makeSignal } from "./step.js";
+export type {
+  WorkflowStepContext,
+  WorkflowSignal,
+  WorkflowSignalToken,
+  StepRunOptions,
+} from "./step.js";
 export type { ExecId, PeekResult } from "./receipt.js";
 export {
   makeExecId,

@@ -37,21 +37,21 @@ describe("Actor.toTestLayer", () => {
   test("actor(id) returns an ActorRef", () =>
     Effect.gen(function* () {
       const ref = yield* Echo.actor("test-1");
-      expect(ref.call).toBeDefined();
-      expect(ref.cast).toBeDefined();
+      expect(ref.execute).toBeDefined();
+      expect(ref.send).toBeDefined();
     }));
 
-  test("call works end-to-end without cluster infrastructure", () =>
+  test("execute works end-to-end without cluster infrastructure", () =>
     Effect.gen(function* () {
       const ref = yield* Echo.actor("test-1");
-      const result = yield* ref.call(Echo.Say({ msg: "hello" }));
+      const result = yield* ref.execute(Echo.Say({ msg: "hello" }));
       expect(result).toBe("echo: hello");
     }));
 
-  test("cast returns ExecId string", () =>
+  test("send returns ExecId string", () =>
     Effect.gen(function* () {
       const ref = yield* Echo.actor("test-2");
-      const execId = yield* ref.cast(Echo.Fire({ x: 7 }));
+      const execId = yield* ref.send(Echo.Fire({ x: 7 }));
       expect(typeof execId).toBe("string");
       expect(String(execId)).toBe("test-2\x00Fire\x007");
     }));
@@ -81,7 +81,7 @@ describe("Actor.toTestLayer", () => {
       // Provide around the full usage — don't let ActorRef escape the provider scope
       return yield* Effect.gen(function* () {
         const ref = yield* Tracker.actor("t-1");
-        const result = yield* ref.call(Tracker.Track({ item: "widget" }));
+        const result = yield* ref.execute(Tracker.Track({ item: "widget" }));
         expect(result).toBe("tracked: widget");
 
         const recorded = yield* Ref.get(calls);

@@ -30,6 +30,8 @@ import {
 } from "effect";
 import type { DateTime, Scope } from "effect";
 import { dual } from "effect/Function";
+import type { WorkflowSignal, WorkflowStepContext } from "./step.js";
+import { makeSignal, makeStepContext } from "./step.js";
 import type { ExecId, PeekResult } from "./receipt.js";
 import {
   Defect,
@@ -70,6 +72,8 @@ type ReservedKeys =
   | "actor"
   | "peek"
   | "watch"
+  | "waitFor"
+  | "signal"
   | "interrupt"
   | "executionId"
   | "pipe";
@@ -201,10 +205,10 @@ type OperationUnion<Name extends string, Defs extends OperationDefs> = {
 // ── ActorRef — value-dispatch ref ──────────────────────────────────────────
 
 export interface ActorRef<Name extends string, Defs extends OperationDefs> {
-  readonly call: <V extends OperationUnion<Name, Defs>>(
+  readonly execute: <V extends OperationUnion<Name, Defs>>(
     op: V,
   ) => Effect.Effect<OperationOutput<V>, OperationError<V>>;
-  readonly cast: <V extends OperationUnion<Name, Defs>>(
+  readonly send: <V extends OperationUnion<Name, Defs>>(
     op: V,
   ) => Effect.Effect<ExecId<OperationOutput<V>, OperationError<V>>>;
 }
@@ -288,6 +292,18 @@ export type ActorObject<
       execId: ExecId<S, E>,
       options?: { readonly interval?: Duration.DurationInput },
     ) => Stream.Stream<
+      PeekResult<S, E>,
+      PersistenceError | MalformedMessage,
+      MessageStorage.MessageStorage | Sharding.Sharding
+    >;
+    readonly waitFor: <S, E>(
+      execId: ExecId<S, E>,
+      options?: {
+        readonly filter?: (result: PeekResult<S, E>) => boolean;
+        // eslint-disable-next-line typescript-eslint/no-explicit-any
+        readonly schedule?: Schedule.Schedule<any, unknown>;
+      },
+    ) => Effect.Effect<
       PeekResult<S, E>,
       PersistenceError | MalformedMessage,
       MessageStorage.MessageStorage | Sharding.Sharding
@@ -553,7 +569,30 @@ const peekResultEquals = (a: PeekResult, b: PeekResult): boolean => {
   return true;
 };
 
-// ── Actor.fromEntity ──────────────────────────────────────────────────────
+// ── waitFor helper ──────────���─────────────────────────────────────────────
+
+/* eslint-disable typescript-eslint/no-explicit-any -- waitFor requires open types */
+const defaultWaitSchedule = Schedule.spaced("200 millis");
+
+const makeWaitFor = <S, E>(
+  peekFn: (execId: ExecId<S, E>) => Effect.Effect<PeekResult<S, E>, any, any>,
+  execId: ExecId<S, E>,
+  options?: {
+    readonly filter?: (result: PeekResult<S, E>) => boolean;
+    readonly schedule?: Schedule.Schedule<any, unknown>;
+  },
+): Effect.Effect<PeekResult<S, E>, any, any> => {
+  const filter = options?.filter ?? (isTerminal as (r: PeekResult<S, E>) => boolean);
+  const sched = options?.schedule ?? defaultWaitSchedule;
+  return peekFn(execId).pipe(
+    Effect.repeat({
+      schedule: sched as Schedule.Schedule<any, PeekResult<S, E>>,
+      while: (result) => !filter(result),
+    }),
+  );
+};
+
+// ���─ Actor.fromEntity ──────────────���────────────────────────────────���──────
 
 const fromEntity = <const Name extends string, const Defs extends OperationDefs>(
   name: Name,
@@ -641,6 +680,14 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     actor: actorFn,
     peek: peekFn,
     watch: watchFn,
+    waitFor: <S, E>(
+      execId: ExecId<S, E>,
+      options?: {
+        readonly filter?: (result: PeekResult<S, E>) => boolean;
+        // eslint-disable-next-line typescript-eslint/no-explicit-any
+        readonly schedule?: Schedule.Schedule<any, unknown>;
+      },
+    ) => makeWaitFor(peekFn, execId, options),
     executionId: executionIdFn,
     interrupt: interruptFn,
     $is,
@@ -685,8 +732,9 @@ function toLayer<
   actor: WorkflowActorObject<Name, Payload, Success, Error>,
   handler: (
     payload: WorkflowPayloadType<Payload>,
-    executionId: string,
-  ) => Effect.Effect<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>,
+    step: WorkflowStepContext<Name, Schema.Struct<Payload>, Error>,
+    // eslint-disable-next-line typescript-eslint/no-explicit-any
+  ) => Effect.Effect<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>, any>,
 ): Layer.Layer<ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>>, never, any>;
 
 function toLayer(
@@ -754,8 +802,9 @@ function toTestLayer<
   actor: WorkflowActorObject<Name, Payload, Success, Error>,
   handler: (
     payload: WorkflowPayloadType<Payload>,
-    executionId: string,
-  ) => Effect.Effect<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>,
+    step: WorkflowStepContext<Name, Schema.Struct<Payload>, Error>,
+    // eslint-disable-next-line typescript-eslint/no-explicit-any
+  ) => Effect.Effect<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>, any>,
 ): Layer.Layer<ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>> | WorkflowEngine>;
 
 /* eslint-disable typescript-eslint/no-explicit-any -- overload implementation */
@@ -836,7 +885,7 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
   };
 
   return {
-    call: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
+    execute: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
       const tag = op["_tag"];
       const fn = client[tag];
       if (!fn)
@@ -847,7 +896,7 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
       const arg = rpcArg(op, def);
       return arg !== undefined ? fn(arg) : fn();
     },
-    cast: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
+    send: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
       const tag = op["_tag"];
       const fn = client[tag];
       if (!fn)
@@ -882,6 +931,10 @@ export interface WorkflowDef<
       Payload[K] extends Schema.Schema.Any ? Payload[K] : never
     >;
   }) => string;
+  // eslint-disable-next-line typescript-eslint/no-explicit-any
+  readonly suspendedRetrySchedule?: Schedule.Schedule<any, unknown>;
+  readonly captureDefects?: boolean;
+  readonly suspendOnFailure?: boolean;
 }
 
 type WorkflowPayloadType<Payload extends Schema.Struct.Fields> = {
@@ -922,13 +975,19 @@ export type WorkflowActorObject<
     payload: WorkflowPayloadType<Payload>,
   ) => { readonly _tag: "Run" } & WorkflowPayloadType<Payload> &
     OperationBrand<Name, "Run", Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>;
-  readonly actor: (
-    entityId: string,
-  ) => Effect.Effect<
+  readonly actor: () => Effect.Effect<
     ActorRef<Name, WorkflowRunDefs<Payload, Success, Error>>,
     never,
     ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>>
   >;
+  readonly signal: <
+    S extends Schema.Schema.Any = typeof Schema.Void,
+    E extends Schema.Schema.All = typeof Schema.Never,
+  >(options: {
+    readonly name: string;
+    readonly success?: S;
+    readonly error?: E;
+  }) => WorkflowSignal<Schema.Struct<Payload>, S, E>;
   readonly peek: <S, E>(
     execId: ExecId<S, E>,
   ) => Effect.Effect<PeekResult<S, E>, never, WorkflowEngine>;
@@ -936,6 +995,14 @@ export type WorkflowActorObject<
     execId: ExecId<S, E>,
     options?: { readonly interval?: Duration.DurationInput },
   ) => Stream.Stream<PeekResult<S, E>, never, WorkflowEngine>;
+  readonly waitFor: <S, E>(
+    execId: ExecId<S, E>,
+    options?: {
+      readonly filter?: (result: PeekResult<S, E>) => boolean;
+      // eslint-disable-next-line typescript-eslint/no-explicit-any
+      readonly schedule?: Schedule.Schedule<any, unknown>;
+    },
+  ) => Effect.Effect<PeekResult<S, E>, never, WorkflowEngine>;
   readonly interrupt: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   readonly resume: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   readonly executionId: (
@@ -962,13 +1029,19 @@ const fromWorkflow = <
   };
   if (def.success) workflowOptions["success"] = def.success;
   if (def.error) workflowOptions["error"] = def.error;
+  if (def.suspendedRetrySchedule)
+    workflowOptions["suspendedRetrySchedule"] = def.suspendedRetrySchedule;
 
-  const wf = (UpstreamWorkflow.make as Function)(workflowOptions) as UpstreamWorkflow.Workflow<
+  let wf = (UpstreamWorkflow.make as Function)(workflowOptions) as UpstreamWorkflow.Workflow<
     Name,
     Schema.Struct<Payload>,
     Success,
     Error
   >;
+  if (def.captureDefects !== undefined)
+    wf = wf.annotate(UpstreamWorkflow.CaptureDefects, def.captureDefects);
+  if (def.suspendOnFailure !== undefined)
+    wf = wf.annotate(UpstreamWorkflow.SuspendOnFailure, def.suspendOnFailure);
 
   type WfDefs = WorkflowRunDefs<Payload, Success, Error>;
 
@@ -981,7 +1054,17 @@ const fromWorkflow = <
     ({ _tag: "Run", ...payload }) as { readonly _tag: "Run" } & WorkflowPayloadType<Payload> &
       OperationBrand<Name, "Run", Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>;
 
-  const actorFn = (entityId: string) => Effect.flatMap(contextTag, (factory) => factory(entityId));
+  const actorFn = () => Effect.flatMap(contextTag, (factory) => factory(""));
+
+  const signalFn = <
+    S extends Schema.Schema.Any = typeof Schema.Void,
+    E extends Schema.Schema.All = typeof Schema.Never,
+  >(options: {
+    readonly name: string;
+    readonly success?: S;
+    readonly error?: E;
+    // eslint-disable-next-line typescript-eslint/no-explicit-any
+  }) => makeSignal(wf as any, options);
 
   const peekFn = <S, E>(execId: ExecId<S, E>) =>
     Effect.map(
@@ -1025,8 +1108,22 @@ const fromWorkflow = <
     Context: contextTag,
     Run,
     actor: actorFn,
+    signal: signalFn,
     peek: peekFn,
     watch: watchFn,
+    waitFor: <S, E>(
+      execId: ExecId<S, E>,
+      options?: {
+        readonly filter?: (result: PeekResult<S, E>) => boolean;
+        // eslint-disable-next-line typescript-eslint/no-explicit-any
+        readonly schedule?: Schedule.Schedule<any, unknown>;
+      },
+    ) =>
+      makeWaitFor(peekFn, execId, options) as Effect.Effect<
+        PeekResult<S, E>,
+        never,
+        WorkflowEngine
+      >,
     interrupt: (executionId: string) => wf.interrupt(executionId),
     resume: (executionId: string) => wf.resume(executionId),
     executionId: (payload: WorkflowPayloadType<Payload>) =>
@@ -1035,7 +1132,7 @@ const fromWorkflow = <
   } as WorkflowActorObject<Name, Payload, Success, Error>;
 };
 
-// ── Workflow-aware helpers ────────────────────────────────────────────────
+// ── Workflow-aware helpers ─────────────���────────────────────────────��─────
 
 /* eslint-disable typescript-eslint/no-explicit-any */
 const isWorkflowActor = (
@@ -1051,12 +1148,20 @@ const isWorkflowActor = (
   "_tag" in actor &&
   (actor as Record<string, unknown>)["_tag"] === "WorkflowActorObject";
 
+const wrapWorkflowHandler = (actor: WorkflowActorObject<any, any, any, any>, handler: Function) => {
+  const wf = actor._meta.workflow;
+  return (payload: any, executionId: string) => {
+    const step = makeStepContext(wf, executionId);
+    return handler(payload, step);
+  };
+};
+
 const workflowToLayer = (
   actor: WorkflowActorObject<any, any, any, any>,
   handler: Function,
 ): Layer.Layer<any, any, any> => {
   const wf = actor._meta.workflow;
-  const handlerLayer = wf.toLayer(handler as any);
+  const handlerLayer = wf.toLayer(wrapWorkflowHandler(actor, handler) as any);
   const clientLayer = Layer.effect(
     actor.Context,
     Effect.succeed((entityId: string) => Effect.succeed(buildWorkflowActorRef(actor, entityId))),
@@ -1069,7 +1174,10 @@ const workflowToTestLayer = (
   handler: Function,
 ): Layer.Layer<any, any, any> => {
   const wf = actor._meta.workflow;
-  const handlerLayer = Layer.provide(wf.toLayer(handler as any), workflowEngineLayerMemory);
+  const handlerLayer = Layer.provide(
+    wf.toLayer(wrapWorkflowHandler(actor, handler) as any),
+    workflowEngineLayerMemory,
+  );
   const clientLayer = Layer.effect(
     actor.Context,
     Effect.succeed((entityId: string) => Effect.succeed(buildWorkflowActorRef(actor, entityId))),
@@ -1083,11 +1191,11 @@ const buildWorkflowActorRef = (
 ): ActorRef<any, any> => {
   const wf = actor._meta.workflow;
   return {
-    call: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
+    execute: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
       const { _tag: _, ...payload } = op;
       return wf.execute(payload as any);
     },
-    cast: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
+    send: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
       const { _tag: _, ...payload } = op;
       return Effect.map(
         wf.execute(payload as any, { discard: true }) as Effect.Effect<string>,

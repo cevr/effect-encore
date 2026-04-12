@@ -42,31 +42,33 @@ const ProcessOrder = Actor.fromWorkflow("ProcessOrder", {
   success: OrderResult,
   error: OrderError,
   idempotencyKey: (p) => p.orderId,
+  captureDefects: true,
+  suspendOnFailure: false,
 });
 ```
 
 ### Unified Call Site
 
-Both entities and workflows share the same `ref.call` / `ref.cast` interface:
+Both entities and workflows share the same `ref.execute` / `ref.send` interface:
 
 ```ts
 // Entity
 const ref = yield * Order.actor("ord-1");
-const result = yield * ref.call(Order.Place({ item: "widget", qty: 3 }));
-const execId = yield * ref.cast(Order.Place({ item: "widget", qty: 3 }));
+const result = yield * ref.execute(Order.Place({ item: "widget", qty: 3 }));
+const execId = yield * ref.send(Order.Place({ item: "widget", qty: 3 }));
 
-// Workflow — identical call site
-const ref = yield * ProcessOrder.actor("ord-1");
-const result = yield * ref.call(ProcessOrder.Run({ orderId: "ord-1" }));
-const execId = yield * ref.cast(ProcessOrder.Run({ orderId: "ord-1" }));
+// Workflow — nullary actor()
+const ref = yield * ProcessOrder.actor();
+const result = yield * ref.execute(ProcessOrder.Run({ orderId: "ord-1" }));
+const execId = yield * ref.send(ProcessOrder.Run({ orderId: "ord-1" }));
 ```
 
-### Peek & Watch
+### Peek, Watch & WaitFor
 
 Track execution status via opaque `ExecId`:
 
 ```ts
-const execId = yield * ref.cast(Order.Place({ item: "widget", qty: 3 }));
+const execId = yield * ref.send(Order.Place({ item: "widget", qty: 3 }));
 
 // one-shot status check
 const status = yield * Order.peek(execId);
@@ -75,30 +77,84 @@ const status = yield * Order.peek(execId);
 // polling stream
 const stream = Order.watch(execId);
 
+// block until terminal (or custom filter)
+const final = yield * Order.waitFor(execId);
+const custom =
+  yield *
+  Order.waitFor(execId, {
+    filter: (r) => r._tag === "Success",
+    schedule: Schedule.spaced("1 second"),
+  });
+
 // compute ExecId without executing
 const id = yield * Order.executionId("ord-1", Order.Place({ item: "widget", qty: 3 }));
 ```
 
-### Handle
+### Handle — Entity
 
 ```ts
-// Entity handlers — per operation
 const OrderLive = Actor.toLayer(Order, {
   Place: ({ operation }) => Effect.succeed(`order: ${operation.item} x${operation.qty}`),
   Cancel: ({ operation }) => cancelOrder(operation.reason),
 });
+```
 
-// Workflow handler — single body with Activities
-const ProcessOrderLive = Actor.toLayer(ProcessOrder, (payload) =>
+### Handle — Workflow (Step DSL)
+
+Workflow handlers receive `(payload, step)` — a context object that wraps upstream workflow primitives:
+
+```ts
+const ProcessOrderLive = Actor.toLayer(ProcessOrder, (payload, step) =>
   Effect.gen(function* () {
-    const validated = yield* Activity.make({
-      name: "Validate",
-      success: Schema.String,
-      execute: validateOrder(payload.orderId),
+    // step.run — shorthand (infallible only)
+    const order = yield* step.run("create-order", createOrder(payload));
+
+    // step.run — shorthand with undo (value, cause)
+    const charge = yield* step.run("charge-card", chargeCard(order), (charge, _cause) =>
+      refundCharge(charge.id),
+    );
+
+    // step.run — full options (typed errors, retry)
+    const receipt = yield* step.run("send-receipt", {
+      do: sendReceipt(order, charge),
+      success: ReceiptSchema,
+      error: ReceiptError,
+      retry: { times: 3 },
     });
-    return { orderId: payload.orderId, status: "ok" };
+
+    // step.sleep — durable sleep
+    yield* step.sleep("cooling-period", "5 minutes");
+
+    // step.signal — await external input
+    const approval = step.signal({ name: "manager-approval", success: ApprovalDecision });
+    const token = yield* approval.token;
+    yield* step.run("send-approval-email", sendApprovalEmail({ token }));
+    const decision = yield* approval.await;
+
+    // step.race — first activity to complete wins
+    const winner = yield* step.race("fast-path", [activity1, activity2]);
+
+    // step.executionId, step.attempt
+    const key = `${step.executionId}/my-key`;
+    const attempt = yield* step.attempt;
+
+    return { orderId: order.id, chargeId: charge.id };
   }),
 );
+```
+
+### Signal — external resolution
+
+```ts
+// Define once on the actor
+const approval = ProcessOrder.signal({ name: "manager-approval", success: ApprovalDecision });
+
+// Resolve from outside the workflow
+export const approve = (token: WorkflowSignalToken, value: typeof ApprovalDecision.Type) =>
+  approval.succeed({ token, value });
+
+// Get a token from a known execution
+const token = approval.tokenFromExecutionId(executionId);
 ```
 
 ### Producer-Only (Client Layer)
@@ -115,8 +171,11 @@ const OrderTest = Actor.toTestLayer(Order, {
   Cancel: () => Effect.void,
 });
 
-const ProcessOrderTest = Actor.toTestLayer(ProcessOrder, (payload) =>
-  Effect.succeed({ orderId: payload.orderId, status: "ok" }),
+const ProcessOrderTest = Actor.toTestLayer(ProcessOrder, (payload, step) =>
+  Effect.gen(function* () {
+    yield* step.run("work", Effect.succeed("done"));
+    return { orderId: payload.orderId, status: "ok" };
+  }),
 );
 
 const test = it.scopedLive.layer(Layer.provide(OrderTest, TestShardingConfig));
@@ -124,7 +183,7 @@ const test = it.scopedLive.layer(Layer.provide(OrderTest, TestShardingConfig));
 test("places an order", () =>
   Effect.gen(function* () {
     const ref = yield* Order.actor("ord-1");
-    const result = yield* ref.call(Order.Place({ item: "widget", qty: 1 }));
+    const result = yield* ref.execute(Order.Place({ item: "widget", qty: 1 }));
     expect(result).toBe("order: widget");
   }));
 ```
@@ -133,8 +192,8 @@ test("places an order", () =>
 
 ```ts
 // Workflow: cancel + resume
-ProcessOrder.interrupt("ord-1");
-ProcessOrder.resume("ord-1");
+yield * ProcessOrder.interrupt("ord-1");
+yield * ProcessOrder.resume("ord-1");
 ```
 
 ### Protocol Transform
@@ -150,16 +209,6 @@ class AuthMiddleware extends RpcMiddleware.Service<AuthMiddleware>()("AuthMiddle
 
 const SecureOrder = Actor.fromEntity("Order", defs).pipe(
   Actor.withProtocol((protocol) => protocol.middleware(AuthMiddleware)),
-);
-```
-
-Workflows don't have an RPC protocol — wrap the handler directly:
-
-```ts
-const ProcessOrderLive = Actor.toLayer(ProcessOrder, (payload, executionId) =>
-  myHandler(payload, executionId).pipe(
-    Effect.withSpan("ProcessOrder.Run", { attributes: { executionId } }),
-  ),
 );
 ```
 
@@ -186,17 +235,6 @@ const Scheduled = Actor.fromEntity("Scheduled", {
     persisted: true,
   },
 });
-```
-
-### Workflow Primitives
-
-Import from upstream directly:
-
-```ts
-// v4
-import { Activity, DurableDeferred, DurableClock, Workflow } from "effect/unstable/workflow";
-// v3
-import { Activity, DurableDeferred, DurableClock, Workflow } from "@effect/workflow";
 ```
 
 ## License

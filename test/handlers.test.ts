@@ -83,17 +83,17 @@ const InspectActor = Actor.fromEntity("InspectActor", {
 });
 
 describe("Actor.toLayer", () => {
-  test("wires plain handler functions — call returns handler result", () =>
+  test("wires plain handler functions — execute returns handler result", () =>
     Effect.gen(function* () {
       const ref = yield* Counter.actor("counter-1");
-      const result = yield* ref.call(Counter.Increment({ amount: 5 }));
+      const result = yield* ref.execute(Counter.Increment({ amount: 5 }));
       expect(result).toBe(6);
     }));
 
   test("handler return value becomes the RPC reply — no explicit .reply()", () =>
     Effect.gen(function* () {
       const ref = yield* Counter.actor("counter-1");
-      const result = yield* ref.call(Counter.GetCount());
+      const result = yield* ref.execute(Counter.GetCount());
       expect(result).toBe("hello");
     }));
 
@@ -102,7 +102,7 @@ describe("Actor.toLayer", () => {
     () =>
       Effect.gen(function* () {
         const ref = yield* GenActor.actor("gen-1");
-        const result = yield* ref.call(GenActor.Compute({ x: 7 }));
+        const result = yield* ref.execute(GenActor.Compute({ x: 7 }));
         expect(result).toBe(70);
       }),
   );
@@ -110,7 +110,7 @@ describe("Actor.toLayer", () => {
   it.scopedLive.layer(ErrActorTest)("handler errors become RPC errors", () =>
     Effect.gen(function* () {
       const ref = yield* ErrActor.actor("err-1");
-      const exit = yield* ref.call(ErrActor.Fail({ input: "test" })).pipe(Effect.exit);
+      const exit = yield* ref.execute(ErrActor.Fail({ input: "test" })).pipe(Effect.exit);
       expect(Exit.isFailure(exit)).toBe(true);
     }),
   );
@@ -125,7 +125,7 @@ describe("Actor.toLayer", () => {
   )("handler receives request with operation — operation has _tag and fields", () =>
     Effect.gen(function* () {
       const ref = yield* InspectActor.actor("inspect-1");
-      const result = yield* ref.call(InspectActor.Inspect({ value: "hello" }));
+      const result = yield* ref.execute(InspectActor.Inspect({ value: "hello" }));
       expect(result).toBe("got: hello");
     }),
   );

@@ -123,34 +123,34 @@ describe("Actor.fromEntity", () => {
 });
 
 describe("Actor.toTestLayer", () => {
-  effectTest("actor(id) returns ActorRef with call/cast", () =>
+  effectTest("actor(id) returns ActorRef with execute/send", () =>
     Effect.gen(function* () {
       const ref = yield* Counter.actor("counter-1");
-      expect(ref.call).toBeDefined();
-      expect(ref.cast).toBeDefined();
+      expect(ref.execute).toBeDefined();
+      expect(ref.send).toBeDefined();
     }),
   );
 
-  effectTest("call dispatches by operation value", () =>
+  effectTest("execute dispatches by operation value", () =>
     Effect.gen(function* () {
       const ref = yield* Counter.actor("counter-2");
-      const result = yield* ref.call(Counter.Increment({ amount: 5 }));
+      const result = yield* ref.execute(Counter.Increment({ amount: 5 }));
       expect(result).toBe(6);
     }),
   );
 
-  effectTest("call works for zero-input operations", () =>
+  effectTest("execute works for zero-input operations", () =>
     Effect.gen(function* () {
       const ref = yield* Counter.actor("counter-3");
-      const result = yield* ref.call(Counter.GetCount());
+      const result = yield* ref.execute(Counter.GetCount());
       expect(result).toBe(42);
     }),
   );
 
-  effectTest("cast returns ExecId string", () =>
+  effectTest("send returns ExecId string", () =>
     Effect.gen(function* () {
       const ref = yield* Counter.actor("counter-4");
-      const execId = yield* ref.cast(Counter.Increment({ amount: 7 }));
+      const execId = yield* ref.send(Counter.Increment({ amount: 7 }));
       expect(typeof execId).toBe("string");
       expect(String(execId)).toBe("counter-4\x00Increment\x007");
     }),
@@ -159,7 +159,7 @@ describe("Actor.toTestLayer", () => {
   effectTest("ExecId is safe with colons in entity ID", () =>
     Effect.gen(function* () {
       const ref = yield* Counter.actor("ns:entity-1");
-      const execId = yield* ref.cast(Counter.Increment({ amount: 3 }));
+      const execId = yield* ref.send(Counter.Increment({ amount: 3 }));
       // null-byte separator means colons in entity ID are safe
       expect(String(execId)).toBe("ns:entity-1\x00Increment\x003");
     }),
@@ -170,7 +170,7 @@ describe("Actor.toTestLayer", () => {
       const ref = yield* Counter.actor("pk-colon-test");
       // primaryKey for Increment returns String(p.amount), so no colons here
       // but the entity ID and tag are clean — the key point is null-byte separators
-      const execId = yield* ref.cast(Counter.Increment({ amount: 42 }));
+      const execId = yield* ref.send(Counter.Increment({ amount: 42 }));
       // Verify the format uses null bytes, making colons in any segment safe
       const str = String(execId);
       expect(str).toContain("\x00");
@@ -181,7 +181,7 @@ describe("Actor.toTestLayer", () => {
   effectTest("unknown operation tag dies with descriptive error", () =>
     Effect.gen(function* () {
       const ref = yield* Counter.actor("counter-5");
-      const result = yield* Effect.exit(ref.call({ _tag: "NonExistent" } as never));
+      const result = yield* Effect.exit(ref.execute({ _tag: "NonExistent" } as never));
       expect(result._tag).toBe("Failure");
     }),
   );
@@ -218,18 +218,18 @@ describe("scalar payload", () => {
     expect(op._payload).toBe("hello");
   });
 
-  scalarTest("call round-trips scalar payload through handler", () =>
+  scalarTest("execute round-trips scalar payload through handler", () =>
     Effect.gen(function* () {
       const ref = yield* Echo.actor("s-1");
-      const result = yield* ref.call(Echo.Say("world"));
+      const result = yield* ref.execute(Echo.Say("world"));
       expect(result).toBe("echo: world");
     }),
   );
 
-  scalarTest("cast returns ExecId with scalar primaryKey", () =>
+  scalarTest("send returns ExecId with scalar primaryKey", () =>
     Effect.gen(function* () {
       const ref = yield* Echo.actor("s-2");
-      const execId = yield* ref.cast(Echo.Say("test"));
+      const execId = yield* ref.send(Echo.Say("test"));
       expect(String(execId)).toBe("s-2\x00Say\x00test");
     }),
   );
