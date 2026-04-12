@@ -18,7 +18,7 @@ What are you working on?
 ├─ Tracking execution (peek/watch) → §Peek
 ├─ Waiting for completion          → §WaitFor
 ├─ Testing                         → §Test
-├─ Lifecycle (interrupt/resume)    → §Lifecycle
+├─ Lifecycle (interrupt/resume/flush/redeliver) → §Lifecycle
 ├─ Delayed delivery (deliverAt)    → §DeliverAt
 ├─ Observability                   → §Observability
 ├─ v3 compatibility                → §v3
@@ -69,23 +69,25 @@ Counter.GetCount(); // zero-input, still callable
 
 ### ActorObject properties
 
-| Property                    | Type        | Description                               |
-| --------------------------- | ----------- | ----------------------------------------- |
-| `Counter.Increment(...)`    | Constructor | Returns `OperationValue`                  |
-| `Counter._meta.name`        | `"Counter"` | Actor name (literal type)                 |
-| `Counter._meta.entity`      | `Entity`    | Underlying cluster Entity                 |
-| `Counter._meta.definitions` | Record      | Raw operation definitions                 |
-| `Counter.Context`           | Context tag | DI tag for client factory                 |
-| `Counter.actor(id)`         | Method      | `yield* Counter.actor("id")` → `ActorRef` |
-| `Counter.peek(execId)`      | Method      | One-shot status check                     |
-| `Counter.watch(execId)`     | Method      | Polling stream of status changes          |
-| `Counter.waitFor(execId)`   | Method      | Poll until terminal (or custom filter)    |
-| `Counter.interrupt(id)`     | Method      | Passivate entity                          |
-| `Counter.$is(tag)`          | Type guard  | `Counter.$is("Increment")(value)`         |
+| Property                    | Type        | Description                                      |
+| --------------------------- | ----------- | ------------------------------------------------ |
+| `Counter.Increment(...)`    | Constructor | Returns `OperationValue`                         |
+| `Counter._meta.name`        | `"Counter"` | Actor name (literal type)                        |
+| `Counter._meta.entity`      | `Entity`    | Underlying cluster Entity                        |
+| `Counter._meta.definitions` | Record      | Raw operation definitions                        |
+| `Counter.Context`           | Context tag | DI tag for client factory                        |
+| `Counter.actor(id)`         | Method      | `yield* Counter.actor("id")` → `ActorRef`        |
+| `Counter.peek(execId)`      | Method      | One-shot status check                            |
+| `Counter.watch(execId)`     | Method      | Polling stream of status changes                 |
+| `Counter.waitFor(execId)`   | Method      | Poll until terminal (or custom filter)           |
+| `Counter.interrupt(id)`     | Method      | Passivate entity (dies — not public API)         |
+| `Counter.flush(id)`         | Method      | Delete all messages + replies (entity-only)      |
+| `Counter.redeliver(id)`     | Method      | Clear read leases for reprocessing (entity-only) |
+| `Counter.$is(tag)`          | Type guard  | `Counter.$is("Increment")(value)`                |
 
 ### Reserved operation names
 
-`_tag`, `_meta`, `$is`, `Context`, `actor`, `peek`, `watch`, `interrupt`, `executionId` — compile-time type guard + runtime check.
+`_tag`, `_meta`, `$is`, `Context`, `actor`, `peek`, `watch`, `interrupt`, `executionId`, `flush`, `redeliver` — compile-time type guard + runtime check.
 
 ### Pre-built Schema.Class payload
 
@@ -547,16 +549,35 @@ it.scopedLive("dynamic test", () =>
 ## Lifecycle
 
 ```ts
-// Entity: passivate
+// Entity: flush all messages + replies (hard delete)
+yield * Order.flush("ord-1");
+// Requires: MessageStorage | Sharding
+
+// Entity: redeliver — clear read leases so unprocessed messages re-enter polling
+yield * Order.redeliver("ord-1");
+// Requires: MessageStorage | Sharding
+
+// Entity: passivate (not yet supported — dies at runtime)
 Order.interrupt("ord-1");
 
-// Workflow: cancel + resume
-ProcessOrder.interrupt("exec-id");
-ProcessOrder.resume("exec-id");
+// Workflow: cancel + resume (via WorkflowEngine)
+yield * ProcessOrder.interrupt("exec-id");
+yield * ProcessOrder.resume("exec-id");
 
 // Workflow-only
 const execId = yield * ProcessOrder.executionId({ orderId: "ord-1" });
 ```
+
+**Entity vs Workflow lifecycle:**
+
+| Operation   | Entity                                                           | Workflow                                      |
+| ----------- | ---------------------------------------------------------------- | --------------------------------------------- |
+| `flush`     | Deletes all messages + replies via `MessageStorage.clearAddress` | Not available — would corrupt execution state |
+| `redeliver` | Clears read leases via `MessageStorage.resetAddress`             | Not available                                 |
+| `interrupt` | Dies (passivation not public API)                                | Cancels via `WorkflowEngine`                  |
+| `resume`    | N/A                                                              | Resumes via `WorkflowEngine`                  |
+
+**Shard group:** `flush`/`redeliver` use `entity.getShardGroup(entityId)` to compute the correct shard ID (defaults to `"default"`). This is the same derivation the cluster uses for message routing.
 
 ## DeliverAt
 
