@@ -1,6 +1,6 @@
 # effect-encore
 
-Erlang gen_server semantics over `@effect/cluster`.
+Declarative actors and durable workflows for `@effect/cluster`.
 
 ```bash
 bun add effect-encore
@@ -11,7 +11,7 @@ For v3 `@effect/cluster` compat: `import { Actor } from "effect-encore/v3"`.
 
 ## Why
 
-`@effect/cluster` entities require custom `Schema.Class`, `Rpc.make`, `RpcGroup`, `Entity.make`, handler wiring, and a hand-rolled client service. effect-encore compresses this into a declarative DSL.
+`@effect/cluster` requires custom `Schema.Class`, `Rpc.make`, `RpcGroup`, `Entity.make`, handler wiring, and a hand-rolled client service. Workflows add `Activity`, `DurableDeferred`, `DurableClock`, and `Workflow.make` on top. effect-encore compresses both into a declarative DSL — define entities and workflows as plain objects, get typed actors with execute/send/peek/watch/waitFor and a step DSL for durable orchestration.
 
 ## Core API
 

@@ -1,11 +1,11 @@
 ---
 name: effect-encore
-description: Erlang gen_server semantics over @effect/cluster. Use when building actor/entity definitions with effect-encore, wiring handlers, writing execute/send/peek/watch patterns, testing actors, defining workflows with the step DSL, or migrating from raw @effect/cluster Entity/Rpc/RpcGroup code.
+description: Declarative actors and durable workflows for @effect/cluster. Use when building actor/entity definitions with effect-encore, wiring handlers, writing execute/send/peek/watch patterns, testing actors, defining workflows with the step DSL, or migrating from raw @effect/cluster Entity/Rpc/RpcGroup code.
 ---
 
 # effect-encore
 
-Thin protocol layer over `@effect/cluster` providing Erlang gen_server semantics. Unified call site for entities and workflows.
+Declarative actors and durable workflows for `@effect/cluster`. Unified call site for entities and workflows with a step DSL for durable orchestration.
 
 ## Navigation
 
