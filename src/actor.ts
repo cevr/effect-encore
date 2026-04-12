@@ -879,7 +879,9 @@ export type WorkflowActorObject<
   ) => Stream.Stream<PeekResult<S, E>, never, WorkflowEngine>;
   readonly interrupt: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   readonly resume: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
-  readonly executionId: (payload: WorkflowPayloadType<Payload>) => Effect.Effect<string>;
+  readonly executionId: (
+    payload: WorkflowPayloadType<Payload>,
+  ) => Effect.Effect<ExecId<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>>;
   readonly $is: (tag: "Run") => (value: unknown) => boolean;
 };
 
@@ -958,7 +960,8 @@ const fromWorkflow = <
 
   const resumeFn = (executionId: string) => wf.resume(executionId);
 
-  const executionIdFn = (payload: WorkflowPayloadType<Payload>) => wf.executionId(payload as never);
+  const executionIdFn = (payload: WorkflowPayloadType<Payload>) =>
+    Effect.map(wf.executionId(payload as never), (id) => makeExecId(id));
 
   const $is =
     (tag: string) =>
