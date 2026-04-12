@@ -1,5 +1,6 @@
 import { describe, expect, it, test } from "effect-bun-test";
-import { Effect, Exit, Schema } from "effect";
+import { Effect, Exit, Layer, Schema } from "effect";
+import { WorkflowEngine } from "effect/unstable/workflow";
 import { Actor, makeExecId } from "../src/index.js";
 
 class OrderError extends Schema.TaggedErrorClass<OrderError>()("OrderError", {
@@ -178,5 +179,21 @@ describe("Actor.fromWorkflow — idempotency", () => {
       const id2 = yield* ref.send(Greeter.Run({ name: "same" }));
       expect(id1).toBe(id2);
     }),
+  );
+});
+
+// ── Production layer pattern (Actor.toLayer + external WorkflowEngine) ──
+
+describe("Actor.fromWorkflow — production layer", () => {
+  const ProductionLayer = Actor.toLayer(Greeter, (payload) =>
+    Effect.succeed(`hello ${payload.name}`),
+  ).pipe(Layer.provide(WorkflowEngine.layerMemory));
+
+  it.scopedLive("works with externally-provided WorkflowEngine", () =>
+    Effect.gen(function* () {
+      const ref = yield* Greeter.actor();
+      const result = yield* ref.execute(Greeter.Run({ name: "prod" }));
+      expect(result).toBe("hello prod");
+    }).pipe(Effect.provide(ProductionLayer)),
   );
 });

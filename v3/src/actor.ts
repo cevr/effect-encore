@@ -776,7 +776,7 @@ function toLayer(
     mailboxCapacity: options?.mailboxCapacity,
   });
 
-  return Layer.provideMerge(handlerLayer, clientLayer);
+  return Layer.merge(handlerLayer, clientLayer).pipe(Layer.passthrough);
 }
 
 // ── Actor.toTestLayer ─────────────────────────────────────────────────────
@@ -1200,7 +1200,10 @@ const workflowToLayer = (
     actor.Context,
     Effect.succeed((entityId: string) => Effect.succeed(buildWorkflowActorRef(actor, entityId))),
   );
-  return Layer.provideMerge(handlerLayer, clientLayer);
+  // handlerLayer requires WorkflowEngine and registers the workflow.
+  // clientLayer has no requirements but ref.execute/send need WorkflowEngine at runtime.
+  // Use passthrough so WorkflowEngine stays in the output for program code.
+  return Layer.merge(handlerLayer, clientLayer).pipe(Layer.passthrough);
 };
 
 const workflowToTestLayer = (

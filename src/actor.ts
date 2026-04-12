@@ -45,6 +45,14 @@ import {
   Success,
 } from "./receipt.js";
 
+// ── Layer passthrough (v4 polyfill — v3 has Layer.passthrough) ────────────
+// Adds the layer's input requirements to its output so provided services
+// flow through to program code. Same as Layer.passthrough in v3.
+const layerPassthrough = <ROut, E, RIn>(
+  layer: Layer.Layer<ROut, E, RIn>,
+): Layer.Layer<ROut | RIn, E, RIn> =>
+  Layer.merge(Layer.effectContext(Effect.context<RIn>()), layer);
+
 // ── Payload classification ─────────────────────────────────────────────────
 // Schema.Class has `fields`; scalars like Schema.String don't.
 const isOpaquePayload = (payload: unknown): boolean =>
@@ -730,7 +738,7 @@ function toLayer(
     mailboxCapacity: options?.mailboxCapacity,
   });
 
-  return Layer.provideMerge(handlerLayer, clientLayer);
+  return layerPassthrough(Layer.merge(handlerLayer, clientLayer));
 }
 
 // ── Actor.toTestLayer ─────────────────────────────────────────────────────
@@ -1165,7 +1173,7 @@ const workflowToLayer = (
     Effect.succeed((entityId: string) => Effect.succeed(buildWorkflowActorRef(actor, entityId))),
   );
 
-  return Layer.provideMerge(handlerLayer, clientLayer);
+  return layerPassthrough(Layer.merge(handlerLayer, clientLayer));
 };
 
 const workflowToTestLayer = (
