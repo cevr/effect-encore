@@ -51,6 +51,22 @@ const ProcessOrder = Actor.fromWorkflow("ProcessOrder", {
 });
 ```
 
+### Identity & Type Guards
+
+```ts
+// .name — the actor's name
+Order.name; // "Order"
+ProcessOrder.name; // "ProcessOrder"
+
+// .type — the cluster entity type
+Order.type; // "Order"
+ProcessOrder.type; // "Workflow/ProcessOrder"
+
+// Type guards
+Actor.isEntity(Order); // true — narrows to EntityActorObject
+Actor.isWorkflow(ProcessOrder); // true — narrows to WorkflowActorObject
+```
+
 ### Unified Call Site
 
 Both entities and workflows share the same `ref.execute` / `ref.send` interface:

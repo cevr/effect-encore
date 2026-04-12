@@ -13,6 +13,7 @@ Declarative actors and durable workflows for `@effect/cluster`. Unified call sit
 What are you working on?
 ├─ Defining an entity              → §Entity
 ├─ Defining a workflow             → §Workflow
+├─ Identity / type guards          → §Type guards
 ├─ Wiring handlers / layers        → §Handle
 ├─ Calling / sending               → §Client
 ├─ Tracking execution (peek/watch) → §Peek
@@ -67,27 +68,44 @@ Counter.GetCount(); // zero-input, still callable
 | `primaryKey` | `(payload) => string`                | **yes**  | Deduplication / exec ID key             |
 | `deliverAt`  | `(payload) => DateTime`              | no       | Delayed delivery extractor              |
 
-### ActorObject properties
+### EntityActorObject properties
 
-| Property                    | Type        | Description                                      |
-| --------------------------- | ----------- | ------------------------------------------------ |
-| `Counter.Increment(...)`    | Constructor | Returns `OperationValue`                         |
-| `Counter._meta.name`        | `"Counter"` | Actor name (literal type)                        |
-| `Counter._meta.entity`      | `Entity`    | Underlying cluster Entity                        |
-| `Counter._meta.definitions` | Record      | Raw operation definitions                        |
-| `Counter.Context`           | Context tag | DI tag for client factory                        |
-| `Counter.actor(id)`         | Method      | `yield* Counter.actor("id")` → `ActorRef`        |
-| `Counter.peek(execId)`      | Method      | One-shot status check                            |
-| `Counter.watch(execId)`     | Method      | Polling stream of status changes                 |
-| `Counter.waitFor(execId)`   | Method      | Poll until terminal (or custom filter)           |
-| `Counter.interrupt(id)`     | Method      | Passivate entity (dies — not public API)         |
-| `Counter.flush(id)`         | Method      | Delete all messages + replies (entity-only)      |
-| `Counter.redeliver(id)`     | Method      | Clear read leases for reprocessing (entity-only) |
-| `Counter.$is(tag)`          | Type guard  | `Counter.$is("Increment")(value)`                |
+| Property                    | Type                  | Description                                      |
+| --------------------------- | --------------------- | ------------------------------------------------ |
+| `Counter.name`              | `"Counter"`           | Actor name (literal type)                        |
+| `Counter.type`              | `"Counter"`           | Cluster entity type (same as name for entities)  |
+| `Counter._tag`              | `"EntityActorObject"` | Discriminant for type guards                     |
+| `Counter.Increment(...)`    | Constructor           | Returns `OperationValue`                         |
+| `Counter._meta.entity`      | `Entity`              | Underlying cluster Entity                        |
+| `Counter._meta.definitions` | Record                | Raw operation definitions                        |
+| `Counter.Context`           | Context tag           | DI tag for client factory                        |
+| `Counter.actor(id)`         | Method                | `yield* Counter.actor("id")` → `ActorRef`        |
+| `Counter.peek(execId)`      | Method                | One-shot status check                            |
+| `Counter.watch(execId)`     | Method                | Polling stream of status changes                 |
+| `Counter.waitFor(execId)`   | Method                | Poll until terminal (or custom filter)           |
+| `Counter.interrupt(id)`     | Method                | Passivate entity (dies — not public API)         |
+| `Counter.flush(id)`         | Method                | Delete all messages + replies (entity-only)      |
+| `Counter.redeliver(id)`     | Method                | Clear read leases for reprocessing (entity-only) |
+| `Counter.$is(tag)`          | Type guard            | `Counter.$is("Increment")(value)`                |
+
+### Type guards
+
+```ts
+Actor.isEntity(actor); // narrows to EntityActorObject
+Actor.isWorkflow(actor); // narrows to WorkflowActorObject
+
+// .name — the actor's declared name
+Counter.name; // "Counter"
+ProcessOrder.name; // "ProcessOrder"
+
+// .type — the cluster entity type (how it's registered with @effect/cluster)
+Counter.type; // "Counter"
+ProcessOrder.type; // "Workflow/ProcessOrder"
+```
 
 ### Reserved operation names
 
-`_tag`, `_meta`, `$is`, `Context`, `actor`, `peek`, `watch`, `interrupt`, `executionId`, `flush`, `redeliver` — compile-time type guard + runtime check.
+`_tag`, `_meta`, `$is`, `Context`, `actor`, `name`, `type`, `peek`, `watch`, `interrupt`, `executionId`, `flush`, `redeliver` — compile-time type guard + runtime check.
 
 ### Pre-built Schema.Class payload
 
@@ -140,11 +158,14 @@ ProcessOrder.Run({ orderId: "ord-1" }); // → OperationValue
 
 All entity properties plus:
 
-| Property                            | Description                                     |
-| ----------------------------------- | ----------------------------------------------- |
-| `ProcessOrder.resume(execId)`       | Resume suspended workflow                       |
-| `ProcessOrder.executionId(payload)` | Compute deterministic execution ID              |
-| `ProcessOrder.Approval`             | Signal property (from `signals` on WorkflowDef) |
+| Property                            | Type                      | Description                                     |
+| ----------------------------------- | ------------------------- | ----------------------------------------------- |
+| `ProcessOrder.name`                 | `"ProcessOrder"`          | Workflow name                                   |
+| `ProcessOrder.type`                 | `"Workflow/ProcessOrder"` | Cluster entity type (prefixed)                  |
+| `ProcessOrder._tag`                 | `"WorkflowActorObject"`   | Discriminant for type guards                    |
+| `ProcessOrder.resume(execId)`       |                           | Resume suspended workflow                       |
+| `ProcessOrder.executionId(payload)` |                           | Compute deterministic execution ID              |
+| `ProcessOrder.Approval`             |                           | Signal property (from `signals` on WorkflowDef) |
 
 ### Declarative signals
 
