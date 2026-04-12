@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.4.2
+
+### Patch Changes
+
+- [`9c74451`](https://github.com/cevr/effect-encore/commit/9c74451f9d8740fd28cda81bc13979cf44e8157b) Thanks [@cevr](https://github.com/cevr)! - Fix `Actor.toLayer` layer composition — use `Layer.provideMerge` instead of `Layer.merge` for handler+client layers. The client layer needs Sharding from the handler layer's output; `Layer.merge` treated them as peers, causing "Service not found: Sharding" when consumers provided ClusterRuntime after the actor layer.
+
 ## 0.4.1
 
 ### Patch Changes
