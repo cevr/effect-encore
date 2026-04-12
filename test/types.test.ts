@@ -2,7 +2,7 @@ import { describe, test } from "effect-bun-test";
 import { Effect, Schema } from "effect";
 import type { Cause, Duration, Stream } from "effect";
 import { Actor } from "../src/index.js";
-import type { ExecId, PeekResult } from "../src/index.js";
+import type { ExecId, PeekResult, WorkflowSignal } from "../src/index.js";
 
 // ── Type-level tests for ExecId phantom brand inference ───────────────────
 
@@ -194,5 +194,64 @@ describe("step DSL type-level tests", () => {
       }),
     );
     void _check;
+  });
+});
+
+// ── Declarative signal type tests ──────────────────────────────────────────
+
+class ApprovalDecision extends Schema.TaggedClass<ApprovalDecision>()("ApprovalDecision", {
+  approved: Schema.Boolean,
+}) {}
+
+const SignalWorkflow = Actor.fromWorkflow("SignalWorkflow", {
+  payload: { id: Schema.String },
+  success: Schema.String,
+  idempotencyKey: (p: { id: string }) => p.id,
+  signals: {
+    Approval: { success: ApprovalDecision },
+    Cancel: {},
+  },
+});
+
+const NoSignalWorkflow = Actor.fromWorkflow("NoSignalWorkflow", {
+  payload: { id: Schema.String },
+  success: Schema.String,
+  idempotencyKey: (p: { id: string }) => p.id,
+});
+
+describe("declarative signal type-level tests", () => {
+  test("signal property is typed as WorkflowSignal with correct schemas", () => {
+    const _approval: WorkflowSignal<
+      Schema.Struct<{ id: typeof Schema.String }>,
+      typeof ApprovalDecision,
+      typeof Schema.Never
+    > = SignalWorkflow.Approval;
+    void _approval;
+  });
+
+  test("void signal defaults to Schema.Void/Schema.Never", () => {
+    const _cancel: WorkflowSignal<
+      Schema.Struct<{ id: typeof Schema.String }>,
+      typeof Schema.Void,
+      typeof Schema.Never
+    > = SignalWorkflow.Cancel;
+    void _cancel;
+  });
+
+  test("workflow without signals has no extra properties", () => {
+    // NoSignalWorkflow should not have Approval or Cancel
+    // @ts-expect-error — no signals defined
+    const _bad = NoSignalWorkflow.Approval;
+    void _bad;
+  });
+
+  test("signal .token returns Effect<WorkflowSignalToken>", () => {
+    const _token: Effect.Effect<unknown, never, unknown> = SignalWorkflow.Approval.token;
+    void _token;
+  });
+
+  test("signal .await returns Effect with correct success type", () => {
+    const _await: Effect.Effect<ApprovalDecision, never, unknown> = SignalWorkflow.Approval.await;
+    void _await;
   });
 });

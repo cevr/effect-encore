@@ -129,6 +129,7 @@ ProcessOrder.Run({ orderId: "ord-1" }); // → OperationValue
 | `success`                | `Schema.Top`           | no       | Success schema (default: Void)              |
 | `error`                  | `Schema.Top`           | no       | Error schema (default: Never)               |
 | `idempotencyKey`         | `(payload) => string`  | **yes**  | Deterministic execution ID                  |
+| `signals`                | `SignalDefs`           | no       | Declarative signal definitions (see below)  |
 | `captureDefects`         | `boolean`              | no       | Capture defects as workflow failures        |
 | `suspendOnFailure`       | `boolean`              | no       | Suspend workflow on failure instead of fail |
 | `suspendedRetrySchedule` | `Schedule`             | no       | Retry schedule for suspended workflows      |
@@ -137,32 +138,49 @@ ProcessOrder.Run({ orderId: "ord-1" }); // → OperationValue
 
 All entity properties plus:
 
-| Property                            | Description                           |
-| ----------------------------------- | ------------------------------------- |
-| `ProcessOrder.resume(execId)`       | Resume suspended workflow             |
-| `ProcessOrder.executionId(payload)` | Compute deterministic execution ID    |
-| `ProcessOrder.signal(options)`      | Create external signal for resolution |
+| Property                            | Description                                     |
+| ----------------------------------- | ----------------------------------------------- |
+| `ProcessOrder.resume(execId)`       | Resume suspended workflow                       |
+| `ProcessOrder.executionId(payload)` | Compute deterministic execution ID              |
+| `ProcessOrder.Approval`             | Signal property (from `signals` on WorkflowDef) |
 
-### signal() — external workflow resolution
+### Declarative signals
 
-Create a `WorkflowSignal` from outside the workflow handler (e.g., from another service or API route):
+Signals are defined on `WorkflowDef.signals` and become typed properties on the actor — single source of truth:
 
 ```ts
-const approval = ProcessOrder.signal({
-  name: "Approval",
-  success: Schema.String,
-  error: ApprovalError,
+const ProcessOrder = Actor.fromWorkflow("ProcessOrder", {
+  payload: { orderId: Schema.String },
+  success: OrderResult,
+  idempotencyKey: (p) => p.orderId,
+  signals: {
+    Approval: { success: Schema.String, error: ApprovalError },
+    Cancel: {}, // void signal — Schema.Void/Schema.Never defaults
+  },
 });
 
-// Resolve from outside the workflow:
-const token = approval.tokenFromExecutionId(execId);
-yield * approval.succeed({ token, value: "approved" });
+// Typed properties on the actor
+ProcessOrder.Approval.token; // Effect<Token, never, WorkflowInstance>
+ProcessOrder.Approval.await; // Effect<string, ApprovalError, ...>
+ProcessOrder.Approval.succeed({ token, value }); // Effect<void, never, WorkflowEngine>
+ProcessOrder.Approval.fail({ token, error }); // Effect<void, never, WorkflowEngine>
+ProcessOrder.Approval.tokenFromExecutionId(id); // Token (pure)
 
-// Or fail it:
-yield * approval.fail({ token, error: new ApprovalError({ reason: "denied" }) });
+// Inside the workflow handler — reference the actor's signals directly
+Actor.toLayer(ProcessOrder, (payload, step) =>
+  Effect.gen(function* () {
+    const token = yield* ProcessOrder.Approval.token;
+    yield* step.run("send-email", { do: sendEmail({ token }), success: Schema.Void });
+    const decision = yield* ProcessOrder.Approval.await;
+  }),
+);
+
+// External resolution
+const token = ProcessOrder.Approval.tokenFromExecutionId(execId);
+yield * ProcessOrder.Approval.succeed({ token, value: "approved" });
 ```
 
-The same signal can be created inside the handler via `step.signal(...)` and awaited with `signal.await`.
+Signal names must not collide with reserved workflow properties (`Run`, `actor`, `peek`, etc.).
 
 ## Step DSL
 
@@ -200,22 +218,6 @@ const charge =
 ```ts
 yield * step.sleep("cooldown", "30 minutes");
 yield * step.sleep("delay", "5 seconds", { inMemoryThreshold: "2 seconds" });
-```
-
-### step.signal — durable deferred
-
-```ts
-const approval = step.signal({
-  name: "Approval",
-  success: Schema.String,
-  error: ApprovalError,
-});
-
-// Inside the workflow — await resolution
-const result = yield * approval.await;
-
-// Or pipe an effect into the signal
-const result = yield * approval.into(someEffect);
 ```
 
 ### step.race — first activity to complete
@@ -600,7 +602,7 @@ Import from `effect-encore/v3`. Same API, different import paths:
 | Custom `RpcMiddleware` for spans                                    | Not needed — cluster creates spans automatically           |
 | `Entity.makeTestClient` + manual RpcClient mapping                  | `Actor.toTestLayer(actor, handlers)` — returns typed Layer |
 | `Workflow.make` + manual client wiring                              | `Actor.fromWorkflow(name, def)` — unified call site        |
-| `Activity`/`DurableDeferred`/`DurableClock` direct imports          | `step.run`/`step.signal`/`step.sleep` in handler           |
+| `Activity`/`DurableDeferred`/`DurableClock` direct imports          | `step.run`/`step.sleep` + declarative `signals` on def     |
 
 ### From effect-encore v1 (Actor.make era)
 

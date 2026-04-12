@@ -269,43 +269,64 @@ describe("WorkflowDef annotations", () => {
   });
 });
 
-describe("signal()", () => {
-  test("creates WorkflowSignal on actor", () => {
-    const sig = Greeter.signal({ name: "approval", success: Schema.String });
-    expect(sig.name).toBe("approval");
-    expect(sig.deferred).toBeDefined();
-    expect(sig.await).toBeDefined();
-    expect(sig.token).toBeDefined();
-    expect(sig.succeed).toBeDefined();
-    expect(sig.fail).toBeDefined();
-    expect(sig.failCause).toBeDefined();
-    expect(sig.done).toBeDefined();
-    expect(sig.into).toBeDefined();
-    expect(sig.tokenFromExecutionId).toBeDefined();
-    expect(sig.tokenFromPayload).toBeDefined();
-  });
-});
-
-// ── Signal round-trip inside workflow ─────────────────────────────────
+// ── Declarative signals ─────────────────────────────────────────────
 
 const SignalWorkflow = Actor.fromWorkflow("SignalWorkflow", {
   payload: { id: Schema.String },
   success: Schema.String,
   idempotencyKey: (p: { id: string }) => p.id,
+  signals: {
+    Approval: { success: Schema.String },
+    Cancel: {},
+  },
 });
 
-const SignalTest = Actor.toTestLayer(SignalWorkflow, (_payload, step) =>
+describe("declarative signals", () => {
+  test("signal properties exist on actor", () => {
+    expect(SignalWorkflow.Approval).toBeDefined();
+    expect(SignalWorkflow.Approval.name).toBe("Approval");
+    expect(SignalWorkflow.Approval.deferred).toBeDefined();
+    expect(SignalWorkflow.Approval.await).toBeDefined();
+    expect(SignalWorkflow.Approval.token).toBeDefined();
+    expect(SignalWorkflow.Approval.succeed).toBeDefined();
+    expect(SignalWorkflow.Approval.fail).toBeDefined();
+    expect(SignalWorkflow.Approval.failCause).toBeDefined();
+    expect(SignalWorkflow.Approval.done).toBeDefined();
+    expect(SignalWorkflow.Approval.into).toBeDefined();
+    expect(SignalWorkflow.Approval.tokenFromExecutionId).toBeDefined();
+    expect(SignalWorkflow.Approval.tokenFromPayload).toBeDefined();
+  });
+
+  test("void signal defaults work", () => {
+    expect(SignalWorkflow.Cancel).toBeDefined();
+    expect(SignalWorkflow.Cancel.name).toBe("Cancel");
+    expect(SignalWorkflow.Cancel.await).toBeDefined();
+  });
+
+  test("collision guard throws for reserved signal names", () => {
+    expect(() =>
+      Actor.fromWorkflow("BadSignal", {
+        payload: { id: Schema.String },
+        idempotencyKey: (p: { id: string }) => p.id,
+        signals: { Run: {} },
+      }),
+    ).toThrow(/collides with reserved/);
+  });
+});
+
+// ── Signal round-trip inside workflow ─────────────────────────────────
+
+const SignalTest = Actor.toTestLayer(SignalWorkflow, (_payload, _step) =>
   Effect.gen(function* () {
-    const approval = step.signal({ name: "approval", success: Schema.String });
-    const token = yield* approval.token;
+    const token = yield* SignalWorkflow.Approval.token;
     // Resolve immediately from inside the handler for testing
-    yield* approval.succeed({ token, value: "approved" });
-    const result = yield* approval.await;
+    yield* SignalWorkflow.Approval.succeed({ token, value: "approved" });
+    const result = yield* SignalWorkflow.Approval.await;
     return `got: ${result}`;
   }),
 );
 
-describe("step.signal — inside handler", () => {
+describe("signal — inside handler", () => {
   it.scopedLive.layer(SignalTest)("signal token + succeed + await round-trip", () =>
     Effect.gen(function* () {
       const ref = yield* SignalWorkflow.actor();

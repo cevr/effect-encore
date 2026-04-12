@@ -18,6 +18,8 @@ export type {
   WorkflowSignal,
   WorkflowSignalToken,
   StepRunOptions,
+  SignalDef,
+  SignalDefs,
 } from "./step.js";
 export type { ExecId, PeekResult } from "./receipt.js";
 export {

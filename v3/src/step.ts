@@ -58,6 +58,18 @@ export interface WorkflowSignal<
   >;
 }
 
+// ── Signal definition types ────────────────────────────────────────────
+
+export interface SignalDef<
+  S extends Schema.Schema.Any = typeof Schema.Void,
+  E extends Schema.Schema.All = typeof Schema.Never,
+> {
+  readonly success?: S;
+  readonly error?: E;
+}
+
+export type SignalDefs = Record<string, SignalDef<Schema.Schema.Any, Schema.Schema.All>>;
+
 // ── Step run options ────────────────────────────────────────────────────
 
 export interface StepRunOptions<
@@ -76,11 +88,7 @@ export interface StepRunOptions<
 
 // ── WorkflowStepContext ─────────────────────────────────────────────────
 
-export interface WorkflowStepContext<
-  _Name extends string,
-  Payload extends UpstreamWorkflow.AnyStructSchema,
-  WorkflowError extends Schema.Schema.All,
-> {
+export interface WorkflowStepContext<WorkflowError extends Schema.Schema.All> {
   readonly executionId: string;
 
   readonly run: {
@@ -139,15 +147,6 @@ export interface WorkflowStepContext<
     options?: { readonly inMemoryThreshold?: Duration.DurationInput },
   ) => Effect.Effect<void, never, WorkflowEngine | WorkflowInstance>;
 
-  readonly signal: <
-    S extends Schema.Schema.Any = typeof Schema.Void,
-    E extends Schema.Schema.All = typeof Schema.Never,
-  >(options: {
-    readonly name: string;
-    readonly success?: S;
-    readonly error?: E;
-  }) => WorkflowSignal<Payload, S, E>;
-
   readonly race: <
     const Steps extends Arr.NonEmptyReadonlyArray<{
       readonly name: string;
@@ -166,12 +165,14 @@ export interface WorkflowStepContext<
     | WorkflowInstance
   >;
 
-  readonly raceSignals: <S extends Schema.Schema.Any, E extends Schema.Schema.All>(options: {
-    readonly name: string;
-    readonly success: S;
-    readonly error: E;
-    readonly effects: Arr.NonEmptyReadonlyArray<Effect.Effect<S["Type"], E["Type"], any>>;
-  }) => Effect.Effect<
+  readonly raceSignals: <S extends Schema.Schema.Any, E extends Schema.Schema.All>(
+    name: string,
+    options: {
+      readonly success: S;
+      readonly error: E;
+      readonly effects: Arr.NonEmptyReadonlyArray<Effect.Effect<S["Type"], E["Type"], any>>;
+    },
+  ) => Effect.Effect<
     S["Type"],
     E["Type"],
     WorkflowEngine | WorkflowInstance | S["Context"] | E["Context"]
@@ -203,15 +204,16 @@ export const makeSignal = <
   E extends Schema.Schema.All = typeof Schema.Never,
 >(
   wf: UpstreamWorkflow.Workflow<string, Payload, Schema.Schema.Any, Schema.Schema.All>,
-  options: { readonly name: string; readonly success?: S; readonly error?: E },
+  name: string,
+  options?: { readonly success?: S; readonly error?: E },
 ): WorkflowSignal<Payload, S, E> => {
-  const deferred = UpstreamDeferred.make(options.name, {
-    success: options.success,
-    error: options.error,
+  const deferred = UpstreamDeferred.make(name, {
+    success: options?.success,
+    error: options?.error,
   });
 
   return {
-    name: options.name,
+    name,
     deferred,
     await: UpstreamDeferred.await(deferred),
     token: UpstreamDeferred.token(deferred),
@@ -236,7 +238,7 @@ export const makeStepContext = <
 >(
   wf: UpstreamWorkflow.Workflow<Name, Payload, Schema.Schema.Any, WorkflowError>,
   executionId: string,
-): WorkflowStepContext<Name, Payload, WorkflowError> => {
+): WorkflowStepContext<WorkflowError> => {
   const runImpl = (id: string, second: unknown, third?: unknown): Effect.Effect<any, any, any> => {
     // Arity 2 + second is plain object with `do` → full options
     if (second !== null && typeof second === "object" && "do" in (second as object)) {
@@ -295,7 +297,7 @@ export const makeStepContext = <
   return {
     executionId,
 
-    run: runImpl as WorkflowStepContext<Name, Payload, WorkflowError>["run"],
+    run: runImpl as WorkflowStepContext<WorkflowError>["run"],
 
     sleep: (id, duration, options) =>
       UpstreamClock.sleep({
@@ -303,8 +305,6 @@ export const makeStepContext = <
         duration,
         inMemoryThreshold: options?.inMemoryThreshold,
       }),
-
-    signal: (options) => makeSignal(wf as any, options),
 
     race: (id, steps) => {
       const activities = steps.map((s) =>
@@ -321,7 +321,7 @@ export const makeStepContext = <
       );
     },
 
-    raceSignals: (options) => UpstreamDeferred.raceAll(options as any),
+    raceSignals: (name, options) => UpstreamDeferred.raceAll({ name, ...options } as any),
 
     idempotencyKey: (name, options) =>
       Effect.gen(function* () {

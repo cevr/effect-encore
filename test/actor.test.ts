@@ -129,14 +129,6 @@ describe("Actor.fromEntity", () => {
     ).toThrow(/collides with reserved/);
   });
 
-  test("throws on reserved operation name 'signal'", () => {
-    expect(() =>
-      Actor.fromEntity("Bad", {
-        signal: { primaryKey: () => "x" },
-      } as never),
-    ).toThrow(/collides with reserved/);
-  });
-
   test("every non-constructor property on ActorObject is in RESERVED_KEYS", () => {
     const operationNames = new Set(Object.keys(Counter._meta.definitions));
     const allKeys = Object.keys(Counter);

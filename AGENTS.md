@@ -1,6 +1,6 @@
 # effect-encore
 
-Thin protocol layer over `@effect/cluster` — Erlang gen_server semantics for Effect TypeScript.
+Declarative actors and durable workflows for `@effect/cluster`.
 
 ## Commands
 

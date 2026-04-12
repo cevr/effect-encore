@@ -42,6 +42,10 @@ const ProcessOrder = Actor.fromWorkflow("ProcessOrder", {
   success: OrderResult,
   error: OrderError,
   idempotencyKey: (p) => p.orderId,
+  signals: {
+    ManagerApproval: { success: ApprovalDecision },
+    Cancel: {},
+  },
   captureDefects: true,
   suspendOnFailure: false,
 });
@@ -125,14 +129,13 @@ const ProcessOrderLive = Actor.toLayer(ProcessOrder, (payload, step) =>
     // step.sleep — durable sleep
     yield* step.sleep("cooling-period", "5 minutes");
 
-    // step.signal — await external input
-    const approval = step.signal({ name: "manager-approval", success: ApprovalDecision });
-    const token = yield* approval.token;
+    // signal — await external input (defined on WorkflowDef.signals)
+    const token = yield* ProcessOrder.ManagerApproval.token;
     yield* step.run("send-approval-email", {
       do: sendApprovalEmail({ token }),
       success: Schema.Void,
     });
-    const decision = yield* approval.await;
+    const decision = yield* ProcessOrder.ManagerApproval.await;
 
     // step.race — first activity to complete wins
     const winner = yield* step.race("fast-path", [
@@ -150,16 +153,15 @@ const ProcessOrderLive = Actor.toLayer(ProcessOrder, (payload, step) =>
 
 ### Signal — external resolution
 
+Signals are declared on `WorkflowDef.signals` and become typed properties on the actor:
+
 ```ts
-// Define once on the actor
-const approval = ProcessOrder.signal({ name: "manager-approval", success: ApprovalDecision });
+// Defined on the workflow (see above)
+// signals: { ManagerApproval: { success: ApprovalDecision } }
 
 // Resolve from outside the workflow
-export const approve = (token: WorkflowSignalToken, value: typeof ApprovalDecision.Type) =>
-  approval.succeed({ token, value });
-
-// Get a token from a known execution
-const token = approval.tokenFromExecutionId(executionId);
+const token = ProcessOrder.ManagerApproval.tokenFromExecutionId(executionId);
+yield * ProcessOrder.ManagerApproval.succeed({ token, value: decision });
 ```
 
 ### Producer-Only (Client Layer)
