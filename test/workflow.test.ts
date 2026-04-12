@@ -166,10 +166,6 @@ describe("Actor.fromWorkflow — lifecycle", () => {
   test("executionId method exists", () => {
     expect(ProcessOrder.executionId).toBeDefined();
   });
-
-  test("withCompensation method exists", () => {
-    expect(ProcessOrder.withCompensation).toBeDefined();
-  });
 });
 
 // ── Idempotency ─────────────────────────────────────────────────────────

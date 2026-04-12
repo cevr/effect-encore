@@ -277,6 +277,10 @@ export type ActorObject<
     PersistenceError | MalformedMessage,
     MessageStorage.MessageStorage | Sharding.Sharding
   >;
+  readonly executionId: <V extends OperationUnion<Name, Defs>>(
+    entityId: string,
+    op: V,
+  ) => ExecId<OperationOutput<V>, OperationError<V>>;
   readonly interrupt: (entityId: string) => Effect.Effect<void, never, Sharding.Sharding>;
   readonly $is: <Tag extends keyof Defs & string>(
     tag: Tag,
@@ -596,6 +600,18 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
       MessageStorage.MessageStorage | Sharding.Sharding
     >;
 
+  const executionIdFn = (
+    entityId: string,
+    op: { readonly _tag: string; readonly [key: string]: unknown },
+  ) => {
+    const tag = op["_tag"];
+    const def = definitions[tag] as OperationDef | undefined;
+    const pkFn = def?.["primaryKey"] as ((p: unknown) => string) | undefined;
+    const pkInput = def?.payload && isOpaquePayload(def.payload) ? op["_payload"] : op;
+    const primaryKey = pkFn ? pkFn(pkInput) : tag;
+    return makeExecId(`${entityId}\x00${tag}\x00${primaryKey}`);
+  };
+
   const interruptFn = (_entityId: string) =>
     Effect.die(
       new Error(
@@ -610,6 +626,7 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     actor: actorFn,
     peek: peekFn,
     watch: watchFn,
+    executionId: executionIdFn,
     interrupt: interruptFn,
     $is,
     ...constructors,
@@ -907,12 +924,6 @@ export type WorkflowActorObject<
   readonly interrupt: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   readonly resume: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   readonly executionId: (payload: WorkflowPayloadType<Payload>) => Effect.Effect<string>;
-  readonly withCompensation: UpstreamWorkflow.Workflow<
-    Name,
-    Schema.Struct<Payload>,
-    Success,
-    Error
-  >["withCompensation"];
   readonly $is: (tag: "Run") => (value: unknown) => boolean;
 };
 
@@ -1002,12 +1013,6 @@ const fromWorkflow = <
     interrupt: (executionId: string) => wf.interrupt(executionId),
     resume: (executionId: string) => wf.resume(executionId),
     executionId: (payload: WorkflowPayloadType<Payload>) => wf.executionId(payload as never),
-    withCompensation: wf.withCompensation.bind(wf) as WorkflowActorObject<
-      Name,
-      Payload,
-      Success,
-      Error
-    >["withCompensation"],
     $is,
   } as WorkflowActorObject<Name, Payload, Success, Error>;
 };

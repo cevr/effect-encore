@@ -185,6 +185,11 @@ describe("Actor.toTestLayer", () => {
       expect(result._tag).toBe("Failure");
     }),
   );
+
+  test("executionId computes ExecId without executing", () => {
+    const execId = Counter.executionId("my-entity", Counter.Increment({ amount: 5 }));
+    expect(String(execId)).toBe("my-entity\x00Increment\x005");
+  });
 });
 
 describe("scalar payload", () => {
