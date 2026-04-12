@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.4.4
+
+### Patch Changes
+
+- [`6631121`](https://github.com/cevr/effect-encore/commit/66311212259ab5275b8d8fa44e4f5ad59c6a77e4) Thanks [@cevr](https://github.com/cevr)! - Use layerPassthrough polyfill in v3 build — Layer.passthrough was removed from Effect 3.x runtime despite existing in type definitions.
+
 ## 0.4.3
 
 ### Patch Changes
