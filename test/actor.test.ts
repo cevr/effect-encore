@@ -74,7 +74,9 @@ describe("Actor.fromEntity", () => {
   test("operations without explicit persisted: true use cluster default", () => {
     const rpc = Counter._meta.entity.protocol.requests.get("Increment")!;
     const result = Context.getOption(rpc.annotations, ClusterSchema.Persisted);
-    expect(Counter._meta.definitions["Increment"]!.persisted).toBeUndefined();
+    expect(
+      (Counter._meta.definitions["Increment"] as Record<string, unknown>)["persisted"],
+    ).toBeUndefined();
     expect(result._tag).toBe("Some");
   });
 
@@ -150,7 +152,7 @@ describe("Actor.toTestLayer", () => {
       const ref = yield* Counter.actor("counter-4");
       const execId = yield* ref.cast(Counter.Increment({ amount: 7 }));
       expect(typeof execId).toBe("string");
-      expect(execId).toBe("counter-4:Increment:7");
+      expect(String(execId)).toBe("counter-4:Increment:7");
     }),
   );
 });

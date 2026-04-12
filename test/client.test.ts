@@ -120,7 +120,7 @@ describe("Ref.cast", () => {
       const ref = yield* CastActor.actor("c-1");
       const execId = yield* ref.cast(CastActor.Process({ input: "data" }));
       expect(typeof execId).toBe("string");
-      expect(execId).toBe("c-1:Process:data");
+      expect(String(execId)).toBe("c-1:Process:data");
     }),
   );
 
@@ -128,7 +128,7 @@ describe("Ref.cast", () => {
     Effect.gen(function* () {
       const ref = yield* CastActor.actor("c-2");
       const execId = yield* ref.cast(CastActor.Process({ input: "mykey" }));
-      expect(execId).toBe("c-2:Process:mykey");
+      expect(String(execId)).toBe("c-2:Process:mykey");
     }),
   );
 
@@ -137,7 +137,7 @@ describe("Ref.cast", () => {
       const ref = yield* CastActor.actor("c-persist-1");
       const execId = yield* ref.cast(CastActor.Process({ input: "test" }));
       expect(typeof execId).toBe("string");
-      expect(execId).toBe("c-persist-1:Process:test");
+      expect(String(execId)).toBe("c-persist-1:Process:test");
     }),
   );
 });

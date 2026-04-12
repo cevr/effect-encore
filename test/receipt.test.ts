@@ -18,7 +18,7 @@ describe("ExecId", () => {
   test("is a branded string", () => {
     const execId = makeExecId("Process:my-key");
     expect(typeof execId).toBe("string");
-    expect(execId).toBe("Process:my-key");
+    expect(String(execId)).toBe("Process:my-key");
   });
 
   test("duplicate keys produce identical strings", () => {

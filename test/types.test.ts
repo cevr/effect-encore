@@ -1,6 +1,6 @@
 import { describe, test } from "effect-bun-test";
 import { Effect, Schema } from "effect";
-import type { Stream } from "effect";
+import type { Duration, Stream } from "effect";
 import { Actor } from "../src/index.js";
 import type { ExecId, PeekResult } from "../src/index.js";
 
@@ -85,7 +85,7 @@ describe("type-level tests", () => {
   test("entity watch accepts ExecId and returns typed Stream of PeekResult", () => {
     const _fn: <S, E>(
       execId: ExecId<S, E>,
-      options?: { readonly interval?: unknown },
+      options?: { readonly interval?: Duration.Input },
     ) => Stream.Stream<PeekResult<S, E>, unknown, unknown> = Order.watch;
     void _fn;
   });

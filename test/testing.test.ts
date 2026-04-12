@@ -53,7 +53,7 @@ describe("Actor.toTestLayer", () => {
       const ref = yield* Echo.actor("test-2");
       const execId = yield* ref.cast(Echo.Fire({ x: 7 }));
       expect(typeof execId).toBe("string");
-      expect(execId).toBe("test-2:Fire:7");
+      expect(String(execId)).toBe("test-2:Fire:7");
     }));
 
   it.scopedLive("preserves side-effect observation", () =>

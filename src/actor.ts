@@ -531,6 +531,20 @@ function toLayer<
   /* eslint-disable typescript-eslint/no-explicit-any -- overload requires any */
 ): Layer.Layer<ActorClientService<Name, Defs>, never, any>;
 
+// Workflow overload
+function toLayer<
+  Name extends string,
+  Payload extends Schema.Struct.Fields,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+>(
+  actor: WorkflowActorObject<Name, Payload, Success, Error>,
+  handler: (
+    payload: WorkflowPayloadType<Payload>,
+    executionId: string,
+  ) => Effect.Effect<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>,
+): Layer.Layer<ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>>, never, any>;
+
 function toLayer(
   actor: any,
   build?: unknown,
@@ -574,12 +588,39 @@ function toLayer(
 
 // ── Actor.toTestLayer ─────────────────────────────────────────────────────
 
-/* eslint-disable typescript-eslint/no-explicit-any -- toTestLayer needs dynamic dispatch for workflow */
-const toTestLayer = (
+// Entity overload
+function toTestLayer<
+  Name extends string,
+  Defs extends OperationDefs,
+  Rpcs extends Rpc.Any = DefRpcs<Defs>,
+  RX = never,
+>(
+  actor: ActorObject<Name, Defs, Rpcs>,
+  build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
+  options?: HandlerOptions,
+): Layer.Layer<ActorClientService<Name, Defs>>;
+
+// Workflow overload
+function toTestLayer<
+  Name extends string,
+  Payload extends Schema.Struct.Fields,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+>(
+  actor: WorkflowActorObject<Name, Payload, Success, Error>,
+  handler: (
+    payload: WorkflowPayloadType<Payload>,
+    executionId: string,
+  ) => Effect.Effect<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>,
+): Layer.Layer<ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>> | WorkflowEngine>;
+
+/* eslint-disable typescript-eslint/no-explicit-any -- overload implementation */
+function toTestLayer(
   actor: any,
   build: unknown,
   options?: HandlerOptions,
-): Layer.Layer<any, any, any> => {
+): Layer.Layer<any, any, any> {
+  /* eslint-enable typescript-eslint/no-explicit-any */
   if (isWorkflowActor(actor)) {
     return workflowToTestLayer(actor, build as Function);
   }
@@ -597,7 +638,7 @@ const toTestLayer = (
     Effect.map(
       Entity.makeTestClient(actor._meta.entity, handlerLayer as never),
       (makeClient: Function) =>
-        (entityId: string): Effect.Effect<any> =>
+        (entityId: string): Effect.Effect<ActorRef<string, OperationDefs>> =>
           Effect.map(
             makeClient(entityId) as Effect.Effect<RpcClient.RpcClient<Rpc.Any, never>>,
             (rpcClient) =>
@@ -605,8 +646,7 @@ const toTestLayer = (
           ),
     ),
   );
-};
-/* eslint-enable typescript-eslint/no-explicit-any */
+}
 
 // ── Transform handlers from operation-first to request-first ───────────────
 
@@ -678,13 +718,28 @@ export interface WorkflowDef<
   }) => string;
 }
 
-// ── WorkflowActorObject ───────────────────────────────────────────────────
+// ── Workflow typed defs ───────────────────────────────────────────────────
 
 type WorkflowPayloadType<Payload extends Schema.Struct.Fields> = {
   readonly [K in keyof Payload]: Schema.Schema.Type<
     Payload[K] extends Schema.Top ? Payload[K] : never
   >;
 };
+
+type WorkflowRunDefs<
+  Payload extends Schema.Struct.Fields,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+> = {
+  readonly Run: {
+    readonly payload: Schema.Struct<Payload>;
+    readonly success: Success;
+    readonly error: Error;
+    readonly primaryKey: (payload: never) => string;
+  };
+};
+
+// ── WorkflowActorObject ───────────────────────────────────────────────────
 
 export type WorkflowActorObject<
   Name extends string,
@@ -698,8 +753,8 @@ export type WorkflowActorObject<
     readonly workflow: UpstreamWorkflow.Workflow<Name, Schema.Struct<Payload>, Success, Error>;
   };
   readonly Context: Context.Service<
-    ActorClientService<Name, { readonly Run: OperationDef }>,
-    ActorClientFactory<Name, { readonly Run: OperationDef }>
+    ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>>,
+    ActorClientFactory<Name, WorkflowRunDefs<Payload, Success, Error>>
   >;
   readonly Run: (
     payload: WorkflowPayloadType<Payload>,
@@ -708,9 +763,9 @@ export type WorkflowActorObject<
   readonly actor: (
     entityId: string,
   ) => Effect.Effect<
-    ActorRef<Name, { readonly Run: OperationDef }>,
+    ActorRef<Name, WorkflowRunDefs<Payload, Success, Error>>,
     never,
-    ActorClientService<Name, { readonly Run: OperationDef }>
+    ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>>
   >;
   readonly peek: <S, E>(
     execId: ExecId<S, E>,
@@ -757,7 +812,7 @@ const fromWorkflow = <
     Error
   >;
 
-  type WfDefs = { readonly Run: OperationDef };
+  type WfDefs = WorkflowRunDefs<Payload, Success, Error>;
 
   const contextTag = Context.Service<
     ActorClientService<Name, WfDefs>,
