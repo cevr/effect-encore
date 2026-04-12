@@ -1,5 +1,17 @@
 # effect-encore
 
+## 0.5.0
+
+### Minor Changes
+
+- [`ca3726f`](https://github.com/cevr/effect-encore/commit/ca3726f4e77bb3efaa7316891e62c25288ff527e) Thanks [@cevr](https://github.com/cevr)! - Add `flush` and `redeliver` methods to entity ActorObject.
+  - `actor.flush(actorId)` — delete all messages and replies via `MessageStorage.clearAddress`
+  - `actor.redeliver(actorId)` — clear read leases so messages re-enter polling via `MessageStorage.resetAddress`
+
+  Both require `MessageStorage | Sharding` in the Effect context (same as `peek`/`watch`).
+
+  Fix shard group derivation in `peek`/`flush`/`redeliver` to use `entity.getShardGroup` instead of actor name. The previous implementation computed wrong shard IDs (e.g. `"VectorUpdate:1"` instead of `"default:1"`), which would have caused `resetAddress` to silently no-op.
+
 ## 0.4.4
 
 ### Patch Changes
