@@ -252,14 +252,14 @@ export interface ActorMeta<
 
 declare const ActorClientServiceId: unique symbol;
 
-interface ActorClientService<Name extends string, Defs extends OperationDefs> {
+export interface ActorClientService<Name extends string, Defs extends OperationDefs> {
   readonly [ActorClientServiceId]: {
     readonly name: Name;
     readonly defs: Defs;
   };
 }
 
-type ActorClientFactory<Name extends string, Defs extends OperationDefs> = (
+export type ActorClientFactory<Name extends string, Defs extends OperationDefs> = (
   entityId: string,
 ) => Effect.Effect<ActorRef<Name, Defs>>;
 

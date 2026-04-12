@@ -1,6 +1,8 @@
 export { Actor, fromRpcs, withProtocol } from "./actor.js";
 export type {
   ActorObject,
+  ActorClientService,
+  ActorClientFactory,
   ActorMeta,
   ActorRef,
   OperationBrand,
