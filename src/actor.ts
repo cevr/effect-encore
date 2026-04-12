@@ -30,6 +30,7 @@ import {
   Stream,
 } from "effect";
 import type { DateTime, Scope } from "effect";
+import { dual } from "effect/Function";
 import type { ExecId, PeekResult } from "./receipt.js";
 import {
   Defect,
@@ -1083,21 +1084,47 @@ export const fromRpcs = <const Name extends string, const Rpcs extends ReadonlyA
 
 // ── Protocol transform ────────────────────────────────────────────────────
 
-/* eslint-disable typescript-eslint/no-explicit-any -- variance bypass for Entity<in out Rpcs> */
-export const withProtocol =
-  <RpcsOut extends Rpc.Any>(
-    transform: (protocol: RpcGroup.RpcGroup<any>) => RpcGroup.RpcGroup<RpcsOut>,
-  ): (<Name extends string, Defs extends OperationDefs>(
-    actor: ActorObject<Name, Defs, any>,
-  ) => ActorObject<Name, Defs, RpcsOut>) =>
-  (actor) => {
-    const newEntity = Entity.fromRpcGroup(
-      actor._meta.name,
-      transform(actor._meta.entity.protocol as any),
-    );
-    return { ...actor, _meta: { ...actor._meta, entity: newEntity } } as any;
-  };
-/* eslint-enable typescript-eslint/no-explicit-any */
+type WithProtocolDataLast = {
+  (
+    transform: <Rpcs extends Rpc.Any>(protocol: RpcGroup.RpcGroup<Rpcs>) => RpcGroup.RpcGroup<Rpcs>,
+  ): <Name extends string, Defs extends OperationDefs, Rpcs extends Rpc.Any>(
+    actor: ActorObject<Name, Defs, Rpcs>,
+  ) => ActorObject<Name, Defs, Rpcs>;
+  <RpcsIn extends Rpc.Any, RpcsOut extends Rpc.Any>(
+    transform: (protocol: RpcGroup.RpcGroup<RpcsIn>) => RpcGroup.RpcGroup<RpcsOut>,
+  ): <Name extends string, Defs extends OperationDefs>(
+    actor: ActorObject<Name, Defs, RpcsIn>,
+  ) => ActorObject<Name, Defs, RpcsOut>;
+};
+
+type WithProtocolDataFirst = <
+  Name extends string,
+  Defs extends OperationDefs,
+  RpcsIn extends Rpc.Any,
+  RpcsOut extends Rpc.Any,
+>(
+  actor: ActorObject<Name, Defs, RpcsIn>,
+  transform: (protocol: RpcGroup.RpcGroup<RpcsIn>) => RpcGroup.RpcGroup<RpcsOut>,
+) => ActorObject<Name, Defs, RpcsOut>;
+
+type WithProtocol = WithProtocolDataLast & WithProtocolDataFirst;
+
+const withProtocolImpl = <
+  Name extends string,
+  Defs extends OperationDefs,
+  RpcsIn extends Rpc.Any,
+  RpcsOut extends Rpc.Any,
+>(
+  actor: ActorObject<Name, Defs, RpcsIn>,
+  transform: (protocol: RpcGroup.RpcGroup<RpcsIn>) => RpcGroup.RpcGroup<RpcsOut>,
+): ActorObject<Name, Defs, RpcsOut> => {
+  const newEntity = Entity.fromRpcGroup(actor._meta.name, transform(actor._meta.entity.protocol));
+  return Object.assign(Object.create(Pipeable.Prototype), actor, {
+    _meta: { ...actor._meta, entity: newEntity },
+  }) as ActorObject<Name, Defs, RpcsOut>;
+};
+
+export const withProtocol: WithProtocol = dual(2, withProtocolImpl);
 
 // ── Public API ─────────────────────────────────────────────────────────────
 

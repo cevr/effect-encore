@@ -386,4 +386,12 @@ describe("Actor.withProtocol", () => {
     expect(transformed._tag).toBe("ActorObject");
     expect(transformed._meta.name).toBe("Counter");
   });
+
+  test("data-first form works", () => {
+    const transformed = Actor.withProtocol(Counter, (protocol) => protocol);
+
+    expect(transformed._tag).toBe("ActorObject");
+    expect(transformed._meta.name).toBe("Counter");
+    expect(transformed._meta.entity).not.toBe(Counter._meta.entity);
+  });
 });

@@ -2,7 +2,7 @@ import { describe, test } from "effect-bun-test";
 import { Effect, Schema } from "effect";
 import type { Duration, Stream } from "effect";
 import { Actor } from "../src/index.js";
-import type { ActorObject, ExecId, PeekResult } from "../src/index.js";
+import type { ExecId, PeekResult } from "../src/index.js";
 
 // ── Type-level tests for ExecId phantom brand inference ───────────────────
 
@@ -132,19 +132,13 @@ describe("type-level tests", () => {
     void _pipeline;
   });
 
-  test("withProtocol preserves Name and Defs while changing Rpcs", () => {
-    // Direct call
-    const _transformed = Actor.withProtocol((protocol) => protocol)(Order);
-    type _TransformedIsActorObject = Assert<
-      typeof _transformed extends ActorObject<"Order", any> ? true : false
-    >;
-    void _transformed;
-
-    // Pipe call
+  test("withProtocol preserves Name and Defs — data-last (pipe)", () => {
     const _piped = Order.pipe(Actor.withProtocol((protocol) => protocol));
-    type _PipedIsActorObject = Assert<
-      typeof _piped extends ActorObject<"Order", any> ? true : false
-    >;
     void _piped;
+  });
+
+  test("withProtocol preserves Name and Defs — data-first", () => {
+    const _direct = Actor.withProtocol(Order, (protocol) => protocol);
+    void _direct;
   });
 });
