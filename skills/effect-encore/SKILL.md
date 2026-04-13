@@ -79,7 +79,7 @@ Counter.GetCount(); // zero-input, still callable
 | `Counter._meta.entity`      | `Entity`        | Underlying cluster Entity                        |
 | `Counter._meta.definitions` | Record          | Raw operation definitions                        |
 | `Counter.Context`           | Context tag     | DI tag for client factory                        |
-| `Counter.actor(id)`         | Method          | `yield* Counter.actor("id")` → `ActorRef`        |
+| `Counter.ref(id)`           | Method          | `yield* Counter.ref("id")` → `ActorRef`          |
 | `Counter.peek(execId)`      | Method          | One-shot status check                            |
 | `Counter.watch(execId)`     | Method          | Polling stream of status changes                 |
 | `Counter.waitFor(execId)`   | Method          | Poll until terminal (or custom filter)           |
@@ -106,7 +106,7 @@ ProcessOrder.type; // "Workflow/ProcessOrder"
 
 ### Reserved operation names
 
-`_tag`, `_meta`, `$is`, `Context`, `actor`, `name`, `type`, `of`, `peek`, `watch`, `interrupt`, `executionId`, `flush`, `redeliver` — compile-time type guard + runtime check.
+`_tag`, `_meta`, `$is`, `Context`, `ref`, `name`, `type`, `of`, `peek`, `watch`, `interrupt`, `executionId`, `flush`, `redeliver` — compile-time type guard + runtime check.
 
 ### Pre-built Schema.Class payload
 
@@ -204,7 +204,7 @@ const token = ProcessOrder.Approval.tokenFromExecutionId(execId);
 yield * ProcessOrder.Approval.succeed({ token, value: "approved" });
 ```
 
-Signal names must not collide with reserved workflow properties (`Run`, `actor`, `peek`, etc.).
+Signal names must not collide with reserved workflow properties (`Run`, `ref`, `peek`, etc.).
 
 ## Step DSL
 
@@ -386,7 +386,7 @@ Handlers receive `{ operation, request }`:
 ### actor(id) — get a ref (entity)
 
 ```ts
-const ref = yield * Counter.actor("counter-1");
+const ref = yield * Counter.ref("counter-1");
 ```
 
 Requires `Counter.Context` in the environment (provided by `Actor.toLayer` or `Actor.toTestLayer`).
@@ -394,7 +394,7 @@ Requires `Counter.Context` in the environment (provided by `Actor.toLayer` or `A
 ### actor() — get a ref (workflow)
 
 ```ts
-const ref = yield * ProcessOrder.actor();
+const ref = yield * ProcessOrder.ref();
 ```
 
 Workflow actors are nullary — no entity ID needed.
@@ -506,7 +506,7 @@ const test = it.scopedLive.layer(CounterTest);
 
 test("increments", () =>
   Effect.gen(function* () {
-    const ref = yield* Counter.actor("counter-1");
+    const ref = yield* Counter.ref("counter-1");
     const result = yield* ref.execute(Counter.Increment({ amount: 5 }));
     expect(result).toBe(6);
   }));
@@ -523,7 +523,7 @@ const GreeterTest = Actor.toTestLayer(Greeter, (payload, step) =>
 
 it.scopedLive.layer(GreeterTest)("greets", () =>
   Effect.gen(function* () {
-    const ref = yield* Greeter.actor();
+    const ref = yield* Greeter.ref();
     const result = yield* ref.execute(Greeter.Run({ name: "world" }));
     expect(result).toBe("hello world");
   }),
@@ -558,7 +558,7 @@ it.scopedLive("dynamic test", () =>
     );
 
     return yield* Effect.gen(function* () {
-      const ref = yield* Tracker.actor("t-1");
+      const ref = yield* Tracker.ref("t-1");
       const result = yield* ref.execute(Tracker.Track({ item: "widget" }));
       expect(result).toBe("tracked: widget");
     }).pipe(Effect.provide(TrackerTest));

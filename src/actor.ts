@@ -77,7 +77,7 @@ type ReservedKeys =
   | "_meta"
   | "$is"
   | "Context"
-  | "actor"
+  | "ref"
   | "name"
   | "type"
   | "of"
@@ -98,7 +98,7 @@ const RESERVED_KEYS = new Set<string>([
   "_meta",
   "$is",
   "Context",
-  "actor",
+  "ref",
   "name",
   "type",
   "of",
@@ -297,7 +297,7 @@ export type EntityActor<
       ActorClientService<Name, Defs>,
       ActorClientFactory<Name, Defs>
     >;
-    readonly actor: (
+    readonly ref: (
       entityId: string,
     ) => Effect.Effect<ActorRef<Name, Defs>, never, ActorClientService<Name, Defs>>;
     readonly peek: <S, E>(
@@ -697,7 +697,7 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     _meta: { name, definitions, entity },
     Context: contextTag,
     of: ofFn,
-    actor: actorFn,
+    ref: actorFn,
     peek: peekFn,
     watch: watchFn,
     waitFor: <S, E>(
@@ -740,8 +740,12 @@ function toLayer<
   actor: EntityActor<Name, Defs, Rpcs>,
   build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
   options?: HandlerOptions,
-  /* eslint-disable typescript-eslint/no-explicit-any -- handler services are open */
-): Layer.Layer<ActorClientService<Name, Defs>, never, any>;
+  /* eslint-disable typescript-eslint/no-explicit-any -- implementation overload requires any */
+): Layer.Layer<
+  ActorClientService<Name, Defs>,
+  never,
+  RX | Scope.Scope | Rpc.MiddlewareClient<Rpcs>
+>;
 
 // Workflow overload
 function toLayer<
@@ -750,13 +754,18 @@ function toLayer<
   Success extends Schema.Top,
   Error extends Schema.Top,
   Signals extends SignalDefs,
+  RX = never,
 >(
   actor: WorkflowActor<Name, Payload, Success, Error, Signals>,
   handler: (
     payload: WorkflowPayloadType<Payload>,
     step: WorkflowStepContext<Error>,
-  ) => Effect.Effect<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>, any>,
-): Layer.Layer<ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>>, never, any>;
+  ) => Effect.Effect<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>, RX>,
+): Layer.Layer<
+  ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>>,
+  never,
+  RX | WorkflowEngine
+>;
 
 function toLayer(
   actor: any,
@@ -945,7 +954,7 @@ const WORKFLOW_RESERVED_KEYS = new Set<string>([
   "_meta",
   "$is",
   "Context",
-  "actor",
+  "ref",
   "name",
   "type",
   "of",
@@ -1038,7 +1047,7 @@ export type WorkflowActor<
     payload: WorkflowPayloadType<Payload>,
   ) => { readonly _tag: "Run" } & WorkflowPayloadType<Payload> &
     OperationBrand<Name, "Run", Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>;
-  readonly actor: () => Effect.Effect<
+  readonly ref: () => Effect.Effect<
     ActorRef<Name, WorkflowRunDefs<Payload, Success, Error>>,
     never,
     ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>>
@@ -1184,7 +1193,7 @@ const fromWorkflow = <
     _meta: { name, workflow: wf },
     Context: contextTag,
     Run,
-    actor: actorFn,
+    ref: actorFn,
     peek: peekFn,
     watch: watchFn,
     waitFor: <S, E>(

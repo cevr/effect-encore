@@ -76,12 +76,12 @@ Both entities and workflows share the same `ref.execute` / `ref.send` interface:
 
 ```ts
 // Entity
-const ref = yield * Order.actor("ord-1");
+const ref = yield * Order.ref("ord-1");
 const result = yield * ref.execute(Order.Place({ item: "widget", qty: 3 }));
 const execId = yield * ref.send(Order.Place({ item: "widget", qty: 3 }));
 
 // Workflow — nullary actor()
-const ref = yield * ProcessOrder.actor();
+const ref = yield * ProcessOrder.ref();
 const result = yield * ref.execute(ProcessOrder.Run({ orderId: "ord-1" }));
 const execId = yield * ref.send(ProcessOrder.Run({ orderId: "ord-1" }));
 ```
@@ -223,7 +223,7 @@ const test = it.scopedLive.layer(Layer.provide(OrderTest, TestShardingConfig));
 
 test("places an order", () =>
   Effect.gen(function* () {
-    const ref = yield* Order.actor("ord-1");
+    const ref = yield* Order.ref("ord-1");
     const result = yield* ref.execute(Order.Place({ item: "widget", qty: 1 }));
     expect(result).toBe("order: widget");
   }));

@@ -59,7 +59,7 @@ const GreeterTest = Actor.toTestLayer(Greeter, (payload) =>
 describe("Actor.fromWorkflow — execute/send", () => {
   it.scopedLive.layer(GreeterTest)("execute runs workflow and returns result", () =>
     Effect.gen(function* () {
-      const ref = yield* Greeter.actor();
+      const ref = yield* Greeter.ref();
       const result = yield* ref.execute(Greeter.Run({ name: "world" }));
       expect(result).toBe("hello world");
     }),
@@ -67,7 +67,7 @@ describe("Actor.fromWorkflow — execute/send", () => {
 
   it.scopedLive.layer(GreeterTest)("send returns ExecId string", () =>
     Effect.gen(function* () {
-      const ref = yield* Greeter.actor();
+      const ref = yield* Greeter.ref();
       const execId = yield* ref.send(Greeter.Run({ name: "cast-test" }));
       expect(typeof execId).toBe("string");
     }),
@@ -75,7 +75,7 @@ describe("Actor.fromWorkflow — execute/send", () => {
 
   it.scopedLive.layer(GreeterTest)("peek returns Success after send", () =>
     Effect.gen(function* () {
-      const ref = yield* Greeter.actor();
+      const ref = yield* Greeter.ref();
       const execId = yield* ref.send(Greeter.Run({ name: "peek-test" }));
 
       yield* Effect.sleep("50 millis");
@@ -110,7 +110,7 @@ const FailingTest = Actor.toTestLayer(FailingWorkflow, () =>
 describe("Actor.fromWorkflow — errors", () => {
   it.scopedLive.layer(FailingTest)("execute surfaces workflow errors", () =>
     Effect.gen(function* () {
-      const ref = yield* FailingWorkflow.actor();
+      const ref = yield* FailingWorkflow.ref();
       const exit = yield* ref.execute(FailingWorkflow.Run({ input: "bad" })).pipe(Effect.exit);
       expect(Exit.isFailure(exit)).toBe(true);
     }),
@@ -120,7 +120,7 @@ describe("Actor.fromWorkflow — errors", () => {
     "peek returns Failure with user's typed error, not raw Cause",
     () =>
       Effect.gen(function* () {
-        const ref = yield* FailingWorkflow.actor();
+        const ref = yield* FailingWorkflow.ref();
         const execId = yield* ref.send(FailingWorkflow.Run({ input: "peek-fail" }));
 
         yield* Effect.sleep("50 millis");
@@ -147,7 +147,7 @@ const DefectTest = Actor.toTestLayer(DefectWorkflow, () => Effect.die("unexpecte
 describe("Actor.fromWorkflow — defects", () => {
   it.scopedLive.layer(DefectTest)("peek returns Defect for die, not Failure", () =>
     Effect.gen(function* () {
-      const ref = yield* DefectWorkflow.actor();
+      const ref = yield* DefectWorkflow.ref();
       const execId = yield* ref.send(DefectWorkflow.Run({ input: "boom" }));
 
       yield* Effect.sleep("50 millis");
@@ -181,7 +181,7 @@ describe("Actor.fromWorkflow — lifecycle", () => {
 describe("Actor.fromWorkflow — idempotency", () => {
   it.scopedLive.layer(GreeterTest)("same payload yields same ExecId", () =>
     Effect.gen(function* () {
-      const ref = yield* Greeter.actor();
+      const ref = yield* Greeter.ref();
       const id1 = yield* ref.send(Greeter.Run({ name: "same" }));
       const id2 = yield* ref.send(Greeter.Run({ name: "same" }));
       expect(id1).toBe(id2);
@@ -198,7 +198,7 @@ describe("Actor.fromWorkflow — production layer", () => {
 
   it.scopedLive("works with externally-provided WorkflowEngine", () =>
     Effect.gen(function* () {
-      const ref = yield* Greeter.actor();
+      const ref = yield* Greeter.ref();
       const result = yield* ref.execute(Greeter.Run({ name: "prod" }));
       expect(result).toBe("hello prod");
     }).pipe(Effect.provide(ProductionLayer)),

@@ -36,21 +36,21 @@ const test = it.scopedLive.layer(EchoTest);
 describe("Actor.toTestLayer", () => {
   test("actor(id) returns an ActorRef", () =>
     Effect.gen(function* () {
-      const ref = yield* Echo.actor("test-1");
+      const ref = yield* Echo.ref("test-1");
       expect(ref.execute).toBeDefined();
       expect(ref.send).toBeDefined();
     }));
 
   test("execute works end-to-end without cluster infrastructure", () =>
     Effect.gen(function* () {
-      const ref = yield* Echo.actor("test-1");
+      const ref = yield* Echo.ref("test-1");
       const result = yield* ref.execute(Echo.Say({ msg: "hello" }));
       expect(result).toBe("echo: hello");
     }));
 
   test("send returns ExecId string", () =>
     Effect.gen(function* () {
-      const ref = yield* Echo.actor("test-2");
+      const ref = yield* Echo.ref("test-2");
       const execId = yield* ref.send(Echo.Fire({ x: 7 }));
       expect(typeof execId).toBe("string");
       expect(String(execId)).toBe("test-2\x00Fire\x007");
@@ -80,7 +80,7 @@ describe("Actor.toTestLayer", () => {
 
       // Provide around the full usage — don't let ActorRef escape the provider scope
       return yield* Effect.gen(function* () {
-        const ref = yield* Tracker.actor("t-1");
+        const ref = yield* Tracker.ref("t-1");
         const result = yield* ref.execute(Tracker.Track({ item: "widget" }));
         expect(result).toBe("tracked: widget");
 

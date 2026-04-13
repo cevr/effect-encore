@@ -112,10 +112,10 @@ describe("Actor.fromEntity", () => {
     ).toThrow(/collides with reserved/);
   });
 
-  test("throws on reserved operation name 'actor'", () => {
+  test("throws on reserved operation name 'ref'", () => {
     expect(() =>
       Actor.fromEntity("Bad", {
-        actor: { primaryKey: () => "x" },
+        ref: { primaryKey: () => "x" },
       } as never),
     ).toThrow(/collides with reserved/);
   });
@@ -155,7 +155,7 @@ describe("Actor.fromEntity", () => {
 describe("Actor.toTestLayer", () => {
   effectTest("actor(id) returns ActorRef with execute/send", () =>
     Effect.gen(function* () {
-      const ref = yield* Counter.actor("counter-1");
+      const ref = yield* Counter.ref("counter-1");
       expect(ref.execute).toBeDefined();
       expect(ref.send).toBeDefined();
     }),
@@ -163,7 +163,7 @@ describe("Actor.toTestLayer", () => {
 
   effectTest("execute dispatches by operation value", () =>
     Effect.gen(function* () {
-      const ref = yield* Counter.actor("counter-2");
+      const ref = yield* Counter.ref("counter-2");
       const result = yield* ref.execute(Counter.Increment({ amount: 5 }));
       expect(result).toBe(6);
     }),
@@ -171,7 +171,7 @@ describe("Actor.toTestLayer", () => {
 
   effectTest("execute works for zero-input operations", () =>
     Effect.gen(function* () {
-      const ref = yield* Counter.actor("counter-3");
+      const ref = yield* Counter.ref("counter-3");
       const result = yield* ref.execute(Counter.GetCount());
       expect(result).toBe(42);
     }),
@@ -179,7 +179,7 @@ describe("Actor.toTestLayer", () => {
 
   effectTest("send returns ExecId string", () =>
     Effect.gen(function* () {
-      const ref = yield* Counter.actor("counter-4");
+      const ref = yield* Counter.ref("counter-4");
       const execId = yield* ref.send(Counter.Increment({ amount: 7 }));
       expect(typeof execId).toBe("string");
       expect(String(execId)).toBe("counter-4\x00Increment\x007");
@@ -188,7 +188,7 @@ describe("Actor.toTestLayer", () => {
 
   effectTest("ExecId is safe with colons in entity ID", () =>
     Effect.gen(function* () {
-      const ref = yield* Counter.actor("ns:entity-1");
+      const ref = yield* Counter.ref("ns:entity-1");
       const execId = yield* ref.send(Counter.Increment({ amount: 3 }));
       // null-byte separator means colons in entity ID are safe
       expect(String(execId)).toBe("ns:entity-1\x00Increment\x003");
@@ -197,7 +197,7 @@ describe("Actor.toTestLayer", () => {
 
   effectTest("ExecId is safe with colons in primary key", () =>
     Effect.gen(function* () {
-      const ref = yield* Counter.actor("pk-colon-test");
+      const ref = yield* Counter.ref("pk-colon-test");
       // primaryKey for Increment returns String(p.amount), so no colons here
       // but the entity ID and tag are clean — the key point is null-byte separators
       const execId = yield* ref.send(Counter.Increment({ amount: 42 }));
@@ -210,7 +210,7 @@ describe("Actor.toTestLayer", () => {
 
   effectTest("unknown operation tag dies with descriptive error", () =>
     Effect.gen(function* () {
-      const ref = yield* Counter.actor("counter-5");
+      const ref = yield* Counter.ref("counter-5");
       const result = yield* Effect.exit(ref.execute({ _tag: "NonExistent" } as never));
       expect(result._tag).toBe("Failure");
     }),
@@ -250,7 +250,7 @@ describe("scalar payload", () => {
 
   scalarTest("execute round-trips scalar payload through handler", () =>
     Effect.gen(function* () {
-      const ref = yield* Echo.actor("s-1");
+      const ref = yield* Echo.ref("s-1");
       const result = yield* ref.execute(Echo.Say("world"));
       expect(result).toBe("echo: world");
     }),
@@ -258,7 +258,7 @@ describe("scalar payload", () => {
 
   scalarTest("send returns ExecId with scalar primaryKey", () =>
     Effect.gen(function* () {
-      const ref = yield* Echo.actor("s-2");
+      const ref = yield* Echo.ref("s-2");
       const execId = yield* ref.send(Echo.Say("test"));
       expect(String(execId)).toBe("s-2\x00Say\x00test");
     }),

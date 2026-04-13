@@ -165,7 +165,7 @@ const Annotated = Actor.fromWorkflow("Annotated", {
 describe("step.run — shorthand", () => {
   it.scopedLive.layer(GreeterTest)("executes and returns result", () =>
     Effect.gen(function* () {
-      const ref = yield* Greeter.actor();
+      const ref = yield* Greeter.ref();
       const result = yield* ref.execute(Greeter.Run({ name: "world" }));
       expect(result).toBe("hello world");
     }),
@@ -175,7 +175,7 @@ describe("step.run — shorthand", () => {
 describe("step.run — full options", () => {
   it.scopedLive.layer(CalculatorTest)("executes with success schema", () =>
     Effect.gen(function* () {
-      const ref = yield* Calculator.actor();
+      const ref = yield* Calculator.ref();
       const result = yield* ref.execute(Calculator.Run({ x: 3, y: 4 }));
       expect(result).toBe(7);
     }),
@@ -185,7 +185,7 @@ describe("step.run — full options", () => {
 describe("step.run — 3-arg undo shorthand", () => {
   it.scopedLive.layer(WithUndoTest)("executes with undo callback", () =>
     Effect.gen(function* () {
-      const ref = yield* WithUndo.actor();
+      const ref = yield* WithUndo.ref();
       const result = yield* ref.execute(WithUndo.Run({ input: "test" }));
       expect(result).toBe("done: test");
     }),
@@ -195,7 +195,7 @@ describe("step.run — 3-arg undo shorthand", () => {
 describe("step.sleep", () => {
   it.scopedLive.layer(SleeperTest)("sleeps and returns", () =>
     Effect.gen(function* () {
-      const ref = yield* Sleeper.actor();
+      const ref = yield* Sleeper.ref();
       const result = yield* ref.execute(Sleeper.Run({ ms: 10 }));
       expect(result).toBe("awake");
     }),
@@ -205,7 +205,7 @@ describe("step.sleep", () => {
 describe("step.run — full options with error", () => {
   it.scopedLive.layer(FailableTest)("success path works", () =>
     Effect.gen(function* () {
-      const ref = yield* Failable.actor();
+      const ref = yield* Failable.ref();
       const result = yield* ref.execute(Failable.Run({ input: "good" }));
       expect(result).toBe("ok: good");
     }),
@@ -213,7 +213,7 @@ describe("step.run — full options with error", () => {
 
   it.scopedLive.layer(FailableTest)("error path surfaces typed error", () =>
     Effect.gen(function* () {
-      const ref = yield* Failable.actor();
+      const ref = yield* Failable.ref();
       const exit = yield* ref.execute(Failable.Run({ input: "bad" })).pipe(Effect.exit);
       expect(Exit.isFailure(exit)).toBe(true);
     }),
@@ -224,7 +224,7 @@ describe("step.run — retry", () => {
   it.scopedLive.layer(RetrierTest)("executes with retry config", () =>
     Effect.gen(function* () {
       retryAttempts = 0;
-      const ref = yield* Retrier.actor();
+      const ref = yield* Retrier.ref();
       const result = yield* ref.execute(Retrier.Run({ id: "r1" }));
       expect(result).toBe("done: r1");
       expect(retryAttempts).toBeGreaterThanOrEqual(1);
@@ -235,7 +235,7 @@ describe("step.run — retry", () => {
 describe("step.executionId + step.attempt", () => {
   it.scopedLive.layer(InspectorTest)("exposes executionId and attempt", () =>
     Effect.gen(function* () {
-      const ref = yield* Inspector.actor();
+      const ref = yield* Inspector.ref();
       const result = yield* ref.execute(Inspector.Run({ id: "i1" }));
       expect(result).toContain("execId=");
       expect(result).toContain("attempt=");
@@ -246,7 +246,7 @@ describe("step.executionId + step.attempt", () => {
 describe("nullary actor() + waitFor", () => {
   it.scopedLive.layer(WaitTargetTest)("nullary actor() works for workflow", () =>
     Effect.gen(function* () {
-      const ref = yield* WaitTarget.actor();
+      const ref = yield* WaitTarget.ref();
       const execId = yield* ref.send(WaitTarget.Run({ id: "w1" }));
       expect(typeof execId).toBe("string");
     }),
@@ -254,7 +254,7 @@ describe("nullary actor() + waitFor", () => {
 
   it.scopedLive.layer(WaitTargetTest)("waitFor polls until terminal", () =>
     Effect.gen(function* () {
-      const ref = yield* WaitTarget.actor();
+      const ref = yield* WaitTarget.ref();
       const execId = yield* ref.send(WaitTarget.Run({ id: "w2" }));
       const result = yield* WaitTarget.waitFor(execId);
       expect(result._tag).toBe("Success");
@@ -329,7 +329,7 @@ const SignalTest = Actor.toTestLayer(SignalWorkflow, (_payload, _step) =>
 describe("signal — inside handler", () => {
   it.scopedLive.layer(SignalTest)("signal token + succeed + await round-trip", () =>
     Effect.gen(function* () {
-      const ref = yield* SignalWorkflow.actor();
+      const ref = yield* SignalWorkflow.ref();
       const result = yield* ref.execute(SignalWorkflow.Run({ id: "sig-1" }));
       expect(result).toBe("got: approved");
     }),
@@ -357,7 +357,7 @@ const RaceTest = Actor.toTestLayer(RaceWorkflow, (_payload, step) =>
 describe("step.race", () => {
   it.scopedLive.layer(RaceTest)("first to complete wins", () =>
     Effect.gen(function* () {
-      const ref = yield* RaceWorkflow.actor();
+      const ref = yield* RaceWorkflow.ref();
       const result = yield* ref.execute(RaceWorkflow.Run({ id: "race-1" }));
       expect(result).toBe("fast-wins");
     }),
@@ -369,7 +369,7 @@ describe("step.race", () => {
 describe("waitFor — custom options", () => {
   it.scopedLive.layer(WaitTargetTest)("waitFor with custom filter and schedule", () =>
     Effect.gen(function* () {
-      const ref = yield* WaitTarget.actor();
+      const ref = yield* WaitTarget.ref();
       const execId = yield* ref.send(WaitTarget.Run({ id: "w-custom" }));
       const result = yield* WaitTarget.waitFor(execId, {
         filter: (r) => r._tag === "Success",
@@ -398,7 +398,7 @@ const IdKeyTest = Actor.toTestLayer(IdKeyWorkflow, (_payload, step) =>
 describe("step.idempotencyKey", () => {
   it.scopedLive.layer(IdKeyTest)("generates key from executionId + name", () =>
     Effect.gen(function* () {
-      const ref = yield* IdKeyWorkflow.actor();
+      const ref = yield* IdKeyWorkflow.ref();
       const result = yield* ref.execute(IdKeyWorkflow.Run({ id: "idem-1" }));
       expect(result).toContain("/my-step");
     }),
