@@ -1,5 +1,15 @@
 # effect-encore
 
+## 0.7.0
+
+### Minor Changes
+
+- [`d4aba0e`](https://github.com/cevr/effect-encore/commit/d4aba0e7702c73090c0234c29b0026e9f1881ebc) Thanks [@cevr](https://github.com/cevr)! - Rename `.actor()` to `.ref()` on EntityActor and WorkflowActor. Fix `Actor.toLayer` to bubble handler requirements instead of `any`.
+  - `actor.ref(entityId)` — returns `ActorRef` (was `.actor()`)
+  - `Actor.toLayer` entity overload: return type `Layer<Service, never, RX | Scope | MiddlewareClient>` (was `any`)
+  - `Actor.toLayer` workflow overload: return type `Layer<Service, never, RX | WorkflowEngine>` (was `any`)
+  - `"ref"` replaces `"actor"` in reserved operation/signal names
+
 ## 0.6.1
 
 ### Patch Changes
