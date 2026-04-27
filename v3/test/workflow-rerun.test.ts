@@ -1,6 +1,7 @@
 import { describe, expect, it } from "effect-bun-test/v3";
 import { Effect, Fiber, Layer as L, Ref, Schema } from "effect";
 import { ClusterWorkflowEngine, MessageStorage, TestRunner } from "@effect/cluster";
+import type * as Envelope from "@effect/cluster/Envelope";
 import { Actor, EncoreMessageStorage, fromMessageStorage } from "../src/index.js";
 
 // ── Test layer providing EncoreMessageStorage on top of TestRunner ─────────
@@ -178,5 +179,64 @@ describe("WorkflowActor.rerun", () => {
         expect(second).toBe(2);
       }).pipe(Effect.provide(handlers));
     }).pipe(Effect.provide(TestCluster)),
+  );
+
+  // Regression: a workflow with `step.sleep` registers a DurableClock
+  // sub-entity at `entityType=Workflow/-/DurableClock`. Without explicit
+  // cleanup, `.rerun` leaves the clock entry behind — when the duration
+  // elapses, it fires into a workflow that no longer expects it. The fix
+  // mirrors upstream `clearClock` in ClusterWorkflowEngine.js:124-134.
+  it.scopedLive(
+    "rerun clears DurableClock sub-entity (step.sleep cleanup)",
+    () =>
+      Effect.gen(function* () {
+        const driver = yield* MessageStorage.MemoryDriver;
+
+        const Sleeper = Actor.fromWorkflow("ClockClearWorkflow", {
+          payload: { id: Schema.String },
+          success: Schema.String,
+          id: (p: { id: string }) => p.id,
+        });
+
+        // Default inMemoryThreshold is 60s — anything shorter goes to an
+        // in-memory Activity and never persists a clock entity row, so the
+        // bug is not observable. Pass `inMemoryThreshold: "1 millis"` to
+        // force the durable-clock path. 10s wakeUp ensures the clock is
+        // still pending when rerun.
+        const handlers = Actor.toLayer(Sleeper, (payload, step) =>
+          Effect.gen(function* () {
+            yield* step.sleep("nap", "10 seconds", { inMemoryThreshold: "1 millis" });
+            return `awake:${payload.id}`;
+          }),
+        );
+
+        const countClockEntries = (): number => {
+          let count = 0;
+          for (const entry of driver.requests.values()) {
+            const env = entry.envelope as Envelope.Envelope.Encoded;
+            if ("address" in env && env.address.entityType === "Workflow/-/DurableClock") {
+              count++;
+            }
+          }
+          return count;
+        };
+
+        return yield* Effect.gen(function* () {
+          const fiber = yield* Effect.forkScoped(Sleeper.execute({ id: "clock" }));
+          yield* Effect.gen(function* () {
+            for (let i = 0; i < 20; i++) {
+              if (countClockEntries() > 0) return;
+              yield* Effect.sleep("50 millis");
+            }
+          });
+          expect(countClockEntries()).toBeGreaterThan(0);
+
+          yield* Sleeper.rerun({ id: "clock" });
+          yield* Fiber.interrupt(fiber);
+
+          expect(countClockEntries()).toBe(0);
+        }).pipe(Effect.provide(handlers));
+      }).pipe(Effect.provide(TestCluster), Effect.timeout("15 seconds")),
+    20_000,
   );
 });

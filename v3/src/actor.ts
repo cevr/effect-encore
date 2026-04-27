@@ -13,7 +13,8 @@ import type { MalformedMessage, PersistenceError } from "@effect/cluster/Cluster
 import type { Rpc, RpcClient, RpcGroup } from "@effect/rpc";
 import { Rpc as RpcMod } from "@effect/rpc";
 import { Workflow as UpstreamWorkflow } from "@effect/workflow";
-import type { WorkflowEngine } from "@effect/workflow/WorkflowEngine";
+import type { Execution } from "@effect/workflow/Workflow";
+import type { WorkflowEngine, WorkflowInstance } from "@effect/workflow/WorkflowEngine";
 import { layerMemory as workflowEngineLayerMemory } from "@effect/workflow/WorkflowEngine";
 import {
   Cause,
@@ -934,6 +935,13 @@ function toLayer<
 >;
 
 // Workflow overload
+//
+// Mirrors upstream `Workflow.toLayer`: excludes `WorkflowEngine | WorkflowInstance |
+// Execution<Name> | Scope.Scope` from the handler's `R`, so callers don't see
+// internal context tags injected by `step.run` leak into the layer's
+// requirements. Without these excludes, a handler that calls `step.run(...)`
+// causes the resulting Layer's `RIn` to include `WorkflowInstance`, which is
+// unsatisfiable from user code.
 function toLayer<
   Name extends string,
   Payload extends Schema.Struct.Fields,
@@ -950,7 +958,7 @@ function toLayer<
 ): Layer.Layer<
   ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>>,
   never,
-  RX | WorkflowEngine
+  Exclude<RX, WorkflowEngine | WorkflowInstance | Execution<Name> | Scope.Scope> | WorkflowEngine
 >;
 
 function toLayer(
@@ -1015,14 +1023,18 @@ function toTestLayer<
   Success extends Schema.Schema.Any,
   Error extends Schema.Schema.All,
   Signals extends SignalDefs,
+  RX = never,
 >(
   actor: WorkflowActor<Name, Payload, Success, Error, Signals>,
   handler: (
     payload: WorkflowPayloadType<Payload>,
     step: WorkflowStepContext<Error>,
-    // eslint-disable-next-line typescript-eslint/no-explicit-any
-  ) => Effect.Effect<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>, any>,
-): Layer.Layer<ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>> | WorkflowEngine>;
+  ) => Effect.Effect<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>, RX>,
+): Layer.Layer<
+  ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>> | WorkflowEngine,
+  never,
+  Exclude<RX, WorkflowEngine | WorkflowInstance | Execution<Name> | Scope.Scope>
+>;
 
 /* eslint-disable typescript-eslint/no-explicit-any -- overload implementation */
 function toTestLayer(
@@ -1340,6 +1352,28 @@ const resolveWorkflowAddress = (
       shardId: sharding.getShardId(entityId, shardGroup),
     });
   });
+
+// DurableClock sub-entity address. Mirrors upstream `clearClock` in
+// `ClusterWorkflowEngine.js:124-134`: clock entityType is the constant
+// `Workflow/-/DurableClock`, entityId is the parent workflow's executionId,
+// shardId uses the parent workflow's shardGroup annotation. Required for
+// `step.sleep` cleanup on rerun — without this, orphan clock entries remain
+// in storage and fire later into a workflow that no longer expects them.
+const resolveWorkflowClockAddress = (
+  workflow: UpstreamWorkflow.Workflow<any, any, any, any>,
+  executionId: string,
+) =>
+  Effect.gen(function* () {
+    const sharding = yield* Sharding.Sharding;
+    const entityId = EntityId.make(executionId);
+    const shardGroupFn = Context.get(workflow.annotations, ClusterSchema.ShardGroup);
+    const shardGroup = shardGroupFn(entityId);
+    return EntityAddress.make({
+      entityType: EntityType.EntityType.make("Workflow/-/DurableClock"),
+      entityId,
+      shardId: sharding.getShardId(entityId, shardGroup),
+    });
+  });
 /* eslint-enable typescript-eslint/no-explicit-any */
 
 // ── Actor.fromWorkflow ────────────────────────────────────────────────────
@@ -1473,11 +1507,16 @@ const fromWorkflow = <
     Effect.map(wf.executionId(payload as never), (id) => makeExecId(id));
 
   // rerun(payload): WorkflowEngine.interrupt + clearAddress on the workflow's
-  // EntityAddress. Wipes both the run reply AND every cached activity reply
-  // (they all live at the same address — the upstream
-  // `ClusterWorkflowEngine.entityAddressFor` is what we mirror here). interrupt
-  // is a fiber signal and is a no-op if the workflow has already completed;
-  // clearAddress() then wipes persisted state regardless.
+  // EntityAddress AND on the DurableClock sub-entity. Wipes the run reply,
+  // every cached activity reply (they all live at the workflow address — the
+  // upstream `ClusterWorkflowEngine.entityAddressFor` is what we mirror), and
+  // any pending step.sleep clock entries (mirror of upstream `clearClock` in
+  // ClusterWorkflowEngine.js:124-134 — upstream only clears the clock when
+  // a running fiber observes the InterruptSignal, which doesn't happen if
+  // the workflow is suspended waiting on the clock). Required so a workflow
+  // using step.sleep can be safely rerun without orphan clock fires.
+  // interrupt is a fiber signal and is a no-op if the workflow has already
+  // completed; clearAddress() then wipes persisted state regardless.
   // Caveat: rerun-while-running interrupts the fiber and clears state, but the
   // fiber's wind-down may queue behind the next execute; cleanup is best-effort
   // eventual.
@@ -1494,6 +1533,8 @@ const fromWorkflow = <
       const storage = yield* EncoreMessageStorage;
       const address = yield* resolveWorkflowAddress(wf, executionId);
       yield* storage.clearAddress(address);
+      const clockAddress = yield* resolveWorkflowClockAddress(wf, executionId);
+      yield* storage.clearAddress(clockAddress);
     });
 
   const executeFn = (payload: WorkflowPayloadType<Payload>) =>

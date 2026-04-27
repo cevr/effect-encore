@@ -1,6 +1,7 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Fiber, Layer as L, Ref, Schema } from "effect";
 import { ClusterWorkflowEngine, MessageStorage, TestRunner } from "effect/unstable/cluster";
+import type * as Envelope from "effect/unstable/cluster/Envelope";
 import { Actor, EncoreMessageStorage, fromMessageStorage } from "../src/index.js";
 
 // ── Test layer providing EncoreMessageStorage on top of TestRunner ─────────
@@ -181,5 +182,71 @@ describe("WorkflowActor.rerun", () => {
         expect(second).toBe(2);
       }).pipe(Effect.provide(handlers));
     }).pipe(Effect.provide(TestCluster)),
+  );
+
+  // Regression: a workflow with `step.sleep` registers a DurableClock
+  // sub-entity at `entityType=Workflow/-/DurableClock`. Without explicit
+  // cleanup, `.rerun` leaves the clock entry behind — when the duration
+  // elapses, it fires into a workflow that no longer expects it. The fix
+  // mirrors upstream `clearClock` in ClusterWorkflowEngine.js:124-134:
+  // `clearAddress` on the clock's EntityAddress (same shardGroup as parent,
+  // entityId = workflow executionId, entityType = "Workflow/-/DurableClock").
+  it.scopedLive(
+    "rerun clears DurableClock sub-entity (step.sleep cleanup)",
+    () =>
+      Effect.gen(function* () {
+        const driver = yield* MessageStorage.MemoryDriver;
+
+        const Sleeper = Actor.fromWorkflow("ClockClearWorkflow", {
+          payload: { id: Schema.String },
+          success: Schema.String,
+          id: (p: { id: string }) => p.id,
+        });
+
+        // Force the durable-clock path (default threshold is 60s — anything
+        // shorter goes to an in-memory Activity and never persists a clock
+        // entity row, so the bug is not observable). `inMemoryThreshold: 0`
+        // pushes every sleep through the DurableClock entity regardless of
+        // duration. 10s wakeUp ensures the clock is still pending when rerun.
+        const handlers = Actor.toLayer(Sleeper, (payload, step) =>
+          Effect.gen(function* () {
+            yield* step.sleep("nap", "10 seconds", { inMemoryThreshold: "1 millis" });
+            return `awake:${payload.id}`;
+          }),
+        );
+
+        const countClockEntries = (): number => {
+          let count = 0;
+          for (const entry of driver.requests.values()) {
+            const env = entry.envelope as Envelope.Encoded;
+            if ("address" in env && env.address.entityType === "Workflow/-/DurableClock") {
+              count++;
+            }
+          }
+          return count;
+        };
+
+        return yield* Effect.gen(function* () {
+          // Fork — execute blocks on the 10s sleep, never resolves in this test.
+          const fiber = yield* Effect.forkScoped(Sleeper.execute({ id: "clock" }));
+
+          // Poll for the clock entry to land in storage. step.sleep schedules
+          // the clock asynchronously, so a tight check would race.
+          yield* Effect.gen(function* () {
+            for (let i = 0; i < 20; i++) {
+              if (countClockEntries() > 0) return;
+              yield* Effect.sleep("50 millis");
+            }
+          });
+          expect(countClockEntries()).toBeGreaterThan(0);
+
+          // Rerun should wipe the clock entry alongside the workflow's own state.
+          yield* Sleeper.rerun({ id: "clock" });
+          yield* Fiber.interrupt(fiber);
+
+          expect(countClockEntries()).toBe(0);
+        }).pipe(Effect.provide(handlers));
+      }).pipe(Effect.provide(TestCluster), Effect.timeout("15 seconds")),
+    20_000,
   );
 });

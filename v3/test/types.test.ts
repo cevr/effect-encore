@@ -1,6 +1,8 @@
 import { describe, test } from "effect-bun-test/v3";
 import { Effect, Schema } from "effect";
-import type { Cause, Duration, Stream } from "effect";
+import type { Cause, Duration, Layer, Scope, Stream } from "effect";
+import type { Execution } from "@effect/workflow/Workflow";
+import type { WorkflowEngine, WorkflowInstance } from "@effect/workflow/WorkflowEngine";
 import { Actor } from "../src/index.js";
 import type { ExecId, PeekResult, WorkflowSignal } from "../src/index.js";
 
@@ -285,5 +287,57 @@ describe("declarative signal type-level tests", () => {
   test("signal .await returns Effect with correct success type", () => {
     const _await: Effect.Effect<ApprovalDecision, never, unknown> = SignalWorkflow.Approval.await;
     void _await;
+  });
+});
+
+// ── Workflow toLayer requirements exclusion ───────────────────────────────
+//
+// Regression test: `Actor.toLayer(workflow, handler)` must mirror upstream
+// `Workflow.toLayer` and exclude `WorkflowEngine | WorkflowInstance |
+// Execution<Name> | Scope.Scope` from the handler's `R` so they don't leak
+// into the resulting Layer's `RIn`. Without these excludes, a handler that
+// calls `step.run(...)` (which uses `Workflow.intoResult` internally and
+// requires `WorkflowInstance`) produces a Layer that's unsatisfiable from
+// user code.
+
+const RegressionWorkflow = Actor.fromWorkflow("Regression", {
+  payload: { id: Schema.String },
+  success: Schema.String,
+  id: (p: { id: string }) => p.id,
+});
+
+describe("workflow toLayer regression — context exclusion", () => {
+  test("toLayer with step.run handler does NOT leak WorkflowInstance / Execution / Scope into RIn", () => {
+    const layer = Actor.toLayer(RegressionWorkflow, (payload, step) =>
+      Effect.gen(function* () {
+        // step.run injects WorkflowInstance into the inner Effect's R; the
+        // outer toLayer signature must Exclude it from the Layer's RIn.
+        yield* step.run("step-1", { do: Effect.succeed(payload.id) });
+        return payload.id;
+      }),
+    );
+
+    type RIn = Layer.Layer.Context<typeof layer>;
+    type _NoWorkflowInstance = Assert<IsExact<Extract<RIn, WorkflowInstance>, never>>;
+    type _NoExecution = Assert<IsExact<Extract<RIn, Execution<"Regression">>, never>>;
+    type _NoScope = Assert<IsExact<Extract<RIn, Scope.Scope>, never>>;
+    // WorkflowEngine SHOULD remain — it's required by the runner.
+    type _HasWorkflowEngine = Assert<WorkflowEngine extends RIn ? true : false>;
+    void layer;
+  });
+
+  test("toTestLayer matches: no WorkflowInstance / Execution / Scope leak in RIn", () => {
+    const layer = Actor.toTestLayer(RegressionWorkflow, (payload, step) =>
+      Effect.gen(function* () {
+        yield* step.run("step-1", { do: Effect.succeed(payload.id) });
+        return payload.id;
+      }),
+    );
+
+    type RIn = Layer.Layer.Context<typeof layer>;
+    type _NoWorkflowInstance = Assert<IsExact<Extract<RIn, WorkflowInstance>, never>>;
+    type _NoExecution = Assert<IsExact<Extract<RIn, Execution<"Regression">>, never>>;
+    type _NoScope = Assert<IsExact<Extract<RIn, Scope.Scope>, never>>;
+    void layer;
   });
 });
