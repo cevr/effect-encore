@@ -63,6 +63,7 @@
     "lefthook": "^2.1.4",
     "oxfmt": "^0.42.0",
     "oxlint": "^1.57.0",
+    "oxlint-plugin-effect": "file:../effect-oxlint/packages/oxlint-plugin-effect",
     "tsdown": "^0.21.7",
     "typescript": "^5.9.3"
   },
