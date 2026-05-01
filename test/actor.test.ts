@@ -2,7 +2,7 @@ import { describe, expect, it, test } from "effect-bun-test";
 import { Context, DateTime, Effect, Layer, PrimaryKey, Schema } from "effect";
 import { ClusterSchema, ShardingConfig } from "effect/unstable/cluster";
 import * as DeliverAt from "effect/unstable/cluster/DeliverAt";
-import { Actor } from "../src/index.js";
+import { Actor, DedupeStrategy } from "../src/index.js";
 
 const TestShardingConfig = ShardingConfig.layer({
   shardsPerGroup: 300,
@@ -296,6 +296,32 @@ describe("deliverAt", () => {
 
     expect(typeof instance[PrimaryKey.symbol]).toBe("function");
     expect(instance[PrimaryKey.symbol]()).toBe("abc");
+  });
+
+  test("dedupe: inProgress encodes only the storage primaryKey", () => {
+    const InProgress = Actor.fromEntity("InProgressPayload", {
+      Op: {
+        payload: { id: Schema.String },
+        dedupe: DedupeStrategy.InProgress,
+        id: (p: { id: string }) => p.id,
+      },
+    });
+
+    const rpc = InProgress._meta.entity.protocol.requests.get("Op")!;
+    const payloadSchema = rpc.payloadSchema;
+    const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
+      id: "abc",
+    }) as { [PrimaryKey.symbol](): string };
+
+    const storageKey = instance[PrimaryKey.symbol]();
+    expect(storageKey).toBe(DedupeStrategy.encodePrimaryKey(DedupeStrategy.InProgress, "abc"));
+    expect(DedupeStrategy.fromPrimaryKey(`InProgressPayload/abc/Op/${storageKey}`)).toBe(
+      DedupeStrategy.InProgress,
+    );
+    expect(DedupeStrategy.stripPrimaryKey(storageKey)).toBe("abc");
+
+    const execId = Effect.runSync(InProgress.Op.executionId({ id: "abc" }));
+    expect(String(execId)).toBe("abc\x00Op\x00abc");
   });
 
   test("deliverAt without payload primaryKey symbol is valid (delayed but uses fn primaryKey)", () => {

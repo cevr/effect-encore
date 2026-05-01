@@ -47,6 +47,7 @@ import {
 } from "./receipt.js";
 import { EncoreMessageStorage } from "./storage.js";
 import type { EncoreMessageStorageShape } from "./storage.js";
+import { DedupeStrategy, type DedupeStrategy as DedupeStrategyType } from "./dedupe.js";
 
 // ── Layer passthrough (v4 polyfill — v3 has Layer.passthrough) ────────────
 // Adds the layer's input requirements to its output so provided services
@@ -99,6 +100,7 @@ export interface OperationDef {
   readonly success?: Schema.Top;
   readonly error?: Schema.Top;
   readonly persisted?: boolean;
+  readonly dedupe?: DedupeStrategyType;
   readonly id: (payload: never) => EntityIdReturn;
   readonly deliverAt?: (payload: never) => DateTime.DateTime;
 }
@@ -423,7 +425,7 @@ const compileRpc = (actorName: string, tag: string, def: OperationDef): Rpc.Any 
   // That's the `primaryKey` portion of resolveId — for string-form `id`,
   // primaryKey === entityId; for object-form, divergent. `id` is required
   // on every OperationDef.
-  const pkOf = (p: unknown) => resolveId(def, p, tag).primaryKey;
+  const pkOf = (p: unknown) => storagePrimaryKey(def, resolveId(def, p, tag).primaryKey);
 
   if (payload) {
     if (Schema.isSchema(payload)) {
@@ -499,6 +501,9 @@ const parseExecId = (execId: string) => {
   };
 };
 
+const storagePrimaryKey = (def: OperationDef | undefined, primaryKey: string): string =>
+  DedupeStrategy.encodePrimaryKey(def?.dedupe, primaryKey);
+
 // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased at runtime
 const resolveAddress = (entity: ClusterEntity.Entity<string, any>, actorId: string) =>
   Effect.gen(function* () {
@@ -550,7 +555,7 @@ const rerunImpl = (
     const maybeRequestId = yield* storage.requestIdForPrimaryKey({
       address,
       tag,
-      id: primaryKey,
+      id: storagePrimaryKey(def, primaryKey),
     });
     if (Option.isNone(maybeRequestId)) return;
     yield* storage.deleteEnvelope(maybeRequestId.value);
@@ -575,7 +580,7 @@ const peekImpl = (
     const maybeRequestId = yield* storage.requestIdForPrimaryKey({
       address,
       tag: parsed.tag,
-      id: parsed.primaryKey,
+      id: storagePrimaryKey(definitions?.[parsed.tag], parsed.primaryKey),
     });
 
     if (Option.isNone(maybeRequestId)) {

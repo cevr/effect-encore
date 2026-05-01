@@ -18,21 +18,31 @@ For v3 `@effect/cluster` compat: `import { Actor } from "effect-encore/v3"`.
 ### Entity — reactive message handlers
 
 ```ts
-import { Actor } from "effect-encore";
+import { Actor, DedupeStrategy } from "effect-encore";
 import { Schema } from "effect";
 
 const Order = Actor.fromEntity("Order", {
   Place: {
     payload: { item: Schema.String, qty: Schema.Number },
     success: Schema.String,
-    primaryKey: (p) => `${p.item}-${p.qty}`,
+    persisted: true,
+    id: (p) => `${p.item}-${p.qty}`,
   },
   Cancel: {
     payload: { reason: Schema.String },
-    primaryKey: (p) => p.reason,
+    persisted: true,
+    id: (p) => p.reason,
+  },
+  RebuildSearchIndex: {
+    payload: { locationId: Schema.String },
+    persisted: true,
+    dedupe: DedupeStrategy.InProgress,
+    id: (p) => p.locationId,
   },
 });
 ```
+
+Persisted entity operations default to `DedupeStrategy.AtMostOnce`: duplicate sends with the same primary key reuse the stored result until `.rerun(payload)` explicitly clears it. Use `DedupeStrategy.InProgress` when producers should coalesce only while work is active, then allow fresh work with the same key after completion. Storage adapters can inspect encoded cluster keys with `DedupeStrategy.fromPrimaryKey(primaryKey)`.
 
 ### Workflow — durable multi-step processes
 
@@ -41,7 +51,7 @@ const ProcessOrder = Actor.fromWorkflow("ProcessOrder", {
   payload: { orderId: Schema.String },
   success: OrderResult,
   error: OrderError,
-  idempotencyKey: (p) => p.orderId,
+  id: (p) => p.orderId,
   signals: {
     ManagerApproval: { success: ApprovalDecision },
     Cancel: {},
@@ -277,7 +287,7 @@ const encode = Schema.encodeSync(schema);
 const Scheduled = Actor.fromEntity("Scheduled", {
   Process: {
     payload: { id: Schema.String, deliverAt: Schema.DateTimeUtc },
-    primaryKey: (p) => p.id,
+    id: (p) => p.id,
     deliverAt: (p) => p.deliverAt,
     persisted: true,
   },

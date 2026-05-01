@@ -44,11 +44,11 @@ const Counter = Actor.fromEntity("Counter", {
   Increment: {
     payload: { amount: Schema.Number },
     success: Schema.Number,
-    primaryKey: (p) => String(p.amount),
+    id: (p) => String(p.amount),
   },
   GetCount: {
     success: Schema.Number,
-    primaryKey: () => "singleton",
+    id: () => "singleton",
   },
 });
 
@@ -59,14 +59,34 @@ Counter.GetCount(); // zero-input, still callable
 
 ### OperationDef fields
 
-| Field        | Type                                 | Required | Description                             |
-| ------------ | ------------------------------------ | -------- | --------------------------------------- |
-| `payload`    | `Schema.Top \| Schema.Struct.Fields` | no       | Inline fields or pre-built Schema.Class |
-| `success`    | `Schema.Top`                         | no       | Success response schema (default: Void) |
-| `error`      | `Schema.Top`                         | no       | Error schema (default: Never)           |
-| `persisted`  | `boolean`                            | no       | Persist to MessageStorage               |
-| `primaryKey` | `(payload) => string`                | **yes**  | Deduplication / exec ID key             |
-| `deliverAt`  | `(payload) => DateTime`              | no       | Delayed delivery extractor              |
+| Field       | Type                                               | Required | Description                             |
+| ----------- | -------------------------------------------------- | -------- | --------------------------------------- |
+| `payload`   | `Schema.Top \| Schema.Struct.Fields`               | no       | Inline fields or pre-built Schema.Class |
+| `success`   | `Schema.Top`                                       | no       | Success response schema (default: Void) |
+| `error`     | `Schema.Top`                                       | no       | Error schema (default: Never)           |
+| `persisted` | `boolean`                                          | no       | Persist to MessageStorage               |
+| `id`        | `(payload) => string \| { entityId, primaryKey? }` | yes      | Routing and dedupe / exec ID key        |
+| `dedupe`    | `DedupeStrategy`                                   | no       | `AtMostOnce` default or `InProgress`    |
+| `deliverAt` | `(payload) => DateTime`                            | no       | Delayed delivery extractor              |
+
+### Dedupe strategies
+
+Entity operations default to `DedupeStrategy.AtMostOnce`: persisted completions are reused until `.rerun(payload)` clears the execId. Use `DedupeStrategy.InProgress` when duplicate producers should coalesce only while the first run is active, then allow fresh work after completion.
+
+```ts
+import { Actor, DedupeStrategy } from "effect-encore";
+
+const VectorUpdate = Actor.fromEntity("VectorUpdate", {
+  UpdateVectors: {
+    payload: { locationId: Schema.String },
+    persisted: true,
+    dedupe: DedupeStrategy.InProgress,
+    id: (p) => p.locationId,
+  },
+});
+```
+
+Storage adapters use `DedupeStrategy.fromPrimaryKey(clusterPrimaryKey)` to distinguish durable at-most-once keys from active-only keys.
 
 ### EntityActor properties
 
@@ -110,7 +130,7 @@ ProcessOrder.type; // "Workflow/ProcessOrder"
 
 ### Pre-built Schema.Class payload
 
-Escape hatch for custom symbol implementations. The `primaryKey`/`deliverAt` options in OperationDef are ignored when using a Schema.Class — symbols must be on the class.
+Escape hatch for custom symbol implementations. The `id`/`dedupe`/`deliverAt` options in OperationDef are ignored when using a Schema.Class — symbols must be on the class.
 
 ```ts
 class CustomPayload extends Schema.Class<CustomPayload>("CustomPayload")({
@@ -122,7 +142,7 @@ class CustomPayload extends Schema.Class<CustomPayload>("CustomPayload")({
 }
 
 const MyActor = Actor.fromEntity("MyActor", {
-  Run: { payload: CustomPayload, success: Schema.Void, persisted: true, primaryKey: (p) => p.id },
+  Run: { payload: CustomPayload, success: Schema.Void, persisted: true, id: (p) => p.id },
 });
 ```
 
@@ -135,7 +155,7 @@ const ProcessOrder = Actor.fromWorkflow("ProcessOrder", {
   payload: { orderId: Schema.String },
   success: OrderResult,
   error: OrderError,
-  idempotencyKey: (p) => p.orderId,
+  id: (p) => p.orderId,
 });
 
 // Single constructor — always "Run"
@@ -149,7 +169,7 @@ ProcessOrder.Run({ orderId: "ord-1" }); // → OperationValue
 | `payload`                | `Schema.Struct.Fields` | **yes**  | Workflow input fields                       |
 | `success`                | `Schema.Top`           | no       | Success schema (default: Void)              |
 | `error`                  | `Schema.Top`           | no       | Error schema (default: Never)               |
-| `idempotencyKey`         | `(payload) => string`  | **yes**  | Deterministic execution ID                  |
+| `id`                     | `(payload) => string`  | **yes**  | Deterministic execution ID                  |
 | `signals`                | `SignalDefs`           | no       | Declarative signal definitions (see below)  |
 | `captureDefects`         | `boolean`              | no       | Capture defects as workflow failures        |
 | `suspendOnFailure`       | `boolean`              | no       | Suspend workflow on failure instead of fail |
@@ -176,7 +196,7 @@ Signals are defined on `WorkflowDef.signals` and become typed properties on the 
 const ProcessOrder = Actor.fromWorkflow("ProcessOrder", {
   payload: { orderId: Schema.String },
   success: OrderResult,
-  idempotencyKey: (p) => p.orderId,
+  id: (p) => p.orderId,
   signals: {
     Approval: { success: Schema.String, error: ApprovalError },
     Cancel: {}, // void signal — Schema.Void/Schema.Never defaults
@@ -427,7 +447,7 @@ type ExecId<Success = unknown, Error = unknown> = string & {
 At runtime, just a string. Format:
 
 - Entity: `"entityId\0operationTag\0primaryKey"` (null-byte separated — opaque, don't parse)
-- Workflow: upstream `idempotencyKey(payload)` result
+- Workflow: upstream workflow execution id derived from `id(payload)`
 
 ## Peek
 
@@ -543,7 +563,7 @@ it.scopedLive("dynamic test", () =>
       Track: {
         payload: { item: Schema.String },
         success: Schema.String,
-        primaryKey: (p) => p.item,
+        id: (p) => p.item,
       },
     });
 
@@ -609,7 +629,7 @@ const execId = yield * ProcessOrder.executionId({ orderId: "ord-1" });
 const Scheduled = Actor.fromEntity("Scheduled", {
   Process: {
     payload: { id: Schema.String, deliverAt: Schema.DateTimeUtc },
-    primaryKey: (p) => p.id,
+    id: (p) => p.id,
     deliverAt: (p) => p.deliverAt,
     persisted: true,
   },
@@ -638,7 +658,7 @@ Import from `effect-encore/v3`. Same API, different import paths:
 
 | Before (raw cluster)                                                | After (effect-encore)                                      |
 | ------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Custom `Schema.Class` with `PrimaryKey.symbol` + `DeliverAt.symbol` | `primaryKey` + `deliverAt` in OperationDef                 |
+| Custom `Schema.Class` with `PrimaryKey.symbol` + `DeliverAt.symbol` | `id` + `deliverAt` in OperationDef                         |
 | `Rpc.make` + `RpcGroup.make` + `Entity.fromRpcGroup`                | `Actor.fromEntity(name, operations)`                       |
 | `entity.toLayer(Effect.gen(...))` with `entity.of({...})`           | `Actor.toLayer(actor, handlers)`                           |
 | `Context.Tag` + `makeClientLayer` per entity                        | `Actor.toLayer(actor)` — provides `actor.Context`          |
@@ -651,13 +671,13 @@ Import from `effect-encore/v3`. Same API, different import paths:
 
 ### From effect-encore v1 (Actor.make era)
 
-| Before                           | After                                    |
-| -------------------------------- | ---------------------------------------- |
-| `Actor.make("Name", defs)`       | `Actor.fromEntity("Name", defs)`         |
-| `primaryKey` optional            | `primaryKey` mandatory on all operations |
-| `ref.call(op)`                   | `ref.execute(op)`                        |
-| `ref.cast(op)` → `CastReceipt`   | `ref.send(op)` → `ExecId<S, E>`          |
-| `peek(actor, receipt)`           | `actor.peek(execId)`                     |
-| `watch(actor, receipt)`          | `actor.watch(execId)`                    |
-| `import { Workflow } from "..."` | Step DSL via `(payload, step)` handler   |
-| `Workflow.workflow(name, opts)`  | `Actor.fromWorkflow(name, def)`          |
+| Before                           | After                                   |
+| -------------------------------- | --------------------------------------- |
+| `Actor.make("Name", defs)`       | `Actor.fromEntity("Name", defs)`        |
+| `primaryKey` optional            | `id` mandatory on all entity operations |
+| `ref.call(op)`                   | `ref.execute(op)`                       |
+| `ref.cast(op)` → `CastReceipt`   | `ref.send(op)` → `ExecId<S, E>`         |
+| `peek(actor, receipt)`           | `actor.peek(execId)`                    |
+| `watch(actor, receipt)`          | `actor.watch(execId)`                   |
+| `import { Workflow } from "..."` | Step DSL via `(payload, step)` handler  |
+| `Workflow.workflow(name, opts)`  | `Actor.fromWorkflow(name, def)`         |

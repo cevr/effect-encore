@@ -28,6 +28,8 @@ export type {
   SignalDefs,
 } from "./step.js";
 export type { ExecId, PeekResult } from "./receipt.js";
+export { DedupeStrategy } from "./dedupe.js";
+export type { DedupeStrategy as DedupeStrategyType } from "./dedupe.js";
 export {
   makeExecId,
   PeekResultSchema,
