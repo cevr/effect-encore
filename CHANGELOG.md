@@ -1,5 +1,13 @@
 # effect-encore
 
+## 0.8.3
+
+### Patch Changes
+
+- [`3506a8a`](https://github.com/cevr/effect-encore/commit/3506a8a164db4a5b4f362a4cd949cbd15981deaf) Thanks [@cevr](https://github.com/cevr)! - Remove the `DedupeStrategy` operation option and helper exports.
+
+  Deduplication policy stays at the actor operation boundary through the `id` function: return a stable `primaryKey` for durable at-most-once work, or include the higher-level scheduling/rerun semantics in that key when fresh work should be allowed.
+
 ## 0.8.2
 
 ### Patch Changes
