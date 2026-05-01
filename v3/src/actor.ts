@@ -47,7 +47,6 @@ import {
 } from "./receipt.js";
 import { EncoreMessageStorage } from "./storage.js";
 import type { EncoreMessageStorageShape } from "./storage.js";
-import { DedupeStrategy, type DedupeStrategy as DedupeStrategyType } from "./dedupe.js";
 
 // ── Layer passthrough polyfill ─────────────────────────────────────────────
 // Layer.passthrough was removed in Effect 3.x. Polyfill it so input services
@@ -97,7 +96,6 @@ export interface OperationDef {
   readonly success?: Schema.Schema.Any;
   readonly error?: Schema.Schema.Any | Schema.Schema.All;
   readonly persisted?: boolean;
-  readonly dedupe?: DedupeStrategyType;
   readonly id: (payload: never) => EntityIdReturn;
   readonly deliverAt?: (payload: never) => DateTime.DateTime;
 }
@@ -419,7 +417,7 @@ const compileRpc = (actorName: string, tag: string, def: OperationDef): Rpc.Any 
   // That's the `primaryKey` portion of resolveId — for string-form `id`,
   // primaryKey === entityId; for object-form, divergent. `id` is required
   // on every OperationDef.
-  const pkOf = (p: unknown) => storagePrimaryKey(def, resolveId(def, p, tag).primaryKey);
+  const pkOf = (p: unknown) => resolveId(def, p, tag).primaryKey;
 
   if (payload) {
     if (Schema.isSchema(payload)) {
@@ -495,9 +493,6 @@ const parseExecId = (execId: string) => {
   };
 };
 
-const storagePrimaryKey = (def: OperationDef | undefined, primaryKey: string): string =>
-  DedupeStrategy.encodePrimaryKey(def?.dedupe, primaryKey);
-
 // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased at runtime
 const resolveAddress = (entity: ClusterEntity.Entity<string, any>, actorId: string) =>
   Effect.gen(function* () {
@@ -549,7 +544,7 @@ const rerunImpl = (
     const maybeRequestId = yield* storage.requestIdForPrimaryKey({
       address,
       tag,
-      id: storagePrimaryKey(def, primaryKey),
+      id: primaryKey,
     });
     if (Option.isNone(maybeRequestId)) return;
     yield* storage.deleteEnvelope(maybeRequestId.value);
@@ -574,7 +569,7 @@ const peekImpl = (
     const maybeRequestId = yield* storage.requestIdForPrimaryKey({
       address,
       tag: parsed.tag,
-      id: storagePrimaryKey(definitions?.[parsed.tag], parsed.primaryKey),
+      id: parsed.primaryKey,
     });
 
     if (Option.isNone(maybeRequestId)) {

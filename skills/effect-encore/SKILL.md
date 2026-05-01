@@ -65,28 +65,8 @@ Counter.GetCount(); // zero-input, still callable
 | `success`   | `Schema.Top`                                       | no       | Success response schema (default: Void) |
 | `error`     | `Schema.Top`                                       | no       | Error schema (default: Never)           |
 | `persisted` | `boolean`                                          | no       | Persist to MessageStorage               |
-| `id`        | `(payload) => string \| { entityId, primaryKey? }` | yes      | Routing and dedupe / exec ID key        |
-| `dedupe`    | `DedupeStrategy`                                   | no       | `AtMostOnce` default or `InProgress`    |
+| `id`        | `(payload) => string \| { entityId, primaryKey? }` | **yes**  | Routing and dedupe / exec ID key        |
 | `deliverAt` | `(payload) => DateTime`                            | no       | Delayed delivery extractor              |
-
-### Dedupe strategies
-
-Entity operations default to `DedupeStrategy.AtMostOnce`: persisted completions are reused until `.rerun(payload)` clears the execId. Use `DedupeStrategy.InProgress` when duplicate producers should coalesce only while the first run is active, then allow fresh work after completion.
-
-```ts
-import { Actor, DedupeStrategy } from "effect-encore";
-
-const VectorUpdate = Actor.fromEntity("VectorUpdate", {
-  UpdateVectors: {
-    payload: { locationId: Schema.String },
-    persisted: true,
-    dedupe: DedupeStrategy.InProgress,
-    id: (p) => p.locationId,
-  },
-});
-```
-
-Storage adapters use `DedupeStrategy.fromPrimaryKey(clusterPrimaryKey)` to distinguish durable at-most-once keys from active-only keys.
 
 ### EntityActor properties
 
@@ -130,7 +110,7 @@ ProcessOrder.type; // "Workflow/ProcessOrder"
 
 ### Pre-built Schema.Class payload
 
-Escape hatch for custom symbol implementations. The `id`/`dedupe`/`deliverAt` options in OperationDef are ignored when using a Schema.Class — symbols must be on the class.
+Escape hatch for custom symbol implementations. The `id`/`deliverAt` options in OperationDef are ignored when using a Schema.Class — symbols must be on the class.
 
 ```ts
 class CustomPayload extends Schema.Class<CustomPayload>("CustomPayload")({

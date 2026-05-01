@@ -100,27 +100,6 @@ PagerDuty: {
 
 `id` must be deterministic.
 
-## Entity Dedupe Strategies
-
-Entity operations default to `dedupe: DedupeStrategy.AtMostOnce`: a persisted primary-key completion is reusable until `.rerun(payload)` explicitly clears that execId.
-
-Use `dedupe: DedupeStrategy.InProgress` for coalescing duplicate producers only while the original work is still active. The public `ExecId` stays stable (`entityId\0tag\0rawPrimaryKey`), while the storage primary key carries an effect-encore marker so adapters can release the dedupe index after terminal completion.
-
-```ts
-import { Actor, DedupeStrategy } from "effect-encore";
-
-const VectorUpdate = Actor.fromEntity("VectorUpdate", {
-  UpdateVectors: {
-    payload: { locationId: Schema.String },
-    persisted: true,
-    dedupe: DedupeStrategy.InProgress,
-    id: (p) => p.locationId,
-  },
-});
-```
-
-Storage adapters that support this policy should branch with `DedupeStrategy.fromPrimaryKey(clusterPrimaryKey)`. Treat `AtMostOnce` as the durable default and `InProgress` as active-only uniqueness; `DedupeStrategy.stripPrimaryKey(...)` removes the marker when presenting keys.
-
 ## ExecId
 
 - Format: `entityId\0tag\0primaryKey` (null byte separator — safe with colons in any segment)
@@ -129,7 +108,7 @@ Storage adapters that support this policy should branch with `DedupeStrategy.fro
 
 ## Surgical rerun (`<Op>.rerun(payload)`)
 
-For the default `AtMostOnce` strategy, dedup records survive forever — that's the property the library sells. `.rerun(payload)` is the surgical escape hatch:
+Dedup records survive forever — that's the property the library sells. `.rerun(payload)` is the surgical escape hatch:
 
 - **Entity**: derives `{entityId, primaryKey}` via `id`, looks up the requestId for the primaryKey, calls `EncoreMessageStorage.deleteEnvelope(requestId)`. No-op on non-existent execId.
 - **Workflow**: `WorkflowEngine.interrupt(executionId)` (signals fiber if running, no-op if completed) + `EncoreMessageStorage.clearAddress(workflowAddress)` (wipes run reply AND every cached activity reply at the same address).
@@ -149,8 +128,6 @@ const storageLayer = encoreMessageStorageLayer(upstreamStorageLayer, {
 ```
 
 Required by `OperationHandle.rerun` and `WorkflowActor.rerun`. Adapters that haven't implemented yet should fail loud (`Effect.die`) rather than coarsen to `flush`.
-
-Adapters that implement `DedupeStrategy.InProgress` must still implement `deleteEnvelope`; `.rerun(payload)` always uses the same storage primary-key encoding as normal dispatch.
 
 ## Payload Classification
 
