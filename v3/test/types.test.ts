@@ -1,10 +1,23 @@
 import { describe, test } from "effect-bun-test/v3";
 import { Effect, Schema } from "effect";
 import type { Cause, Duration, Layer, Scope, Stream } from "effect";
+import type {
+  AlreadyProcessingMessage,
+  MailboxFull,
+  PersistenceError,
+} from "@effect/cluster/ClusterError";
+import type { Snowflake } from "@effect/cluster";
 import type { Execution } from "@effect/workflow/Workflow";
 import type { WorkflowEngine, WorkflowInstance } from "@effect/workflow/WorkflowEngine";
 import { Actor } from "../src/index.js";
-import type { ExecId, PeekResult, WorkflowSignal } from "../src/index.js";
+import type {
+  ActorAddressResolverShape,
+  ActorMailboxShape,
+  ExecId,
+  MailboxError,
+  PeekResult,
+  WorkflowSignal,
+} from "../src/index.js";
 
 // ── Type-level tests for ExecId phantom brand inference ───────────────────
 
@@ -54,20 +67,35 @@ type _PeekResultHasSuspended = Assert<
 >;
 
 describe("type-level tests", () => {
+  // The new `.send` boundary moved from `ActorClientService` to
+  // ActorMailbox + ActorAddressResolver + Snowflake.Generator. We pin the
+  // exact E/R contract once (here) so accidental drift fails fast; the
+  // remaining `.send` tests stay loose with `unknown` to avoid noise on
+  // signature-level changes elsewhere.
+  type SendError = MailboxError | PersistenceError | MailboxFull | AlreadyProcessingMessage;
+  type SendR = ActorMailboxShape | ActorAddressResolverShape | Snowflake.Generator;
+  test("Place.send pins the exact error union and required services", () => {
+    const _check = (): Effect.Effect<ExecId<string, OrderError>, SendError, SendR> =>
+      Order.Place.send({ item: "widget" });
+    void _check;
+  });
+
+  // Looser assertions for the remaining call sites — they exercise success-type
+  // inference (the phantom) without re-asserting the boundary every time.
   test("Place.send returns ExecId<success, error> with correct phantom types", () => {
-    const _check = (): Effect.Effect<ExecId<string, OrderError>, never, unknown> =>
+    const _check = (): Effect.Effect<ExecId<string, OrderError>, unknown, unknown> =>
       Order.Place.send({ item: "widget" });
     void _check;
   });
 
   test("Count.send returns ExecId<number, never>", () => {
-    const _check = (): Effect.Effect<ExecId<number, never>, never, unknown> =>
+    const _check = (): Effect.Effect<ExecId<number, never>, unknown, unknown> =>
       Order.Count.send(undefined as never);
     void _check;
   });
 
   test("Greeter.send returns ExecId<string, never> with correct phantom types", () => {
-    const _check = (): Effect.Effect<ExecId<string, never>, never, unknown> =>
+    const _check = (): Effect.Effect<ExecId<string, never>, unknown, unknown> =>
       Greeter.send({ name: "world" });
     void _check;
   });
