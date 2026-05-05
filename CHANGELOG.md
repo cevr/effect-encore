@@ -1,5 +1,39 @@
 # effect-encore
 
+## 0.9.0
+
+### Minor Changes
+
+- [`59885ec`](https://github.com/cevr/effect-encore/commit/59885ecf6acb86538aa5ee86d0d7061a92e954f6) Thanks [@cevr](https://github.com/cevr)! - Add `ActorSenderLayer` — a bundle of `ActorMailbox` + `ActorAddressResolver` + `Snowflake.Generator` (all on the `fromConfig` variants) for sender-only / ops-only hosts. Cuts the producer wiring from a three-layer `Layer.mergeAll` to a single `ActorSenderLayer.layer` (still requires `MessageStorage` + `ShardingConfig`).
+
+  `ActorSenderLayer.layerMemory` provides the same bundle with in-memory storage and default sharding config preset — drop-in for tests and single-process setups.
+
+  The underlying `ActorMailboxLayer` / `ActorAddressResolverLayer` factories remain exported unchanged for advanced wiring (e.g. ops-only hosts that need address math but not `.send`).
+
+- [#17](https://github.com/cevr/effect-encore/pull/17) [`fe13b49`](https://github.com/cevr/effect-encore/commit/fe13b494d4125d5355645ba629ebfe2902081fb2) Thanks [@cevr](https://github.com/cevr)! - Fix producer-only `.send()` deadlock by introducing two narrow Tags that replace the previous `ActorClientService` dispatch surface.
+
+  **The bug.** `OperationHandle.send` previously dispatched through `Sharding.makeClient`, which routes via `sendOutgoing → notifyLocal → waitForEntityManager`. In producer-only hosts (no handler registered for the entity), `notifyLocal` blocks until `entityRegistrationTimeout` (15s default) and then dies with `Entity type 'X' not registered`. This made producer-only `.send()` impossible through the public encore surface.
+
+  **The fix.** Two new Tags decouple the dispatch surface from `Sharding.Sharding`:
+  - `ActorAddressResolver` — pure address resolution. `fromConfig` (only `ShardingConfig`) replicates upstream's djb2 + bit-mix shard math; `fromSharding` delegates to live `Sharding`. Both produce identical `EntityAddress` for the same `(entityId, shardGroup)` (parity test enforces this).
+  - `ActorMailbox` — outbound dispatch. `fromConfig` (only `MessageStorage`) treats `SaveResult.Success` and `SaveResult.Duplicate` as enqueued; rejects non-persisted requests loudly so the platform's persisted gate is mirrored. `fromSharding` delegates to `sharding.sendOutgoing(request, true)`.
+
+  `OperationHandle.send` now requires `ActorMailbox | ActorAddressResolver | Snowflake.Generator`. `peek/watch/waitFor/rerun/flush/redeliver/interrupt` swap `Sharding.Sharding` for `ActorAddressResolver`. `Actor.toLayer` and `Actor.toTestLayer` provide the consumer-side support layers automatically — existing consumer hosts see no behavior change.
+
+  **Producer-only / ops-only hosts** must wire the `fromConfig` variants explicitly:
+
+  ```ts
+  Layer.mergeAll(
+    ActorMailboxLayer.fromConfig,
+    ActorAddressResolverLayer.fromConfig,
+    Snowflake.layerGenerator,
+  );
+  ```
+
+  The consumer's storage poll loop (`Sharding.unprocessedMessages`) routes the envelope on the next `entityMessagePollInterval` tick — `notifyLocal` is an acceleration path, not the only delivery mechanism. Tradeoff: latency bounded by `entityMessagePollInterval`, not correctness.
+
+  Mirrored across both v3 (`v3/src/`) and v4 (`src/`) lines.
+
 ## 0.8.3
 
 ### Patch Changes
