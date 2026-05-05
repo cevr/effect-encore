@@ -199,32 +199,32 @@ const token = ProcessOrder.ManagerApproval.tokenFromExecutionId(executionId);
 yield * ProcessOrder.ManagerApproval.succeed({ token, value: decision });
 ```
 
-### Producer-Only (Client Layer)
+### Sender-Only (Client Layer)
 
 `.send()` (fire-and-forget dispatch) goes through `ActorMailbox` + `ActorAddressResolver` Tags. Consumer hosts that already have full `Sharding.Sharding` get the wiring for free from `Actor.toLayer`.
 
-Producer-only / ops-only hosts that must NOT register entity managers wire the `fromConfig` variants directly — they require only `MessageStorage` and `ShardingConfig`, no `Sharding` runtime, no `notifyLocal` deadlock:
+Sender-only / ops-only hosts that must NOT register entity managers use `ActorSenderLayer` — bundles the three Tags on the `fromConfig` variants. Requires only `MessageStorage` + `ShardingConfig`, no `Sharding` runtime, no `notifyLocal` deadlock:
 
 ```ts
 import { Layer } from "effect";
-import { MessageStorage, ShardingConfig, Snowflake } from "effect/unstable/cluster";
-import { ActorAddressResolverLayer, ActorMailboxLayer } from "effect-encore";
+import { MessageStorage, ShardingConfig } from "effect/unstable/cluster";
+import { ActorSenderLayer } from "effect-encore";
 
-const ProducerSupport = Layer.mergeAll(
-  ActorMailboxLayer.fromConfig,
-  ActorAddressResolverLayer.fromConfig,
-  Snowflake.layerGenerator,
-).pipe(
+const SenderSupport = ActorSenderLayer.layer.pipe(
   Layer.provide(MessageStorage.layerMemory), // or your durable storage
   Layer.provide(ShardingConfig.layer()),
 );
+
+// Or, for tests / single-process setups — bundle includes in-memory
+// storage and default sharding config:
+const SenderTest = ActorSenderLayer.layerMemory;
 
 // Sends are durably enqueued; the consumer's storage poll loop picks them up
 // on the next entityMessagePollInterval tick.
 yield * Order.Place.send({ item: "widget", qty: 3 });
 ```
 
-`ActorMailboxLayer.fromConfig` rejects non-persisted requests with `MailboxError` (only persisted requests can cross the storage boundary), mirroring upstream's persisted gate. Use `ActorMailboxLayer.fromSharding` when the host already has `Sharding.Sharding` and prefers the `notifyLocal`-accelerated path.
+`ActorMailboxLayer.fromConfig` rejects non-persisted requests with `MailboxError` (only persisted requests can cross the storage boundary), mirroring upstream's persisted gate. Use `ActorMailboxLayer.fromSharding` when the host already has `Sharding.Sharding` and prefers the `notifyLocal`-accelerated path. The underlying `ActorMailboxLayer` / `ActorAddressResolverLayer` Tags remain exposed for advanced wiring (e.g. ops-only hosts that need address resolution but not `.send`).
 
 ### Test
 

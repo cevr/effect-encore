@@ -54,3 +54,4 @@ export { ActorAddressResolver, ActorAddressResolverLayer } from "./actor-address
 export type { ActorAddressResolverShape } from "./actor-address-resolver.js";
 export { ActorMailbox, ActorMailboxLayer, MailboxError } from "./actor-mailbox.js";
 export type { ActorMailboxShape } from "./actor-mailbox.js";
+export { ActorSenderLayer } from "./actor-sender.js";
