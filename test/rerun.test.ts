@@ -1,7 +1,12 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer as L, Ref, Schema } from "effect";
 import { MessageStorage, TestRunner } from "effect/unstable/cluster";
-import { Actor, EncoreMessageStorage, fromMessageStorage } from "../src/index.js";
+import {
+  Actor,
+  ActorAddressResolverLayer,
+  EncoreMessageStorage,
+  fromMessageStorage,
+} from "../src/index.js";
 
 // ── Test layer providing EncoreMessageStorage on top of TestRunner ─────────
 
@@ -40,7 +45,12 @@ const EncoreMessageStorageTest = L.effect(
 
 // EncoreMessageStorageTest needs MemoryDriver, which TestRunner.layer provides.
 // `provideMerge` keeps the upstream tags in the result alongside the new one.
-const TestCluster = L.provideMerge(EncoreMessageStorageTest, TestRunner.layer);
+// ActorAddressResolverLayer.fromSharding is wired so .rerun has the resolver
+// alongside the storage shape.
+const TestCluster = ActorAddressResolverLayer.fromSharding.pipe(
+  L.provideMerge(EncoreMessageStorageTest),
+  L.provideMerge(TestRunner.layer),
+);
 
 describe("OperationHandle.rerun", () => {
   it.scopedLive("rerun-of-non-existent-execId is a no-op (idempotent)", () =>

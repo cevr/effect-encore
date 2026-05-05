@@ -1,18 +1,39 @@
-import type { Entity as ClusterEntity } from "@effect/cluster";
 import {
   ClusterSchema,
+  type Entity as ClusterEntity,
   Entity,
   EntityAddress,
   EntityId,
   EntityType,
+  Envelope,
+  Message,
   MessageStorage,
   Sharding,
+  type ShardingConfig,
+  Snowflake,
 } from "@effect/cluster";
 import * as DeliverAt from "@effect/cluster/DeliverAt";
-import type { MalformedMessage, PersistenceError } from "@effect/cluster/ClusterError";
+import type {
+  AlreadyProcessingMessage,
+  MailboxFull,
+  MalformedMessage,
+  PersistenceError,
+} from "@effect/cluster/ClusterError";
+import * as Headers from "@effect/platform/Headers";
 import type { Rpc, RpcClient, RpcGroup } from "@effect/rpc";
 import { Rpc as RpcMod } from "@effect/rpc";
 import { Workflow as UpstreamWorkflow } from "@effect/workflow";
+import {
+  ActorAddressResolver,
+  ActorAddressResolverLayer,
+  type ActorAddressResolverShape,
+} from "./actor-address-resolver.js";
+import {
+  ActorMailbox,
+  ActorMailboxLayer,
+  type ActorMailboxShape,
+  MailboxError,
+} from "./actor-mailbox.js";
 import type { Execution } from "@effect/workflow/Workflow";
 import type { WorkflowEngine, WorkflowInstance } from "@effect/workflow/WorkflowEngine";
 import { layerMemory as workflowEngineLayerMemory } from "@effect/workflow/WorkflowEngine";
@@ -323,8 +344,8 @@ export interface OperationHandle<
     payload: PayloadInput<C>,
   ) => Effect.Effect<
     ExecId<Schema.Schema.Type<SuccessOf<C>>, Schema.Schema.Type<ErrorOf<C>>>,
-    never,
-    ActorClientService<Name, Defs>
+    MailboxError | PersistenceError | MailboxFull | AlreadyProcessingMessage,
+    ActorMailboxShape | ActorAddressResolverShape | Snowflake.Generator
   >;
   readonly executionId: (
     payload: PayloadInput<C>,
@@ -334,7 +355,7 @@ export interface OperationHandle<
   ) => Effect.Effect<
     PeekResult<Schema.Schema.Type<SuccessOf<C>>, Schema.Schema.Type<ErrorOf<C>>>,
     PersistenceError | MalformedMessage,
-    MessageStorage.MessageStorage | Sharding.Sharding
+    MessageStorage.MessageStorage | ActorAddressResolverShape
   >;
   readonly watch: (
     payload: PayloadInput<C>,
@@ -342,7 +363,7 @@ export interface OperationHandle<
   ) => Stream.Stream<
     PeekResult<Schema.Schema.Type<SuccessOf<C>>, Schema.Schema.Type<ErrorOf<C>>>,
     PersistenceError | MalformedMessage,
-    MessageStorage.MessageStorage | Sharding.Sharding
+    MessageStorage.MessageStorage | ActorAddressResolverShape
   >;
   readonly waitFor: (
     payload: PayloadInput<C>,
@@ -356,11 +377,11 @@ export interface OperationHandle<
   ) => Effect.Effect<
     PeekResult<Schema.Schema.Type<SuccessOf<C>>, Schema.Schema.Type<ErrorOf<C>>>,
     PersistenceError | MalformedMessage,
-    MessageStorage.MessageStorage | Sharding.Sharding
+    MessageStorage.MessageStorage | ActorAddressResolverShape
   >;
   readonly rerun: (
     payload: PayloadInput<C>,
-  ) => Effect.Effect<void, PersistenceError, EncoreMessageStorageShape | Sharding.Sharding>;
+  ) => Effect.Effect<void, PersistenceError, EncoreMessageStorageShape | ActorAddressResolverShape>;
   readonly make: (payload: PayloadInput<C>) => OperationValue<Name, Tag, C>;
 }
 
@@ -393,13 +414,25 @@ export type EntityActor<
      */
     readonly interrupt: (
       entityId: string,
-    ) => Effect.Effect<void, PersistenceError, MessageStorage.MessageStorage | Sharding.Sharding>;
+    ) => Effect.Effect<
+      void,
+      PersistenceError,
+      MessageStorage.MessageStorage | ActorAddressResolverShape
+    >;
     readonly flush: (
       actorId: string,
-    ) => Effect.Effect<void, PersistenceError, MessageStorage.MessageStorage | Sharding.Sharding>;
+    ) => Effect.Effect<
+      void,
+      PersistenceError,
+      MessageStorage.MessageStorage | ActorAddressResolverShape
+    >;
     readonly redeliver: (
       actorId: string,
-    ) => Effect.Effect<void, PersistenceError, MessageStorage.MessageStorage | Sharding.Sharding>;
+    ) => Effect.Effect<
+      void,
+      PersistenceError,
+      MessageStorage.MessageStorage | ActorAddressResolverShape
+    >;
     readonly of: (handlers: ActorHandlers<Defs>) => ActorHandlers<Defs>;
     readonly $is: <Tag extends keyof Defs & string>(
       tag: Tag,
@@ -493,39 +526,145 @@ const parseExecId = (execId: string) => {
   };
 };
 
-// eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased at runtime
-const resolveAddress = (entity: ClusterEntity.Entity<string, any>, actorId: string) =>
-  Effect.gen(function* () {
-    const sharding = yield* Sharding.Sharding;
-    const entityId = EntityId.make(actorId);
-    const shardId = sharding.getShardId(entityId, entity.getShardGroup(entityId));
-    return EntityAddress.make({
-      entityType: entity.type,
-      entityId,
-      shardId,
-    });
+// ── OutgoingRequest builder for .send dispatch ───────────────────────────
+// Produces the same OutgoingRequest shape as upstream `Sharding.makeClient`
+// (Sharding.ts:1043-1052) but bypasses Sharding entirely so the host doesn't
+// need a registered entity manager. The mailbox's `send` decides what to do
+// with the request (saveRequest vs. sendOutgoing).
+//
+// Payload handling mirrors `buildActorRef.send` (the legacy path through
+// `client.client(tag, payload, {discard:true})`): for opaque payload defs
+// the raw `_payload` is the rpc's payload value; for struct-fields defs the
+// fields-only object becomes a `Schema.Class` instance via the rpc's
+// payloadSchema. The class instance carries `PrimaryKey.symbol` /
+// `DeliverAt.symbol` on its prototype, which `Envelope.primaryKey` and
+// `DeliverAt.toMillis` read inside `MessageStorage.saveRequest`.
+//
+// Captures fiber.currentContext into the OutgoingRequest to mirror upstream's
+// `makeClient` (`@effect/cluster/src/Sharding.ts:1033-1062`). MessageStorage
+// duplicate decoding reads `message.context` — empty context is wrong for any
+// schema that requires services at decode time.
+const buildOutgoingRequestForSend = (
+  // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs erased
+  entity: ClusterEntity.Entity<string, any>,
+  tag: string,
+  def: OperationDef | undefined,
+  address: EntityAddress.EntityAddress,
+  opValue: { readonly _tag: string; readonly [key: string]: unknown },
+  snowflakeGen: Snowflake.Snowflake.Generator,
+): Effect.Effect<Message.OutgoingRequest<Rpc.Any>> =>
+  Effect.withFiberRuntime((fiber) => {
+    const rpc = entity.protocol.requests.get(tag);
+    if (!rpc) {
+      throw new Error(`effect-encore: rpc "${tag}" not found on entity "${entity.type}"`);
+    }
+    // eslint-disable-next-line typescript-eslint/no-explicit-any -- payloadSchema type-erased
+    const payloadSchema = (rpc as any).payloadSchema as Schema.Schema.Any;
+
+    let payload: unknown;
+    if (!def?.payload) {
+      // Zero-payload op. compileRpc still creates an EmptyPayloadClass; we
+      // construct an instance so PrimaryKey.symbol resolves.
+      // eslint-disable-next-line typescript-eslint/no-explicit-any -- class constructor
+      payload = new (payloadSchema as any)({});
+    } else if (isOpaquePayload(def.payload)) {
+      // Opaque scalar payload — raw value is what the rpc's schema decodes.
+      payload = opValue["_payload"];
+    } else {
+      // Struct-fields payload — instantiate compileRpc's PayloadClass.
+      const { _tag: _t, ...fields } = opValue;
+      void _t;
+      // eslint-disable-next-line typescript-eslint/no-explicit-any -- class constructor
+      payload = new (payloadSchema as any)(fields);
+    }
+
+    const fiberContext = fiber.currentContext as Context.Context<never>;
+
+    return Effect.succeed(
+      new Message.OutgoingRequest({
+        rpc,
+        // eslint-disable-next-line typescript-eslint/no-explicit-any -- mirror of Sharding.makeClient (line 1062)
+        context: fiberContext as any,
+        envelope: Envelope.makeRequest({
+          requestId: snowflakeGen.unsafeNext(),
+          address,
+          // tag/payload are type-erased — Envelope.makeRequest's generic Rpc
+          // collapses to never when called dynamically. Widen via cast.
+          tag: tag as never,
+          payload: payload as never,
+          headers: Headers.empty,
+        }),
+        lastReceivedReply: Option.none(),
+        respond: () => Effect.void,
+      }),
+    );
   });
+
+// eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased at runtime
+const resolveEntityAddress = (
+  resolver: ActorAddressResolverShape,
+  // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs erased
+  entity: ClusterEntity.Entity<string, any>,
+  actorId: string,
+): EntityAddress.EntityAddress => resolver.resolveEntity(entity, actorId);
+
+// Test ActorMailbox impl that routes a prebuilt OutgoingRequest back through
+// the entity's per-entity test rpcClient (with `{ discard: true }`). Used by
+// `toTestLayer`. NOT exported on the public surface — production hosts must
+// use `ActorMailbox.fromConfig` or `fromSharding`.
+const makeTestMailboxImpl = (
+  makeClient: (entityId: string) => Effect.Effect<RpcClient.RpcClient<Rpc.Any, never>>,
+): ActorMailboxShape => ({
+  send: (request) =>
+    Effect.gen(function* () {
+      const envelope = request.envelope;
+      const entityId = envelope.address.entityId as string;
+      const tag = envelope.tag;
+      const payload = envelope.payload;
+      const rpcClient = yield* makeClient(entityId);
+      // eslint-disable-next-line typescript-eslint/no-explicit-any -- rpcClient type-erased
+      const fn = (rpcClient as unknown as Record<string, Function>)[tag];
+      if (!fn) {
+        return yield* Effect.fail(
+          new MailboxError({
+            cause: new Error(
+              `effect-encore test mailbox: unknown rpc "${tag}" on entity "${envelope.address.entityType}"`,
+            ),
+          }),
+        );
+      }
+      yield* fn(payload, { discard: true }) as Effect.Effect<void>;
+    }),
+});
 
 const flushImpl = (
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased
   entity: ClusterEntity.Entity<string, any>,
   actorId: string,
-): Effect.Effect<void, PersistenceError, MessageStorage.MessageStorage | Sharding.Sharding> =>
+): Effect.Effect<
+  void,
+  PersistenceError,
+  MessageStorage.MessageStorage | ActorAddressResolverShape
+> =>
   Effect.gen(function* () {
     const storage = yield* MessageStorage.MessageStorage;
-    const address = yield* resolveAddress(entity, actorId);
-    yield* storage.clearAddress(address);
+    const resolver = yield* ActorAddressResolver;
+    yield* storage.clearAddress(resolveEntityAddress(resolver, entity, actorId));
   });
 
 const redeliverImpl = (
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased
   entity: ClusterEntity.Entity<string, any>,
   actorId: string,
-): Effect.Effect<void, PersistenceError, MessageStorage.MessageStorage | Sharding.Sharding> =>
+): Effect.Effect<
+  void,
+  PersistenceError,
+  MessageStorage.MessageStorage | ActorAddressResolverShape
+> =>
   Effect.gen(function* () {
     const storage = yield* MessageStorage.MessageStorage;
-    const address = yield* resolveAddress(entity, actorId);
-    yield* storage.resetAddress(address);
+    const resolver = yield* ActorAddressResolver;
+    yield* storage.resetAddress(resolveEntityAddress(resolver, entity, actorId));
   });
 
 // ── rerun — surgical per-execId clear via deleteEnvelope ─────────────────
@@ -536,11 +675,12 @@ const rerunImpl = (
   def: OperationDef | undefined,
   tag: string,
   payload: unknown,
-): Effect.Effect<void, PersistenceError, EncoreMessageStorageShape | Sharding.Sharding> =>
+): Effect.Effect<void, PersistenceError, EncoreMessageStorageShape | ActorAddressResolverShape> =>
   Effect.gen(function* () {
     const { entityId, primaryKey } = resolveId(def, payload, tag);
     const storage = yield* EncoreMessageStorage;
-    const address = yield* resolveAddress(entity, entityId);
+    const resolver = yield* ActorAddressResolver;
+    const address = resolveEntityAddress(resolver, entity, entityId);
     const maybeRequestId = yield* storage.requestIdForPrimaryKey({
       address,
       tag,
@@ -558,13 +698,14 @@ const peekImpl = (
 ): Effect.Effect<
   PeekResult,
   PersistenceError | MalformedMessage,
-  MessageStorage.MessageStorage | Sharding.Sharding
+  MessageStorage.MessageStorage | ActorAddressResolverShape
 > => {
   const parsed = parseExecId(execId);
 
   return Effect.gen(function* () {
     const storage = yield* MessageStorage.MessageStorage;
-    const address = yield* resolveAddress(entity, parsed.entityId);
+    const resolver = yield* ActorAddressResolver;
+    const address = resolveEntityAddress(resolver, entity, parsed.entityId);
 
     const maybeRequestId = yield* storage.requestIdForPrimaryKey({
       address,
@@ -692,7 +833,7 @@ const watchImpl = (
 ): Stream.Stream<
   PeekResult,
   PersistenceError | MalformedMessage,
-  MessageStorage.MessageStorage | Sharding.Sharding
+  MessageStorage.MessageStorage | ActorAddressResolverShape
 > => {
   const interval = options?.interval ?? Duration.millis(200);
   return Stream.repeatEffectWithSchedule(
@@ -872,12 +1013,29 @@ const makeOperationHandle = <
         const ref = yield* factory(entityId);
         return yield* ref.execute(buildOpValue(tag, payload) as never);
       })) as never,
+    // .send dispatches via ActorMailbox + ActorAddressResolver. The two
+    // mailbox layers (`fromConfig` storage-only, `fromSharding` delegating)
+    // satisfy this same call site — producer-only hosts wire `fromConfig`
+    // and consumer hosts wire `fromSharding`. No `notifyLocal` deadlock.
     send: ((payload: unknown) =>
       Effect.gen(function* () {
-        const factory = yield* contextTag;
+        const mailbox = yield* ActorMailbox;
+        const resolver = yield* ActorAddressResolver;
+        const snowflakeGen = yield* Snowflake.Generator;
         const { entityId } = idOf(payload);
-        const ref = yield* factory(entityId);
-        return yield* ref.send(buildOpValue(tag, payload) as never);
+        const address = resolver.resolveEntity(entityAny, entityId);
+        const request = yield* buildOutgoingRequestForSend(
+          entityAny,
+          tag,
+          def,
+          address,
+          // buildOpValue always returns an object with a `_tag` field — see
+          // its definition above. TS widens the literal away though.
+          buildOpValue(tag, payload) as { readonly _tag: string; readonly [key: string]: unknown },
+          snowflakeGen,
+        );
+        yield* mailbox.send(request);
+        return execId(payload);
       })) as never,
     executionId: ((payload: unknown) => Effect.succeed(execId(payload))) as never,
     peek: ((payload: unknown) =>
@@ -916,7 +1074,14 @@ function toLayer<
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
 >(
   actor: EntityActor<Name, Defs, Rpcs>,
-): Layer.Layer<ActorClientService<Name, Defs>, never, Scope.Scope | Rpc.MiddlewareClient<Rpcs>>;
+): Layer.Layer<
+  | ActorClientService<Name, Defs>
+  | ActorMailboxShape
+  | ActorAddressResolverShape
+  | Snowflake.Generator,
+  never,
+  Sharding.Sharding | Scope.Scope | Rpc.MiddlewareClient<Rpcs>
+>;
 
 function toLayer<
   Name extends string,
@@ -929,9 +1094,12 @@ function toLayer<
   options?: HandlerOptions,
   /* eslint-disable typescript-eslint/no-explicit-any -- implementation overload requires any */
 ): Layer.Layer<
-  ActorClientService<Name, Defs>,
+  | ActorClientService<Name, Defs>
+  | ActorMailboxShape
+  | ActorAddressResolverShape
+  | Snowflake.Generator,
   never,
-  RX | Scope.Scope | Rpc.MiddlewareClient<Rpcs>
+  RX | Sharding.Sharding | Scope.Scope | Rpc.MiddlewareClient<Rpcs>
 >;
 
 // Workflow overload
@@ -987,8 +1155,22 @@ function toLayer(
     ),
   );
 
+  // Consumer hosts already have full `Sharding.Sharding` from
+  // `TestRunner.layer` / `ClusterRunnerSocket.layer` / similar — wire
+  // ActorMailbox + ActorAddressResolver from that. Producer-only hosts must
+  // wire `fromConfig` variants explicitly at the runtime root.
+  //
+  // `Snowflake.layerGenerator` is needed by `OperationHandle.send` to build
+  // the `OutgoingRequest`. `Sharding.layer` consumes it internally but
+  // doesn't expose it, so we provide a fresh generator at this surface.
+  const consumerSupportLayers = Layer.mergeAll(
+    ActorMailboxLayer.fromSharding,
+    ActorAddressResolverLayer.fromSharding,
+    Snowflake.layerGenerator,
+  );
+
   if (build === undefined) {
-    return clientLayer;
+    return Layer.merge(clientLayer, consumerSupportLayers);
   }
 
   const transformed = transformHandlers(build, actor._meta.definitions);
@@ -999,7 +1181,9 @@ function toLayer(
     mailboxCapacity: options?.mailboxCapacity,
   });
 
-  return layerPassthrough(Layer.merge(handlerLayer, clientLayer));
+  return layerPassthrough(
+    Layer.merge(Layer.merge(handlerLayer, clientLayer), consumerSupportLayers),
+  );
 }
 
 // ── Actor.toTestLayer ─────────────────────────────────────────────────────
@@ -1014,7 +1198,14 @@ function toTestLayer<
   actor: EntityActor<Name, Defs, Rpcs>,
   build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
   options?: HandlerOptions,
-): Layer.Layer<ActorClientService<Name, Defs>>;
+): Layer.Layer<
+  | ActorClientService<Name, Defs>
+  | ActorMailboxShape
+  | ActorAddressResolverShape
+  | Snowflake.Generator,
+  never,
+  ShardingConfig.ShardingConfig
+>;
 
 // Workflow overload
 function toTestLayer<
@@ -1055,19 +1246,37 @@ function toTestLayer(
     mailboxCapacity: options?.mailboxCapacity,
   });
 
-  return Layer.effect(
-    actor.Context,
-    Effect.map(
-      Entity.makeTestClient(actor._meta.entity, handlerLayer as never),
-      (makeClient: Function) =>
-        (entityId: string): Effect.Effect<ActorRef<string, OperationDefs>> =>
-          Effect.map(
-            makeClient(entityId) as Effect.Effect<RpcClient.RpcClient<Rpc.Any, never>>,
-            (rpcClient) =>
-              buildActorRef(actor._meta.name, entityId, actor._meta.definitions, rpcClient),
-          ),
-    ),
+  // Build the test rpcClient factory once and use it for BOTH the
+  // ActorClientService (.execute path) AND the test ActorMailbox (.send path).
+  // `Entity.makeTestClient` is a scoped resource — `Layer.scopedContext` hosts
+  // it in the layer's build scope and we expose two services from one closure.
+  //
+  // Pure-data resolver + a fresh Snowflake.Generator complete the wiring so
+  // OperationHandle.send can build OutgoingRequests.
+  const factoryAndMailboxLayer = Layer.scopedContext(
+    Effect.gen(function* () {
+      const makeClient = (yield* Entity.makeTestClient(
+        actor._meta.entity,
+        handlerLayer as never,
+      )) as (entityId: string) => Effect.Effect<RpcClient.RpcClient<Rpc.Any, never>>;
+
+      const factory = (entityId: string): Effect.Effect<ActorRef<string, OperationDefs>> =>
+        Effect.map(makeClient(entityId), (rpcClient) =>
+          buildActorRef(actor._meta.name, entityId, actor._meta.definitions, rpcClient),
+        );
+
+      const mailboxImpl: ActorMailboxShape = makeTestMailboxImpl(makeClient);
+
+      return Context.empty().pipe(
+        Context.add(actor.Context, factory),
+        Context.add(ActorMailbox, mailboxImpl),
+      );
+    }),
   );
+
+  const supportLayers = Layer.merge(ActorAddressResolverLayer.fromConfig, Snowflake.layerGenerator);
+
+  return Layer.merge(factoryAndMailboxLayer, supportLayers);
 }
 
 // ── Transform handlers from operation-first to request-first ───────────────
