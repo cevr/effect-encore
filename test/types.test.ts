@@ -13,6 +13,7 @@ import { Actor } from "../src/index.js";
 import type {
   ActorAddressResolver,
   ActorMailbox,
+  CurrentAddress,
   ExecId,
   MailboxError,
   PeekResult,
@@ -366,6 +367,25 @@ describe("workflow toLayer regression — context exclusion", () => {
     type _NoWorkflowInstance = Assert<IsExact<Extract<RIn, WorkflowInstance>, never>>;
     type _NoExecution = Assert<IsExact<Extract<RIn, Execution<"Regression">>, never>>;
     type _NoScope = Assert<IsExact<Extract<RIn, Scope.Scope>, never>>;
+    void layer;
+  });
+});
+
+describe("entity toLayer regression — current address context exclusion", () => {
+  test("handler can access Actor.CurrentAddress without leaking it to layer requirements", () => {
+    const layer = Actor.toLayer(
+      Order,
+      Effect.gen(function* () {
+        const address = yield* Actor.CurrentAddress;
+        return {
+          Place: ({ operation }) => Effect.succeed(`${address.entityId}:${operation.item}`),
+          Count: () => Effect.succeed(1),
+        } as const;
+      }),
+    );
+
+    type RIn = Layer.Services<typeof layer>;
+    type _NoCurrentAddress = Assert<IsExact<Extract<RIn, CurrentAddress>, never>>;
     void layer;
   });
 });

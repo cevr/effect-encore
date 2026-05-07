@@ -1,4 +1,4 @@
-export { Actor, fromRpcs, withProtocol } from "./actor.js";
+export { Actor, CurrentAddress, fromRpcs, withProtocol } from "./actor.js";
 export type {
   EntityActor,
   AnyEntityActor,

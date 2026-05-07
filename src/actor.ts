@@ -13,6 +13,7 @@ import {
   Snowflake,
 } from "effect/unstable/cluster";
 import * as DeliverAt from "effect/unstable/cluster/DeliverAt";
+import { CurrentAddress, type CurrentRunnerAddress } from "effect/unstable/cluster/Entity";
 import type {
   AlreadyProcessingMessage,
   MailboxFull,
@@ -1036,7 +1037,10 @@ function toLayer<
 ): Layer.Layer<
   ActorClientService<Name, Defs> | ActorMailbox | ActorAddressResolver | Snowflake.Generator,
   never,
-  RX | Sharding.Sharding | Scope.Scope | Rpc.MiddlewareClient<Rpcs>
+  | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress>
+  | Sharding.Sharding
+  | Scope.Scope
+  | Rpc.MiddlewareClient<Rpcs>
 >;
 
 // Workflow overload
@@ -1873,6 +1877,8 @@ const withProtocolImpl = <
 
 export const withProtocol: WithProtocol = dual(2, withProtocolImpl);
 
+export { CurrentAddress };
+
 // ── Any types + Type Guards ───────────────────────────────────────────────
 
 // eslint-disable-next-line typescript-eslint/no-explicit-any
@@ -1888,6 +1894,7 @@ const isWorkflow = (actor: AnyActor): actor is AnyWorkflowActor => actor._tag ==
 // ── Public API ─────────────────────────────────────────────────────────────
 
 export const Actor = {
+  CurrentAddress,
   fromEntity,
   fromWorkflow,
   fromRpcs,
