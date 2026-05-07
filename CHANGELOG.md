@@ -1,5 +1,14 @@
 # effect-encore
 
+## 0.11.0
+
+### Minor Changes
+
+- [`63b4bea`](https://github.com/cevr/effect-encore/commit/63b4bea8f0ee26815737ee158b43c1b6cea5569a) Thanks [@cevr](https://github.com/cevr)! - Add SQL-backed Encore message storage helpers. `fromSqlClient()` and
+  `fromSqlClientWithShardingConfig()` now provide both upstream Effect Cluster
+  `MessageStorage` and Encore's `EncoreMessageStorage`, including surgical
+  `deleteEnvelope` support for entity rerun.
+
 ## 0.10.0
 
 ### Minor Changes
