@@ -138,15 +138,23 @@ Dedup records survive forever — that's the property the library sells. `.rerun
 Encore's storage tag extends upstream `MessageStorage` with `deleteEnvelope(requestId)`. Adapters provide both:
 
 ```ts
-import { encoreMessageStorageLayer, fromMessageStorage } from "effect-encore";
+import { encoreMessageStorageLayer, fromMessageStorage, fromSqlClient } from "effect-encore";
 
 // in your runtime composition:
 const storageLayer = encoreMessageStorageLayer(upstreamStorageLayer, {
   deleteEnvelope: (requestId) => /* adapter-specific delete */
 });
+
+// SQL-backed runtimes can use the built-in Effect Cluster SQL adapter:
+const sqlStorageLayer = fromSqlClient(); // requires SqlClient.SqlClient
 ```
 
 Required by `OperationHandle.rerun` and `WorkflowActor.rerun`. Adapters that haven't implemented yet should fail loud (`Effect.die`) rather than coarsen to `flush`.
+
+`fromSqlClient()` provides both upstream `MessageStorage.MessageStorage` and
+Encore's `EncoreMessageStorage` over Effect Cluster's default
+`cluster_messages` / `cluster_replies` tables. Use
+`fromSqlClientWithShardingConfig()` when the runtime owns sharding config.
 
 ## Payload Classification
 

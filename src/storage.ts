@@ -16,7 +16,13 @@
  * value from an upstream storage plus the extension method, or `layer(ext)`
  * to compose an effect Layer providing both tags.
  */
-import { MessageStorage } from "effect/unstable/cluster";
+import {
+  ClusterError,
+  MessageStorage,
+  ShardingConfig,
+  SqlMessageStorage,
+} from "effect/unstable/cluster";
+import { SqlClient } from "effect/unstable/sql";
 import type { PersistenceError } from "effect/unstable/cluster/ClusterError";
 import type * as Snowflake from "effect/unstable/cluster/Snowflake";
 import { Context, Effect, Layer } from "effect";
@@ -27,6 +33,20 @@ export type EncoreMessageStorageShape = MessageStorage.MessageStorage["Service"]
   readonly deleteEnvelope: (
     requestId: Snowflake.Snowflake,
   ) => Effect.Effect<void, PersistenceError>;
+};
+
+export interface SqlMessageStorageOptions {
+  readonly prefix?: string;
+}
+
+const defaultSqlPrefix = "cluster";
+
+const sqlTables = (options?: SqlMessageStorageOptions) => {
+  const prefix = options?.prefix ?? defaultSqlPrefix;
+  return {
+    messages: `${prefix}_messages`,
+    replies: `${prefix}_replies`,
+  };
 };
 
 // ─── Tag ────────────────────────────────────────────────────────────────────
@@ -84,3 +104,42 @@ export const layer = <RIn, E>(
       }),
     ).pipe(Layer.provide(upstream)),
   );
+
+export const fromSqlClientWithShardingConfig = (
+  options?: SqlMessageStorageOptions,
+): Layer.Layer<
+  MessageStorage.MessageStorage | EncoreMessageStorage,
+  never,
+  SqlClient.SqlClient | ShardingConfig.ShardingConfig
+> => {
+  const tables = sqlTables(options);
+  const upstream: Layer.Layer<
+    MessageStorage.MessageStorage,
+    never,
+    SqlClient.SqlClient | ShardingConfig.ShardingConfig
+  > = SqlMessageStorage.layer;
+  const encore = Layer.effect(
+    EncoreMessageStorage,
+    Effect.gen(function* () {
+      const storage = yield* MessageStorage.MessageStorage;
+      const sql = yield* SqlClient.SqlClient;
+      return fromMessageStorage(storage, {
+        deleteEnvelope: (requestId) => {
+          const id = String(requestId);
+          return sql`DELETE FROM ${sql(tables.replies)} WHERE request_id = ${id}`.pipe(
+            Effect.andThen(sql`DELETE FROM ${sql(tables.messages)} WHERE request_id = ${id}`),
+            sql.withTransaction,
+            Effect.asVoid,
+            (effect) => ClusterError.PersistenceError.refail(effect),
+          );
+        },
+      });
+    }),
+  );
+  return Layer.merge(upstream, encore.pipe(Layer.provide(upstream)));
+};
+
+export const fromSqlClient = (
+  options?: SqlMessageStorageOptions,
+): Layer.Layer<MessageStorage.MessageStorage | EncoreMessageStorage, never, SqlClient.SqlClient> =>
+  fromSqlClientWithShardingConfig(options).pipe(Layer.provide(ShardingConfig.layerDefaults));

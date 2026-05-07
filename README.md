@@ -6,7 +6,7 @@ Declarative actors and durable workflows for `@effect/cluster`.
 bun add effect-encore
 ```
 
-Peer dependency: `effect >= 4.0.0-beta.46`.
+Peer dependency: `effect >= 4.0.0-beta.63`.
 For v3 `@effect/cluster` compat: `import { Actor } from "effect-encore/v3"`.
 
 ## Why
@@ -178,6 +178,27 @@ The registration finalizer removes the state handle when the entity scope
 closes. `Actor.toLayer` and `Actor.toTestLayer` provide the state registry
 locally; remote producer-only runtimes cannot observe another process's live
 heap state.
+
+### SQL Message Storage
+
+Entity `.rerun(payload)` needs surgical deletion of one persisted request and
+its replies. SQL-backed runtimes can use Encore's SQL layer instead of writing
+their own adapter:
+
+```ts
+import { fromSqlClient } from "effect-encore";
+import { SqliteClient } from "@effect/sql-sqlite-bun";
+
+const MessageStorageLive = fromSqlClient().pipe(
+  Layer.provide(SqliteClient.layer({ filename: "app.db" })),
+);
+```
+
+`fromSqlClient()` provides both upstream `MessageStorage.MessageStorage` and
+Encore's `EncoreMessageStorage`. It uses Effect Cluster's default
+`cluster_messages` / `cluster_replies` tables and default sharding config. Use
+`fromSqlClientWithShardingConfig()` when the host provides a custom
+`ShardingConfig`.
 
 ### Handle — Workflow (Step DSL)
 
