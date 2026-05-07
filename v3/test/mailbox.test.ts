@@ -72,15 +72,16 @@ const buildRequest = (
     const snowflake = yield* Snowflake.Generator;
     const entity = actor._meta.entity;
     // eslint-disable-next-line typescript-eslint/no-explicit-any -- erased
-    const rpc = entity.protocol.requests.get(tag) as any;
-    const entityId = EntityId.make(String(payload["item"] ?? payload["input"] ?? "x"));
+    const rpc = entity.protocol.requests.get(tag);
+    const idValue = payload["item"] ?? payload["input"];
+    const entityId = EntityId.make(typeof idValue === "string" ? idValue : "x");
     const address = EntityAddress.make({
       entityType: entity.type,
       entityId,
       shardId: ShardId.make("default", 1),
     });
     // eslint-disable-next-line typescript-eslint/no-explicit-any -- class constructor
-    const payloadInstance = new (rpc.payloadSchema as any)(payload);
+    const payloadInstance = new rpc.payloadSchema(payload);
     return new Message.OutgoingRequest({
       rpc,
       // eslint-disable-next-line typescript-eslint/no-explicit-any -- empty fiber context for unit test

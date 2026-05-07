@@ -6,18 +6,20 @@ Declarative actors and durable workflows for `@effect/cluster`.
 
 ```bash
 bun run gate          # all checks concurrent: typecheck, typecheck:v3, lint, fmt, build, test
-bun run typecheck     # tsgo --noEmit (v4)
+bun run typecheck     # tsgo --noEmit for v4 and v3, patched by @effect/tsgo
 bun run typecheck:v3  # tsgo --noEmit -p v3/tsconfig.json
-bun run lint          # oxlint + effect-language-service (src strict, test relaxed)
+bun run lint          # oxlint type-aware; Effect diagnostics run through tsgo plugin
 bun run build         # tsdown v4 + v3 concurrent
 bun test              # bun test
 ```
 
 ## Architecture
 
-- `src/actor.ts` — entire v4 API: `Actor.fromEntity`, `Actor.fromWorkflow`, `toLayer`, `toTestLayer`, types, runtime
-- `src/storage.ts` — `EncoreMessageStorage` Context.Tag (extends upstream `MessageStorage` with `deleteEnvelope`)
+- `src/actor.ts` — v4 actor API: `Actor.fromEntity`, `Actor.fromWorkflow`, `toLayer`, `toTestLayer`, types, runtime
+- `src/actor-state.ts` — live entity state registry and `Actor.registerState` helpers
+- `src/storage.ts` — `EncoreMessageStorage` Context.Service (extends upstream `MessageStorage` with `deleteEnvelope`)
 - `v3/src/actor.ts` — v3 mirror using `@effect/cluster`, `@effect/rpc`, `@effect/workflow` imports
+- `v3/src/actor-state.ts` — v3 mirror of live entity state helpers
 - `src/receipt.ts` — `ExecId<S,E>` branded type, `PeekResult` ADT
 - Both v3 and v4 import from the same `effect@4.x` — v3 distinction is only the cluster/rpc/workflow packages
 
@@ -52,6 +54,23 @@ Entity-scoped (not per-op):
 - `Counter.flush(entityId)` — clears mailbox + lastRead. Coarse.
 - `Counter.redeliver(entityId)` — clears lastRead only.
 - `Counter.interrupt(entityId)` — `clearAddress(address)`. Distinct intent from flush ("stop accepting more" vs "clean slate"); programmatic in-flight fiber cancellation needs `Sharding.passivate` (not yet public upstream).
+- `Counter.getState<State>(entityId, { materialize? })` — read the state handle registered by the live entity.
+- `Counter.watchState<State>(entityId, { materialize? })` — stream registered state changes; stream fails with `ActorStateUnavailable` if the entity has no live state handle.
+- `Counter.listStateEntityIds()` — list entity ids with currently registered state handles in this process.
+
+Entity handlers register live state from the entity scope:
+
+```ts
+yield *
+  Actor.registerState({
+    get: SubscriptionRef.get(state),
+    watch: SubscriptionRef.changes(state),
+  });
+```
+
+`Actor.toLayer` / `Actor.toTestLayer` provide the state registry locally. This
+is a live heap protocol, not durable storage; cross-process producers cannot
+observe another runner's in-memory entity state.
 
 ### Workflow actors — payload-only methods at actor level
 
@@ -141,12 +160,12 @@ Three payload forms, two operation shapes:
 
 Discriminator: `Schema.isSchema(payload) && !("fields" in payload)`. Schema.Class has `fields`, scalars don't.
 
-## Effect LSP Linting
+## Effect Diagnostics
 
-- Config lives in `.effect-lsp.json` / `.effect-lsp.test.json` — NOT in tsconfig plugins
-- CLI needs `--lspconfig "$(cat .effect-lsp.json)"` — without it, reports "Checked 0 files"
-- `tsconfig.src.json` / `tsconfig.test.json` scope which files get checked
-- `globalDate` is error in src, off in test (test setup uses `Date.now()`)
+- Effect diagnostics live in the `@effect/language-service` tsconfig plugin.
+- `@effect/tsgo` patches `tsgo`; run `bun install` or `bun run prepare` after dependency changes.
+- `serviceNotAsClass` is enabled for v4 services. Use `class X extends Context.Service<X, Shape>()("key") {}`.
+- The v3 mirror inherits the root tsconfig but maps `effect` to `effect-v3`.
 
 ## Gotchas
 

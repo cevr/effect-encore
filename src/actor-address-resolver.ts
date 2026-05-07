@@ -63,7 +63,7 @@ export interface ActorAddressResolverShape {
 export class ActorAddressResolver extends Context.Service<
   ActorAddressResolver,
   ActorAddressResolverShape
->()("effect-encore/ActorAddressResolver") {}
+>()("effect-encore/actor-address-resolver/ActorAddressResolver") {}
 
 // ─── Internal: hash math (mirror of effect/unstable/cluster's internal hash) ──
 //

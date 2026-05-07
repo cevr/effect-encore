@@ -31,10 +31,10 @@ export type EncoreMessageStorageShape = MessageStorage.MessageStorage["Service"]
 
 // ─── Tag ────────────────────────────────────────────────────────────────────
 
-export const EncoreMessageStorage = Context.Service<
-  EncoreMessageStorageShape,
+export class EncoreMessageStorage extends Context.Service<
+  EncoreMessageStorage,
   EncoreMessageStorageShape
->("effect-encore/EncoreMessageStorage");
+>()("effect-encore/storage/EncoreMessageStorage") {}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -73,7 +73,7 @@ export const layer = <RIn, E>(
       requestId: Snowflake.Snowflake,
     ) => Effect.Effect<void, PersistenceError>;
   },
-): Layer.Layer<MessageStorage.MessageStorage | EncoreMessageStorageShape, E, RIn> =>
+): Layer.Layer<MessageStorage.MessageStorage | EncoreMessageStorage, E, RIn> =>
   Layer.merge(
     upstream,
     Layer.effect(

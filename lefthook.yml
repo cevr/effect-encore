@@ -1,5 +1,5 @@
 pre-commit:
-  parallel: true
+  parallel: false
   jobs:
     - name: fmt+lint
       run: bun run fmt && bun run lint:fix

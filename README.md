@@ -138,6 +138,47 @@ const OrderLive = Actor.toLayer(
 );
 ```
 
+### Entity State
+
+Long-lived entity handlers can expose live, in-memory state without a
+side-channel registry in the host app. Register the state from the entity scope;
+clients read or watch it through the actor, keyed by the same `entityId` used
+for operations.
+
+```ts
+const CounterLive = Actor.toLayer(
+  Counter,
+  Effect.gen(function* () {
+    const state = yield* SubscriptionRef.make(0);
+
+    yield* Actor.registerState({
+      get: SubscriptionRef.get(state),
+      watch: SubscriptionRef.changes(state),
+    });
+
+    return Counter.of({
+      Increment: ({ operation }) =>
+        SubscriptionRef.updateAndGet(state, (n) => n + operation.amount),
+    });
+  }),
+);
+
+const current =
+  yield *
+  Counter.getState<number>("counter-1", {
+    // Optional: run an actor operation first to materialize a cold entity.
+    materialize: Counter.Increment.execute({ id: "counter-1", amount: 0 }),
+  });
+
+const changes = Counter.watchState<number>("counter-1");
+const activeIds = yield * Counter.listStateEntityIds();
+```
+
+The registration finalizer removes the state handle when the entity scope
+closes. `Actor.toLayer` and `Actor.toTestLayer` provide the state registry
+locally; remote producer-only runtimes cannot observe another process's live
+heap state.
+
 ### Handle — Workflow (Step DSL)
 
 Workflow handlers receive `(payload, step)` — a context object that wraps upstream workflow primitives.

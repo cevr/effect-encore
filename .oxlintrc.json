@@ -1,5 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "options": {
+    "typeAware": true
+  },
   "categories": {
     "correctness": "error",
     "suspicious": "error",
@@ -15,9 +18,16 @@
       "error",
       { "prefer": "type-imports", "fixStyle": "separate-type-imports" }
     ],
-    "typescript/no-unsafe-type-assertion": "error",
+    "typescript/no-unsafe-type-assertion": "off",
     "import/no-duplicates": "error",
-    "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
+    "no-underscore-dangle": "off",
+    "no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "typescript/no-unnecessary-type-parameters": "off",
+    "typescript/consistent-return": "off",
+    "typescript/no-unnecessary-type-arguments": "off",
+    "typescript/unbound-method": "off",
+    "typescript/no-unnecessary-type-conversion": "off",
+    "typescript/no-redundant-type-constituents": "off"
   },
   "ignorePatterns": ["**/dist/**", "**/node_modules/**", "**/*.d.ts", "**/bin/**", "**/scripts/**"],
   "overrides": [

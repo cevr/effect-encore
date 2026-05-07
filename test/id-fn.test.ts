@@ -10,7 +10,7 @@ describe("OperationDef.id (string return)", () => {
         id: (p: { x: string }) => p.x,
       },
     });
-    const def = A._meta.definitions["Op"]!;
+    const def = A._meta.definitions["Op"];
     expect(def.id).toBeDefined();
     const r = (def.id as (p: unknown) => unknown)({ x: "k" });
     expect(r).toBe("k");
@@ -25,7 +25,7 @@ describe("OperationDef.id (object return)", () => {
         id: (p: { x: string }) => ({ entityId: p.x }),
       },
     });
-    const def = A._meta.definitions["Op"]!;
+    const def = A._meta.definitions["Op"];
     const r = (def.id as (p: unknown) => { entityId: string; primaryKey?: string })({ x: "k" });
     expect(r.entityId).toBe("k");
     expect(r.primaryKey).toBeUndefined();
@@ -41,7 +41,7 @@ describe("OperationDef.id (object return)", () => {
         }),
       },
     });
-    const def = A._meta.definitions["Op"]!;
+    const def = A._meta.definitions["Op"];
     const r = (def.id as (p: unknown) => { entityId: string; primaryKey?: string })({
       dedup: "k",
       action: "trigger",

@@ -68,7 +68,14 @@ import {
   Success,
 } from "./receipt.js";
 import { EncoreMessageStorage } from "./storage.js";
-import type { EncoreMessageStorageShape } from "./storage.js";
+import {
+  ActorStateRegistry,
+  listStateEntityIds,
+  registerState,
+  stateOf,
+  watchStateOf,
+} from "./actor-state.js";
+import type { ActorStateHandle, ActorStateUnavailable } from "./actor-state.js";
 
 // ── Layer passthrough (v4 polyfill — v3 has Layer.passthrough) ────────────
 // Adds the layer's input requirements to its output so provided services
@@ -137,6 +144,9 @@ type ReservedKeys =
   | "name"
   | "type"
   | "of"
+  | "getState"
+  | "watchState"
+  | "listStateEntityIds"
   | "interrupt"
   | "flush"
   | "redeliver"
@@ -153,6 +163,9 @@ const RESERVED_KEYS = new Set<string>([
   "name",
   "type",
   "of",
+  "getState",
+  "watchState",
+  "listStateEntityIds",
   "interrupt",
   "flush",
   "redeliver",
@@ -304,6 +317,10 @@ export type ActorClientFactory<Name extends string, Defs extends OperationDefs> 
   entityId: string,
 ) => Effect.Effect<ActorRef<Name, Defs>>;
 
+export interface ActorStateOptions<E = never, R = never> {
+  readonly materialize?: Effect.Effect<unknown, E, R>;
+}
+
 // ── OperationHandle — per-op payload-only dispatch surface ─────────────────
 
 /**
@@ -385,7 +402,7 @@ export interface OperationHandle<
   >;
   readonly rerun: (
     payload: PayloadInput<C>,
-  ) => Effect.Effect<void, PersistenceError, EncoreMessageStorageShape | ActorAddressResolver>;
+  ) => Effect.Effect<void, PersistenceError, EncoreMessageStorage | ActorAddressResolver>;
   readonly make: (payload: PayloadInput<C>) => OperationValue<Name, Tag, C>;
 }
 
@@ -441,6 +458,39 @@ export type EntityActor<
       MessageStorage.MessageStorage | ActorAddressResolver
     >;
     readonly of: (handlers: ActorHandlers<Defs>) => ActorHandlers<Defs>;
+    readonly getState: <
+      State,
+      Error = never,
+      Requirements = never,
+      MaterializeError = never,
+      MaterializeRequirements = never,
+    >(
+      entityId: string,
+      options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
+    ) => Effect.Effect<
+      State,
+      Error | MaterializeError | ActorStateUnavailable,
+      ActorAddressResolver | ActorStateRegistry | Requirements | MaterializeRequirements
+    >;
+    readonly watchState: <
+      State,
+      Error = never,
+      Requirements = never,
+      MaterializeError = never,
+      MaterializeRequirements = never,
+    >(
+      entityId: string,
+      options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
+    ) => Stream.Stream<
+      State,
+      Error | MaterializeError | ActorStateUnavailable,
+      ActorAddressResolver | ActorStateRegistry | Requirements | MaterializeRequirements
+    >;
+    readonly listStateEntityIds: () => Effect.Effect<
+      ReadonlyArray<string>,
+      never,
+      ActorStateRegistry
+    >;
     readonly $is: <Tag extends keyof Defs & string>(
       tag: Tag,
     ) => (value: unknown) => value is OperationValue<Name, Tag, Defs[Tag]>;
@@ -463,7 +513,7 @@ const compileRpc = (actorName: string, tag: string, def: OperationDef): Rpc.Any 
     if (Schema.isSchema(payload)) {
       options["payload"] = payload;
     } else {
-      const fields = payload as Schema.Struct.Fields;
+      const fields = payload;
 
       const Base = Schema.Class<Record<string, unknown>>(
         `effect-encore/${actorName}/${tag}/Payload`,
@@ -557,7 +607,7 @@ const buildOutgoingRequestForSend = (
       throw new Error(`effect-encore: rpc "${tag}" not found on entity "${entity.type}"`);
     }
     // eslint-disable-next-line typescript-eslint/no-explicit-any -- payloadSchema type-erased
-    const payloadSchema = (rpc as any).payloadSchema as Schema.Top;
+    const payloadSchema = rpc.payloadSchema as Schema.Top;
 
     let payload: unknown;
     if (!def?.payload) {
@@ -591,7 +641,7 @@ const buildOutgoingRequestForSend = (
     // `message.annotations` for OutgoingRequest specifically — `Context.empty()`
     // here would silently route persisted requests as non-persisted.
     // eslint-disable-next-line typescript-eslint/no-explicit-any -- annotations type-erased
-    const rpcAnnotations = (rpc as any).annotations as Context.Context<never>;
+    const rpcAnnotations = rpc.annotations as Context.Context<never>;
     const dynamicFn = Context.get(rpcAnnotations, ClusterSchema.Dynamic);
     // eslint-disable-next-line typescript-eslint/no-explicit-any -- envelope shape erased through Dynamic
     const annotations = dynamicFn(rpcAnnotations, envelope as any);
@@ -630,13 +680,11 @@ const makeTestMailboxImpl = (
       // eslint-disable-next-line typescript-eslint/no-explicit-any -- rpcClient type-erased
       const fn = (rpcClient as unknown as Record<string, Function>)[tag];
       if (!fn) {
-        return yield* Effect.fail(
-          new MailboxError({
-            cause: new Error(
-              `effect-encore test mailbox: unknown rpc "${tag}" on entity "${envelope.address.entityType}"`,
-            ),
-          }),
-        );
+        return yield* new MailboxError({
+          cause: new Error(
+            `effect-encore test mailbox: unknown rpc "${String(tag)}" on entity "${String(envelope.address.entityType)}"`,
+          ),
+        });
       }
       yield* fn(payload, { discard: true }) as Effect.Effect<void>;
     }),
@@ -672,7 +720,7 @@ const rerunImpl = (
   def: OperationDef | undefined,
   tag: string,
   payload: unknown,
-): Effect.Effect<void, PersistenceError, EncoreMessageStorageShape | ActorAddressResolver> =>
+): Effect.Effect<void, PersistenceError, EncoreMessageStorage | ActorAddressResolver> =>
   Effect.gen(function* () {
     const { entityId, primaryKey } = resolveId(def, payload, tag);
     const storage = yield* EncoreMessageStorage;
@@ -839,9 +887,7 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     }
   }
 
-  const rpcs = Object.entries(definitions).map(([tag, def]) =>
-    compileRpc(name, tag, def as OperationDef),
-  );
+  const rpcs = Object.entries(definitions).map(([tag, def]) => compileRpc(name, tag, def));
 
   const entity = Entity.make(name, rpcs as Array<DefRpcs<Defs>>);
 
@@ -855,10 +901,15 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
       : { _tag: tag, ...(payload != null && typeof payload === "object" ? payload : {}) };
   };
 
-  const contextTag = Context.Service<
+  class ActorClientContext extends Context.Service<
+    ActorClientContext,
+    ActorClientFactory<Name, Defs>
+  >()(`effect-encore/${name}/Client`) {}
+
+  const contextTag = ActorClientContext as unknown as Context.Service<
     ActorClientService<Name, Defs>,
     ActorClientFactory<Name, Defs>
-  >(`effect-encore/${name}/Client`);
+  >;
 
   const $is =
     (tag: string) =>
@@ -880,6 +931,33 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
   const interruptFn = (entityId: string) => flushImpl(entityAny, entityId);
 
   const ofFn = <T>(handlers: T): T => handlers;
+  const getStateFn = (
+    entityId: string,
+    options?: ActorStateOptions<unknown, unknown>,
+  ): Effect.Effect<unknown, unknown, ActorAddressResolver | ActorStateRegistry | unknown> =>
+    Effect.gen(function* () {
+      if (options?.materialize !== undefined) {
+        yield* options.materialize;
+      }
+      const resolver = yield* ActorAddressResolver;
+      return yield* stateOf(resolveEntityAddress(resolver, entityAny, entityId));
+    });
+
+  const watchStateFn = (
+    entityId: string,
+    options?: ActorStateOptions<unknown, unknown>,
+  ): Stream.Stream<unknown, unknown, ActorAddressResolver | ActorStateRegistry | unknown> =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        if (options?.materialize !== undefined) {
+          yield* options.materialize;
+        }
+        const resolver = yield* ActorAddressResolver;
+        return watchStateOf(resolveEntityAddress(resolver, entityAny, entityId));
+      }),
+    );
+
+  const listStateEntityIdsFn = () => listStateEntityIds(String(entityAny.type));
 
   // Build per-op handles. Each handle derives entityId/primaryKey from
   // payload via resolveId, and composes execute/send/peek/watch/waitFor/
@@ -913,6 +991,9 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     redeliver: redeliverFn,
     $is,
     ...handles,
+    getState: getStateFn,
+    watchState: watchStateFn,
+    listStateEntityIds: listStateEntityIdsFn,
   });
 
   return actor as EntityActor<Name, Defs>;
@@ -1019,7 +1100,11 @@ function toLayer<
 >(
   actor: EntityActor<Name, Defs, Rpcs>,
 ): Layer.Layer<
-  ActorClientService<Name, Defs> | ActorMailbox | ActorAddressResolver | Snowflake.Generator,
+  | ActorClientService<Name, Defs>
+  | ActorMailbox
+  | ActorAddressResolver
+  | ActorStateRegistry
+  | Snowflake.Generator,
   never,
   Sharding.Sharding | Scope.Scope | Rpc.MiddlewareClient<Rpcs>
 >;
@@ -1035,7 +1120,11 @@ function toLayer<
   options?: HandlerOptions,
   /* eslint-disable typescript-eslint/no-explicit-any -- implementation overload requires any */
 ): Layer.Layer<
-  ActorClientService<Name, Defs> | ActorMailbox | ActorAddressResolver | Snowflake.Generator,
+  | ActorClientService<Name, Defs>
+  | ActorMailbox
+  | ActorAddressResolver
+  | ActorStateRegistry
+  | Snowflake.Generator,
   never,
   | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress>
   | Sharding.Sharding
@@ -1107,6 +1196,7 @@ function toLayer(
   const consumerSupportLayers = Layer.mergeAll(
     ActorMailboxLayer.fromSharding,
     ActorAddressResolverLayer.fromSharding,
+    ActorStateRegistry.Live,
     Snowflake.layerGenerator,
   );
 
@@ -1140,7 +1230,11 @@ function toTestLayer<
   build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
   options?: HandlerOptions,
 ): Layer.Layer<
-  ActorClientService<Name, Defs> | ActorMailbox | ActorAddressResolver | Snowflake.Generator,
+  | ActorClientService<Name, Defs>
+  | ActorMailbox
+  | ActorAddressResolver
+  | ActorStateRegistry
+  | Snowflake.Generator,
   never,
   ShardingConfig.ShardingConfig
 >;
@@ -1212,7 +1306,11 @@ function toTestLayer(
     }),
   );
 
-  const supportLayers = Layer.merge(ActorAddressResolverLayer.fromConfig, Snowflake.layerGenerator);
+  const supportLayers = Layer.mergeAll(
+    ActorAddressResolverLayer.fromConfig,
+    ActorStateRegistry.Live,
+    Snowflake.layerGenerator,
+  );
 
   return Layer.merge(factoryAndMailboxLayer, supportLayers);
 }
@@ -1468,7 +1566,7 @@ export type WorkflowActor<
   ) => Effect.Effect<
     void,
     PersistenceError,
-    EncoreMessageStorageShape | Sharding.Sharding | WorkflowEngine
+    EncoreMessageStorage | Sharding.Sharding | WorkflowEngine
   >;
   readonly interrupt: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   readonly resume: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
@@ -1565,10 +1663,15 @@ const fromWorkflow = <
 
   type WfDefs = WorkflowRunDefs<Payload, Success, Error>;
 
-  const contextTag = Context.Service<
+  class WorkflowClientContext extends Context.Service<
+    WorkflowClientContext,
+    ActorClientFactory<Name, WfDefs>
+  >()(`effect-encore/${name}/Client`) {}
+
+  const contextTag = WorkflowClientContext as unknown as Context.Service<
     ActorClientService<Name, WfDefs>,
     ActorClientFactory<Name, WfDefs>
-  >(`effect-encore/${name}/Client`);
+  >;
 
   const make = (payload: WorkflowPayloadType<Payload>) =>
     ({ _tag: "Run", ...payload }) as { readonly _tag: "Run" } & WorkflowPayloadType<Payload> &
@@ -1647,7 +1750,7 @@ const fromWorkflow = <
       (executionId) =>
         makeWaitFor(
           (eid) => peekById(eid as unknown as string),
-          makeExecId(executionId) as ExecId<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>,
+          makeExecId(executionId),
           options as never,
         ) as Effect.Effect<RawPeek, never, WorkflowEngine>,
     );
@@ -1679,7 +1782,7 @@ const fromWorkflow = <
   ): Effect.Effect<
     void,
     PersistenceError,
-    EncoreMessageStorageShape | Sharding.Sharding | WorkflowEngine
+    EncoreMessageStorage | Sharding.Sharding | WorkflowEngine
   > =>
     Effect.gen(function* () {
       const executionId = yield* execIdFor(payload);
@@ -1895,6 +1998,9 @@ const isWorkflow = (actor: AnyActor): actor is AnyWorkflowActor => actor._tag ==
 
 export const Actor = {
   CurrentAddress,
+  registerState: registerState as <State, Error = never, Requirements = never>(
+    handle: ActorStateHandle<State, Error, Requirements>,
+  ) => Effect.Effect<void, never, ActorStateRegistry | CurrentAddress | Scope.Scope>,
   fromEntity,
   fromWorkflow,
   fromRpcs,

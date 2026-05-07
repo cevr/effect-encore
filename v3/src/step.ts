@@ -241,7 +241,7 @@ export const makeStepContext = <
 ): WorkflowStepContext<WorkflowError> => {
   const runImpl = (id: string, second: unknown, third?: unknown): Effect.Effect<any, any, any> => {
     // Arity 2 + second is plain object with `do` → full options
-    if (second !== null && typeof second === "object" && "do" in (second as object)) {
+    if (second !== null && typeof second === "object" && "do" in second) {
       const opts = second as StepRunOptions<any, any, any, any>;
       const retryPolicy = opts.retry
         ? "times" in (opts.retry as object)
@@ -333,14 +333,9 @@ export const makeStepContext = <
         return `${instance.executionId}/${name}`;
       }),
 
-    attempt: Effect.gen(function* () {
-      return yield* UpstreamActivity.CurrentAttempt;
-    }),
+    attempt: UpstreamActivity.CurrentAttempt,
 
-    suspend: Effect.gen(function* () {
-      const instance = yield* WorkflowInstance;
-      return yield* UpstreamWorkflow.suspend(instance);
-    }) as Effect.Effect<never, never, WorkflowInstance>,
+    suspend: Effect.flatMap(WorkflowInstance, UpstreamWorkflow.suspend),
 
     scope: UpstreamWorkflow.scope,
     provideScope: UpstreamWorkflow.provideScope,

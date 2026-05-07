@@ -47,7 +47,7 @@ import { Context, Data, Effect, Layer } from "effect";
  * Thrown when storage rejects the request beyond the recoverable
  * `MalformedMessage` case. Mirrors `PersistenceError` semantics.
  */
-export class MailboxError extends Data.TaggedError("ActorMailboxError")<{
+export class MailboxError extends Data.TaggedError("effect-encore/actor-mailbox/MailboxError")<{
   readonly cause: unknown;
 }> {}
 
@@ -103,13 +103,11 @@ const fromConfig: Layer.Layer<ActorMailboxShape, never, MessageStorage.MessageSt
             );
             /* eslint-enable typescript-eslint/no-explicit-any */
             if (!isPersisted) {
-              return yield* Effect.fail(
-                new MailboxError({
-                  cause: new Error(
-                    `effect-encore: ActorMailboxLayer.fromConfig refuses to dispatch non-persisted rpc "${request.envelope.tag}". Storage-only mailboxes can only enqueue persisted requests; live-only rpcs require ActorMailboxLayer.fromSharding.`,
-                  ),
-                }),
-              );
+              return yield* new MailboxError({
+                cause: new Error(
+                  `effect-encore: ActorMailboxLayer.fromConfig refuses to dispatch non-persisted rpc "${String(request.envelope.tag)}". Storage-only mailboxes can only enqueue persisted requests; live-only rpcs require ActorMailboxLayer.fromSharding.`,
+                ),
+              });
             }
             const result = yield* storage
               .saveRequest(request)

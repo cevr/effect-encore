@@ -1,4 +1,12 @@
 export { Actor, CurrentAddress, fromRpcs, withProtocol } from "./actor.js";
+export {
+  ActorStateRegistry,
+  ActorStateUnavailable,
+  listStateEntityIds,
+  registerState,
+  stateOf,
+  watchStateOf,
+} from "./actor-state.js";
 export type {
   EntityActor,
   AnyEntityActor,
@@ -17,7 +25,9 @@ export type {
   WorkflowDef,
   WorkflowActor,
   EntityIdReturn,
+  ActorStateOptions,
 } from "./actor.js";
+export type { ActorStateHandle, ActorStateRegistryShape } from "./actor-state.js";
 export { makeStepContext, makeSignal } from "./step.js";
 export type {
   WorkflowStepContext,

@@ -35,6 +35,18 @@ import {
   type ActorMailboxShape,
   MailboxError,
 } from "./actor-mailbox.js";
+import {
+  ActorStateRegistryLive,
+  listStateEntityIds,
+  registerState,
+  stateOf,
+  watchStateOf,
+} from "./actor-state.js";
+import type {
+  ActorStateHandle,
+  ActorStateRegistryShape,
+  ActorStateUnavailable,
+} from "./actor-state.js";
 import type { Execution } from "@effect/workflow/Workflow";
 import type { WorkflowEngine, WorkflowInstance } from "@effect/workflow/WorkflowEngine";
 import { layerMemory as workflowEngineLayerMemory } from "@effect/workflow/WorkflowEngine";
@@ -134,6 +146,9 @@ type ReservedKeys =
   | "name"
   | "type"
   | "of"
+  | "getState"
+  | "watchState"
+  | "listStateEntityIds"
   | "interrupt"
   | "flush"
   | "redeliver"
@@ -150,6 +165,9 @@ const RESERVED_KEYS = new Set<string>([
   "name",
   "type",
   "of",
+  "getState",
+  "watchState",
+  "listStateEntityIds",
   "interrupt",
   "flush",
   "redeliver",
@@ -301,6 +319,10 @@ export type ActorClientFactory<Name extends string, Defs extends OperationDefs> 
   entityId: string,
 ) => Effect.Effect<ActorRef<Name, Defs>>;
 
+export interface ActorStateOptions<E = never, R = never> {
+  readonly materialize?: Effect.Effect<unknown, E, R>;
+}
+
 // ── OperationHandle — per-op payload-only dispatch surface ─────────────────
 
 /**
@@ -435,6 +457,39 @@ export type EntityActor<
       MessageStorage.MessageStorage | ActorAddressResolverShape
     >;
     readonly of: (handlers: ActorHandlers<Defs>) => ActorHandlers<Defs>;
+    readonly getState: <
+      State,
+      Error = never,
+      Requirements = never,
+      MaterializeError = never,
+      MaterializeRequirements = never,
+    >(
+      entityId: string,
+      options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
+    ) => Effect.Effect<
+      State,
+      Error | MaterializeError | ActorStateUnavailable,
+      ActorAddressResolverShape | ActorStateRegistryShape | Requirements | MaterializeRequirements
+    >;
+    readonly watchState: <
+      State,
+      Error = never,
+      Requirements = never,
+      MaterializeError = never,
+      MaterializeRequirements = never,
+    >(
+      entityId: string,
+      options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
+    ) => Stream.Stream<
+      State,
+      Error | MaterializeError | ActorStateUnavailable,
+      ActorAddressResolverShape | ActorStateRegistryShape | Requirements | MaterializeRequirements
+    >;
+    readonly listStateEntityIds: () => Effect.Effect<
+      ReadonlyArray<string>,
+      never,
+      ActorStateRegistryShape
+    >;
     readonly $is: <Tag extends keyof Defs & string>(
       tag: Tag,
     ) => (value: unknown) => value is OperationValue<Name, Tag, Defs[Tag]>;
@@ -457,7 +512,7 @@ const compileRpc = (actorName: string, tag: string, def: OperationDef): Rpc.Any 
     if (Schema.isSchema(payload)) {
       options["payload"] = payload;
     } else {
-      const fields = payload as Schema.Struct.Fields;
+      const fields = payload;
 
       const Base = Schema.Class<Record<string, unknown>>(
         `effect-encore/${actorName}/${tag}/Payload`,
@@ -560,7 +615,7 @@ const buildOutgoingRequestForSend = (
       throw new Error(`effect-encore: rpc "${tag}" not found on entity "${entity.type}"`);
     }
     // eslint-disable-next-line typescript-eslint/no-explicit-any -- payloadSchema type-erased
-    const payloadSchema = (rpc as any).payloadSchema as Schema.Schema.Any;
+    const payloadSchema = rpc.payloadSchema as Schema.Schema.Any;
 
     let payload: unknown;
     if (!def?.payload) {
@@ -579,7 +634,7 @@ const buildOutgoingRequestForSend = (
       payload = new (payloadSchema as any)(fields);
     }
 
-    const fiberContext = fiber.currentContext as Context.Context<never>;
+    const fiberContext = fiber.currentContext;
 
     return Effect.succeed(
       new Message.OutgoingRequest({
@@ -626,13 +681,11 @@ const makeTestMailboxImpl = (
       // eslint-disable-next-line typescript-eslint/no-explicit-any -- rpcClient type-erased
       const fn = (rpcClient as unknown as Record<string, Function>)[tag];
       if (!fn) {
-        return yield* Effect.fail(
-          new MailboxError({
-            cause: new Error(
-              `effect-encore test mailbox: unknown rpc "${tag}" on entity "${envelope.address.entityType}"`,
-            ),
-          }),
-        );
+        return yield* new MailboxError({
+          cause: new Error(
+            `effect-encore test mailbox: unknown rpc "${String(tag)}" on entity "${String(envelope.address.entityType)}"`,
+          ),
+        });
       }
       yield* fn(payload, { discard: true }) as Effect.Effect<void>;
     }),
@@ -896,9 +949,7 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     }
   }
 
-  const rpcs = Object.entries(definitions).map(([tag, def]) =>
-    compileRpc(name, tag, def as OperationDef),
-  );
+  const rpcs = Object.entries(definitions).map(([tag, def]) => compileRpc(name, tag, def));
 
   const entity = Entity.make(name, rpcs as Array<DefRpcs<Defs>>);
 
@@ -937,6 +988,41 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
   const interruptFn = (entityId: string) => flushImpl(entityAny, entityId);
 
   const ofFn = <T>(handlers: T): T => handlers;
+  const getStateFn = (
+    entityId: string,
+    options?: ActorStateOptions<unknown, unknown>,
+  ): Effect.Effect<
+    unknown,
+    unknown,
+    ActorAddressResolverShape | ActorStateRegistryShape | unknown
+  > =>
+    Effect.gen(function* () {
+      if (options?.materialize !== undefined) {
+        yield* options.materialize;
+      }
+      const resolver = yield* ActorAddressResolver;
+      return yield* stateOf(resolveEntityAddress(resolver, entityAny, entityId));
+    });
+
+  const watchStateFn = (
+    entityId: string,
+    options?: ActorStateOptions<unknown, unknown>,
+  ): Stream.Stream<
+    unknown,
+    unknown,
+    ActorAddressResolverShape | ActorStateRegistryShape | unknown
+  > =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        if (options?.materialize !== undefined) {
+          yield* options.materialize;
+        }
+        const resolver = yield* ActorAddressResolver;
+        return watchStateOf(resolveEntityAddress(resolver, entityAny, entityId));
+      }),
+    );
+
+  const listStateEntityIdsFn = () => listStateEntityIds(String(entityAny.type));
 
   // Build per-op handles. Each handle derives entityId/primaryKey from
   // payload via resolveId, and composes execute/send/peek/watch/waitFor/
@@ -970,6 +1056,9 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     redeliver: redeliverFn,
     $is,
     ...handles,
+    getState: getStateFn,
+    watchState: watchStateFn,
+    listStateEntityIds: listStateEntityIdsFn,
   });
 
   return actor as EntityActor<Name, Defs>;
@@ -1079,6 +1168,7 @@ function toLayer<
   | ActorClientService<Name, Defs>
   | ActorMailboxShape
   | ActorAddressResolverShape
+  | ActorStateRegistryShape
   | Snowflake.Generator,
   never,
   Sharding.Sharding | Scope.Scope | Rpc.MiddlewareClient<Rpcs>
@@ -1098,6 +1188,7 @@ function toLayer<
   | ActorClientService<Name, Defs>
   | ActorMailboxShape
   | ActorAddressResolverShape
+  | ActorStateRegistryShape
   | Snowflake.Generator,
   never,
   | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress>
@@ -1170,6 +1261,7 @@ function toLayer(
   const consumerSupportLayers = Layer.mergeAll(
     ActorMailboxLayer.fromSharding,
     ActorAddressResolverLayer.fromSharding,
+    ActorStateRegistryLive,
     Snowflake.layerGenerator,
   );
 
@@ -1206,6 +1298,7 @@ function toTestLayer<
   | ActorClientService<Name, Defs>
   | ActorMailboxShape
   | ActorAddressResolverShape
+  | ActorStateRegistryShape
   | Snowflake.Generator,
   never,
   ShardingConfig.ShardingConfig
@@ -1278,7 +1371,11 @@ function toTestLayer(
     }),
   );
 
-  const supportLayers = Layer.merge(ActorAddressResolverLayer.fromConfig, Snowflake.layerGenerator);
+  const supportLayers = Layer.mergeAll(
+    ActorAddressResolverLayer.fromConfig,
+    ActorStateRegistryLive,
+    Snowflake.layerGenerator,
+  );
 
   return Layer.merge(factoryAndMailboxLayer, supportLayers);
 }
@@ -1707,7 +1804,7 @@ const fromWorkflow = <
       (executionId) =>
         makeWaitFor(
           (eid) => peekById(eid as unknown as string),
-          makeExecId(executionId) as ExecId<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>,
+          makeExecId(executionId),
           options as never,
         ) as Effect.Effect<RawPeek, never, WorkflowEngine>,
     );
@@ -1950,6 +2047,9 @@ const isWorkflow = (actor: AnyActor): actor is AnyWorkflowActor => actor._tag ==
 
 export const Actor = {
   CurrentAddress,
+  registerState: registerState as <State, Error = never, Requirements = never>(
+    handle: ActorStateHandle<State, Error, Requirements>,
+  ) => Effect.Effect<void, never, ActorStateRegistryShape | CurrentAddress | Scope.Scope>,
   fromEntity,
   fromWorkflow,
   fromRpcs,

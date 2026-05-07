@@ -73,8 +73,8 @@ describe("Actor.fromEntity", () => {
         id: (p: { id: string }) => p.id,
       },
     });
-    expect(WithPK._meta.definitions["Op"]!.id).toBeDefined();
-    const pk = WithPK._meta.definitions["Op"]!.id({ id: "abc" } as never);
+    expect(WithPK._meta.definitions["Op"].id).toBeDefined();
+    const pk = WithPK._meta.definitions["Op"].id({ id: "abc" } as never);
     expect(pk).toBe("abc");
   });
 

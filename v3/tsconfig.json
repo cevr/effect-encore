@@ -1,13 +1,6 @@
 {
+  "extends": "../tsconfig.json",
   "compilerOptions": {
-    "noUncheckedIndexedAccess": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noPropertyAccessFromIndexSignature": true,
-    "moduleDetection": "force",
-    "skipLibCheck": true,
-    "types": ["bun"],
-    "noEmit": true,
     "paths": {
       "effect": ["../node_modules/effect-v3"],
       "effect/*": ["../node_modules/effect-v3/*"],

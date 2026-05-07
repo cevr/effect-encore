@@ -1,7 +1,6 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Fiber, Layer as L, Ref, Schema } from "effect";
 import { ClusterWorkflowEngine, MessageStorage, TestRunner } from "effect/unstable/cluster";
-import type * as Envelope from "effect/unstable/cluster/Envelope";
 import { Actor, EncoreMessageStorage, fromMessageStorage } from "../src/index.js";
 
 // ── Test layer providing EncoreMessageStorage on top of TestRunner ─────────
@@ -218,7 +217,7 @@ describe("WorkflowActor.rerun", () => {
         const countClockEntries = (): number => {
           let count = 0;
           for (const entry of driver.requests.values()) {
-            const env = entry.envelope as Envelope.Encoded;
+            const env = entry.envelope;
             if ("address" in env && env.address.entityType === "Workflow/-/DurableClock") {
               count++;
             }

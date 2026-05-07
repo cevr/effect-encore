@@ -72,10 +72,10 @@ export const PeekResultSchema = <
   error: Error,
 ) =>
   Schema.Union(
-    Schema.Struct({ _tag: Schema.Literal("Pending") }),
-    Schema.Struct({ _tag: Schema.Literal("Success"), value: success }),
-    Schema.Struct({ _tag: Schema.Literal("Failure"), error: error }),
-    Schema.Struct({ _tag: Schema.Literal("Interrupted") }),
-    Schema.Struct({ _tag: Schema.Literal("Defect"), cause: Schema.Unknown }),
-    Schema.Struct({ _tag: Schema.Literal("Suspended") }),
+    Schema.TaggedStruct("Pending", {}),
+    Schema.TaggedStruct("Success", { value: success }),
+    Schema.TaggedStruct("Failure", { error: error }),
+    Schema.TaggedStruct("Interrupted", {}),
+    Schema.TaggedStruct("Defect", { cause: Schema.Unknown }),
+    Schema.TaggedStruct("Suspended", {}),
   );
