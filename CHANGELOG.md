@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.11.1
+
+### Patch Changes
+
+- [`dc2131c`](https://github.com/cevr/effect-encore/commit/dc2131cb3176ef6db186811f7cf50e9825a1c60a) Thanks [@cevr](https://github.com/cevr)! - Update the Effect v4 toolchain to `effect@4.0.0-beta.64`, refresh the matching SQLite integration package, and run tsdown through Bun so CI and local builds share Bun's package resolution.
+
 ## 0.11.0
 
 ### Minor Changes
