@@ -163,18 +163,15 @@ const CounterLive = Actor.toLayer(
   }),
 );
 
-const current =
-  yield *
-  Counter.getState<number>("counter-1", {
-    // Optional: run an actor operation first to materialize a cold entity.
-    materialize: Counter.Increment.execute({ id: "counter-1", amount: 0 }),
-  });
+const current = yield * Counter.getState<number>("counter-1");
 
 const changes = Counter.watchState<number>("counter-1");
 const activeIds = yield * Counter.listStateEntityIds();
 ```
 
-The registration finalizer removes the state handle when the entity scope
+Cold `getState` and `watchState` calls materialize the entity before reading the
+registered state; apps do not need to define their own no-op operation for that
+case. The registration finalizer removes the state handle when the entity scope
 closes. `Actor.toLayer` and `Actor.toTestLayer` provide the state registry
 locally; remote producer-only runtimes cannot observe another process's live
 heap state.

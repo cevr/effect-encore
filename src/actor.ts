@@ -172,6 +172,21 @@ const RESERVED_KEYS = new Set<string>([
   "pipe",
 ]);
 
+const ACTIVATE_TAG = "__effectEncoreActivate";
+
+const ActivatePayload = Schema.Struct({ entityId: Schema.String });
+
+type ActivatePayloadType = Schema.Schema.Type<typeof ActivatePayload>;
+
+const ActivateOperation = {
+  payload: ActivatePayload,
+  success: Schema.Void,
+  id: (payload: ActivatePayloadType) => ({
+    entityId: payload.entityId,
+    primaryKey: "activate",
+  }),
+} satisfies OperationDef;
+
 // ── Type-level Rpc mirror ──────────────────────────────────────────────────
 
 type PayloadOf<C extends OperationDef> = C extends {
@@ -299,6 +314,7 @@ export interface ActorMeta<
 > {
   readonly name: Name;
   readonly definitions: Defs;
+  readonly internalDefinitions?: OperationDefs;
   readonly entity: ClusterEntity.Entity<Name, Rpcs>;
 }
 
@@ -887,14 +903,19 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     }
   }
 
-  const rpcs = Object.entries(definitions).map(([tag, def]) => compileRpc(name, tag, def));
+  const internalDefinitions = {
+    ...definitions,
+    [ACTIVATE_TAG]: ActivateOperation,
+  } satisfies OperationDefs;
+
+  const rpcs = Object.entries(internalDefinitions).map(([tag, def]) => compileRpc(name, tag, def));
 
   const entity = Entity.make(name, rpcs as Array<DefRpcs<Defs>>);
 
   // Build the raw OperationValue for a given tag/payload — used by `make`
   // escape hatch and internally by execute/send to feed buildActorRef.
   const buildOpValue = (tag: string, payload: unknown) => {
-    const def = definitions[tag] as OperationDef | undefined;
+    const def = internalDefinitions[tag] as OperationDef | undefined;
     const opaque = def?.payload !== undefined && isOpaquePayload(def.payload);
     return opaque
       ? { _tag: tag, _payload: payload }
@@ -931,13 +952,28 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
   const interruptFn = (entityId: string) => flushImpl(entityAny, entityId);
 
   const ofFn = <T>(handlers: T): T => handlers;
+  const activateFn = (
+    entityId: string,
+  ): Effect.Effect<void, unknown, ActorClientService<Name, Defs>> =>
+    Effect.gen(function* () {
+      const factory = yield* contextTag;
+      const ref = yield* factory(entityId);
+      return yield* ref.execute(buildOpValue(ACTIVATE_TAG, { entityId }) as never);
+    });
+
   const getStateFn = (
     entityId: string,
     options?: ActorStateOptions<unknown, unknown>,
-  ): Effect.Effect<unknown, unknown, ActorAddressResolver | ActorStateRegistry | unknown> =>
+  ): Effect.Effect<
+    unknown,
+    unknown,
+    ActorAddressResolver | ActorStateRegistry | ActorClientService<Name, Defs> | unknown
+  > =>
     Effect.gen(function* () {
       if (options?.materialize !== undefined) {
         yield* options.materialize;
+      } else {
+        yield* activateFn(entityId);
       }
       const resolver = yield* ActorAddressResolver;
       return yield* stateOf(resolveEntityAddress(resolver, entityAny, entityId));
@@ -946,11 +982,17 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
   const watchStateFn = (
     entityId: string,
     options?: ActorStateOptions<unknown, unknown>,
-  ): Stream.Stream<unknown, unknown, ActorAddressResolver | ActorStateRegistry | unknown> =>
+  ): Stream.Stream<
+    unknown,
+    unknown,
+    ActorAddressResolver | ActorStateRegistry | ActorClientService<Name, Defs> | unknown
+  > =>
     Stream.unwrap(
       Effect.gen(function* () {
         if (options?.materialize !== undefined) {
           yield* options.materialize;
+        } else {
+          yield* activateFn(entityId);
         }
         const resolver = yield* ActorAddressResolver;
         return watchStateOf(resolveEntityAddress(resolver, entityAny, entityId));
@@ -969,7 +1011,7 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
       name,
       tag,
       def,
-      definitions,
+      definitions: internalDefinitions,
       contextTag: contextTag as unknown as Context.Service<
         ActorClientService<Name, OperationDefs>,
         ActorClientFactory<Name, OperationDefs>
@@ -983,7 +1025,7 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     _tag: "EntityActor" as const,
     name,
     type: name,
-    _meta: { name, definitions, entity },
+    _meta: { name, definitions, internalDefinitions, entity },
     Context: contextTag,
     of: ofFn,
     interrupt: interruptFn,
@@ -1169,6 +1211,8 @@ function toLayer(
     return workflowToLayer(actor, build as Function);
   }
 
+  const actorDefinitions = actor._meta.internalDefinitions ?? actor._meta.definitions;
+
   const clientLayer = Layer.effect(
     actor.Context,
     Effect.map(
@@ -1178,7 +1222,7 @@ function toLayer(
           buildActorRef(
             actor._meta.name,
             entityId,
-            actor._meta.definitions,
+            actorDefinitions,
             makeClient(entityId) as RpcClient.RpcClient<Rpc.Any, never>,
           ),
         ),
@@ -1204,7 +1248,7 @@ function toLayer(
     return Layer.merge(clientLayer, consumerSupportLayers);
   }
 
-  const transformed = transformHandlers(build, actor._meta.definitions);
+  const transformed = transformHandlers(build, actorDefinitions);
   const handlerLayer = actor._meta.entity.toLayer(transformed as never, {
     spanAttributes: options?.spanAttributes,
     maxIdleTime: options?.maxIdleTime,
@@ -1270,7 +1314,8 @@ function toTestLayer(
     return workflowToTestLayer(actor, build as Function);
   }
 
-  const transformed = transformHandlers(build, actor._meta.definitions);
+  const actorDefinitions = actor._meta.internalDefinitions ?? actor._meta.definitions;
+  const transformed = transformHandlers(build, actorDefinitions);
   const handlerLayer = actor._meta.entity.toLayer(transformed as never, {
     spanAttributes: options?.spanAttributes,
     maxIdleTime: options?.maxIdleTime,
@@ -1294,7 +1339,7 @@ function toTestLayer(
 
       const factory = (entityId: string): Effect.Effect<ActorRef<string, OperationDefs>> =>
         Effect.map(makeClient(entityId), (rpcClient) =>
-          buildActorRef(actor._meta.name, entityId, actor._meta.definitions, rpcClient),
+          buildActorRef(actor._meta.name, entityId, actorDefinitions, rpcClient),
         );
 
       const mailboxImpl: ActorMailboxShape = makeTestMailboxImpl(makeClient);
@@ -1321,6 +1366,9 @@ const transformHandlers = (build: unknown, definitions?: OperationDefs): unknown
   if (build != null && typeof build === "object" && !Effect.isEffect(build)) {
     const handlers = build as Record<string, Function>;
     const transformed: Record<string, Function> = {};
+    if (definitions?.[ACTIVATE_TAG] !== undefined) {
+      transformed[ACTIVATE_TAG] = () => Effect.void;
+    }
     for (const tag of Object.keys(handlers)) {
       const handler = handlers[tag];
       if (!handler) continue;

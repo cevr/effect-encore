@@ -41,6 +41,28 @@ const StatefulLayer = Layer.provide(
 const test = it.scopedLive.layer(StatefulLayer);
 
 describe("Actor state protocol", () => {
+  test("cold getState materializes an entity before reading registered state", () =>
+    Effect.gen(function* () {
+      const value = yield* Stateful.getState<number>("cold-counter");
+      expect(value).toBe(0);
+    }));
+
+  test("cold watchState materializes an entity before subscribing to registered state", () =>
+    Effect.gen(function* () {
+      const fiber = yield* Stateful.watchState<number>("cold-watch").pipe(
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.sleep("20 millis");
+      const makeRef = yield* Stateful.Context;
+      const ref = yield* makeRef("cold-watch");
+      yield* ref.execute(Stateful.Increment.make({ id: "cold-watch", amount: 4 }));
+
+      const values = Array.from(yield* Fiber.join(fiber));
+      expect(values).toEqual([0, 4]);
+    }));
+
   test("materializes an entity and reads its registered state", () =>
     Effect.gen(function* () {
       const makeRef = yield* Stateful.Context;
@@ -73,9 +95,24 @@ describe("Actor state protocol", () => {
       expect(values).toEqual([1, 5]);
     }));
 
-  test("fails loudly when no entity state is registered", () =>
+  test("fails loudly when the materialized entity registers no state", () =>
     Effect.gen(function* () {
-      const exit = yield* Stateful.getState<number>("missing").pipe(Effect.exit);
+      const Stateless = Actor.fromEntity("Stateless", {
+        Ping: {
+          payload: { id: Schema.String },
+          id: (p: { id: string }) => p.id,
+        },
+      });
+      const StatelessLayer = Layer.provide(
+        Actor.toTestLayer(Stateless, {
+          Ping: () => Effect.void,
+        }),
+        TestShardingConfig,
+      );
+      const exit = yield* Stateless.getState<number>("missing").pipe(
+        Effect.provide(StatelessLayer),
+        Effect.exit,
+      );
       expect(exit._tag).toBe("Failure");
       if (exit._tag === "Failure") {
         expect(String(exit.cause)).toContain("ActorStateUnavailable");
