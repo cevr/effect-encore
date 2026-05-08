@@ -6,7 +6,7 @@ Declarative actors and durable workflows for `@effect/cluster`.
 bun add effect-encore
 ```
 
-Peer dependency: `effect >= 4.0.0-beta.63`.
+Peer dependency: `effect >= 4.0.0-beta.64`.
 For v3 `@effect/cluster` compat: `import { Actor } from "effect-encore/v3"`.
 
 ## Why
