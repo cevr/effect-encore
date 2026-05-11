@@ -124,6 +124,23 @@ const resolveId = (
  */
 export type EntityIdReturn = string | { readonly entityId: string; readonly primaryKey?: string };
 
+/**
+ * Requirement bundle for hosts that send messages to actors.
+ *
+ * Producer-side ops (`send`, `ask`, `peek`, `cancel`, etc.) compose into
+ * the same three-Tag union: `MessageStorage` to persist envelopes,
+ * `ActorAddressResolver` to compute the destination shard, and `Sharding`
+ * to drive the cluster client. Use `Actor.SenderContext` in `R` instead
+ * of re-listing the union at every producer-op signature.
+ *
+ * Constructors live in `ActorSenderLayer.layer` / `layerMemory` (which
+ * also supply `Snowflake.Generator` for request-id minting).
+ */
+export type SenderContext =
+  | MessageStorage.MessageStorage
+  | ActorAddressResolver
+  | Sharding.Sharding;
+
 export interface OperationDef {
   readonly payload?: Schema.Top | Schema.Struct.Fields;
   readonly success?: Schema.Top;

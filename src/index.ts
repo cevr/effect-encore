@@ -27,6 +27,7 @@ export type {
   WorkflowActor,
   EntityIdReturn,
   ActorStateOptions,
+  SenderContext,
 } from "./actor.js";
 export type { ActorStateHandle, ActorStateRegistryShape } from "./actor-state.js";
 export { makeStepContext, makeSignal } from "./step.js";
