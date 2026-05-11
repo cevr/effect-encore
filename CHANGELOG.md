@@ -1,5 +1,56 @@
 # effect-encore
 
+## 0.12.0
+
+### Minor Changes
+
+- [`fe0d785`](https://github.com/cevr/effect-encore/commit/fe0d785a03e9779c261abc069f83ce45ccab2e1c) Thanks [@cevr](https://github.com/cevr)! - `Actor.toLayer` and `Actor.toTestLayer` now accept a `withScope` option that builds a per-call `Context` from the entity address. The returned context is merged into each handler invocation via `Effect.provide`, so handlers can `yield* Tag` to read services derived from the entity id without threading them as parameters.
+
+  ```ts
+  class WorkspaceId extends Context.Service<WorkspaceId, string>()("…/WorkspaceId") {}
+
+  Actor.toLayer(MyActor, handlers, {
+    withScope: (address) =>
+      Effect.succeed(Context.make(WorkspaceId, parseWorkspace(address.entityId))),
+  });
+  ```
+
+  `withScope` runs before every handler call (not once per activation), so it can read the live `CurrentAddress` and derive different scopes for different entities. Tags it provides become available to handlers via `yield* Tag` and are reflected as a typed `S` in the layer's requirements (excluded so they're satisfied by `withScope` itself, not external Layer plumbing).
+
+  Use this to lift per-actor-instance setup — workspace ids, request-scoped storage handles, anything derived from the entity key — out of the actor's outer Layer and into a single ergonomic option on `toLayer`.
+
+- [`2bd98ef`](https://github.com/cevr/effect-encore/commit/2bd98efc9af9ada02db94952890c425b9d0ef3da) Thanks [@cevr](https://github.com/cevr)! - `Actor.entityIdCodec(schema)`. Collision-safe codec for tuple-shaped entity ids. `Entity.toLayer` keys entities by a `string` `entityId`; when the natural key is a tuple like `(workspaceId, sessionId, branchId)`, a naive `${a}:${b}:${c}` join collides whenever a component contains `:`. The new codec encodes each component through `encodeURIComponent` before joining on `:`, so segments are unambiguous on decode, then validates the decoded tuple through the supplied schema.
+
+  ```ts
+  const Key = Schema.Tuple(Schema.String, Schema.String, Schema.String);
+  const codec = Actor.entityIdCodec(Key);
+  codec.encode(["ws-1", "sess-2", "branch:3"]); // "ws-1:sess-2:branch%3A3"
+  yield * codec.decode("ws-1:sess-2:branch%3A3"); // ["ws-1", "sess-2", "branch:3"]
+  ```
+
+  Decode failures surface as `EntityIdDecodeError` (segment is not valid URI-encoded text) or the schema's parse error (tuple shape disagrees).
+
+- [`91e755b`](https://github.com/cevr/effect-encore/commit/91e755b798b6738cb82713c8d345898c2690aa07) Thanks [@cevr](https://github.com/cevr)! - Export `SenderContext` type alias bundling the three producer-side cluster requirements (`MessageStorage | ActorAddressResolver | Sharding`). Use it in `R` channels for ops that send messages to actors instead of re-listing the union at every signature.
+
+- [`d1f48f5`](https://github.com/cevr/effect-encore/commit/d1f48f5b033ce8b8743aba2462a0683b4bd8df40) Thanks [@cevr](https://github.com/cevr)! - Materialize entity state automatically for cold `getState` and `watchState` calls so apps no longer need no-op activation operations.
+
+- [`02e72fc`](https://github.com/cevr/effect-encore/commit/02e72fcf10cede8eeb4fd3551006a2b15e94ff21) Thanks [@cevr](https://github.com/cevr)! - Typed actor state. `Actor.fromEntity(name, defs, { state: { schema, error? } })` now wires the registered state handle through `Schema.decodeUnknown` at the read boundary. `getState` / `watchState` / `waitForState` return `Schema.Type<schema>` instead of `unknown`, and emissions are validated through the schema (defense-in-depth at the registry boundary, not a bare type assertion). The optional `error` schema decodes the failure channel.
+
+  ```ts
+  const Counter = Actor.fromEntity(
+    "Counter",
+    { Increment: { ... } },
+    { state: { schema: Schema.Number } },
+  );
+
+  // inferred as Effect<number, ...>
+  const value = yield* Counter.getState("c1");
+  ```
+
+  Backwards compatible — actors declared without `state` continue to return `unknown` from the state methods.
+
+- [`da7e14f`](https://github.com/cevr/effect-encore/commit/da7e14f7009ff311eeea1cb10f70ac1279055dd8) Thanks [@cevr](https://github.com/cevr)! - Add `Actor.waitForState(entityId, predicate)` and `waitForStateOf(address, predicate)` for predicate-driven state observation. Resolves on the first state snapshot satisfying the predicate. Compose `Effect.timeout` for time-bounded waits.
+
 ## 0.11.1
 
 ### Patch Changes
