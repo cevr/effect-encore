@@ -76,6 +76,7 @@ import {
   watchStateOf,
 } from "./actor-state.js";
 import type { ActorStateHandle, ActorStateUnavailable } from "./actor-state.js";
+import { entityIdCodec } from "./entity-id-codec.js";
 
 // ── Layer passthrough (v4 polyfill — v3 has Layer.passthrough) ────────────
 // Adds the layer's input requirements to its output so provided services
@@ -2182,6 +2183,7 @@ export const Actor = {
   registerState: registerState as <State, Error = never, Requirements = never>(
     handle: ActorStateHandle<State, Error, Requirements>,
   ) => Effect.Effect<void, never, ActorStateRegistry | CurrentAddress | Scope.Scope>,
+  entityIdCodec,
   fromEntity,
   fromWorkflow,
   fromRpcs,

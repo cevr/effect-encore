@@ -69,6 +69,8 @@ export {
   layer as encoreMessageStorageLayer,
 } from "./storage.js";
 export type { EncoreMessageStorageShape, SqlMessageStorageOptions } from "./storage.js";
+export { entityIdCodec, EntityIdDecodeError } from "./entity-id-codec.js";
+export type { EntityIdCodec } from "./entity-id-codec.js";
 export { ActorAddressResolver, ActorAddressResolverLayer } from "./actor-address-resolver.js";
 export type { ActorAddressResolverShape } from "./actor-address-resolver.js";
 export { ActorMailbox, ActorMailboxLayer, MailboxError } from "./actor-mailbox.js";

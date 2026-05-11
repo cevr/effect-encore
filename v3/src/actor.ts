@@ -47,6 +47,7 @@ import type {
   ActorStateRegistryShape,
   ActorStateUnavailable,
 } from "./actor-state.js";
+import { entityIdCodec } from "./entity-id-codec.js";
 import type { Execution } from "@effect/workflow/Workflow";
 import type { WorkflowEngine, WorkflowInstance } from "@effect/workflow/WorkflowEngine";
 import { layerMemory as workflowEngineLayerMemory } from "@effect/workflow/WorkflowEngine";
@@ -2224,6 +2225,7 @@ export const Actor = {
   registerState: registerState as <State, Error = never, Requirements = never>(
     handle: ActorStateHandle<State, Error, Requirements>,
   ) => Effect.Effect<void, never, ActorStateRegistryShape | CurrentAddress | Scope.Scope>,
+  entityIdCodec,
   fromEntity,
   fromWorkflow,
   fromRpcs,
