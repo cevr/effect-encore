@@ -40,6 +40,7 @@ import {
   listStateEntityIds,
   registerState,
   stateOf,
+  waitForStateOf,
   watchStateOf,
 } from "./actor-state.js";
 import type {
@@ -148,6 +149,7 @@ type ReservedKeys =
   | "of"
   | "getState"
   | "watchState"
+  | "waitForState"
   | "listStateEntityIds"
   | "interrupt"
   | "flush"
@@ -167,6 +169,7 @@ const RESERVED_KEYS = new Set<string>([
   "of",
   "getState",
   "watchState",
+  "waitForState",
   "listStateEntityIds",
   "interrupt",
   "flush",
@@ -497,6 +500,21 @@ export type EntityActor<
       entityId: string,
       options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
     ) => Stream.Stream<
+      State,
+      Error | MaterializeError | ActorStateUnavailable,
+      ActorAddressResolverShape | ActorStateRegistryShape | Requirements | MaterializeRequirements
+    >;
+    readonly waitForState: <
+      State,
+      Error = never,
+      Requirements = never,
+      MaterializeError = never,
+      MaterializeRequirements = never,
+    >(
+      entityId: string,
+      predicate: (state: State) => boolean,
+      options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
+    ) => Effect.Effect<
       State,
       Error | MaterializeError | ActorStateUnavailable,
       ActorAddressResolverShape | ActorStateRegistryShape | Requirements | MaterializeRequirements
@@ -1056,6 +1074,25 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
       }),
     );
 
+  const waitForStateFn = (
+    entityId: string,
+    predicate: (state: unknown) => boolean,
+    options?: ActorStateOptions<unknown, unknown>,
+  ): Effect.Effect<
+    unknown,
+    unknown,
+    ActorAddressResolverShape | ActorStateRegistryShape | ActorClientService<Name, Defs> | unknown
+  > =>
+    Effect.gen(function* () {
+      if (options?.materialize !== undefined) {
+        yield* options.materialize;
+      } else {
+        yield* activateFn(entityId);
+      }
+      const resolver = yield* ActorAddressResolver;
+      return yield* waitForStateOf(resolveEntityAddress(resolver, entityAny, entityId), predicate);
+    });
+
   const listStateEntityIdsFn = () => listStateEntityIds(String(entityAny.type));
 
   // Build per-op handles. Each handle derives entityId/primaryKey from
@@ -1092,6 +1129,7 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     ...handles,
     getState: getStateFn,
     watchState: watchStateFn,
+    waitForState: waitForStateFn,
     listStateEntityIds: listStateEntityIdsFn,
   });
 

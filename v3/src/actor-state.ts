@@ -1,6 +1,6 @@
 import type { EntityAddress } from "@effect/cluster";
 import { CurrentAddress } from "@effect/cluster/Entity";
-import { Context, Data, Effect, Layer, Ref, Stream } from "effect";
+import { Context, Data, Effect, Layer, Option, Ref, Stream } from "effect";
 import type { Scope } from "effect";
 
 export class ActorStateUnavailable extends Data.TaggedError(
@@ -122,6 +122,26 @@ export const listStateEntityIds = (
     const registry = yield* ActorStateRegistry;
     return yield* registry.list(entityType);
   });
+
+export const waitForStateOf = <State, Error = never, Requirements = never>(
+  address: EntityAddress.EntityAddress,
+  predicate: (state: State) => boolean,
+): Effect.Effect<State, Error | ActorStateUnavailable, ActorStateRegistryShape | Requirements> =>
+  watchStateOf<State, Error, Requirements>(address).pipe(
+    Stream.filter(predicate),
+    Stream.runHead,
+    Effect.flatMap((option) =>
+      Option.match(option, {
+        onNone: () =>
+          Effect.die(
+            new Error(
+              `effect-encore/waitForStateOf: state stream ended before predicate matched for ${String(address.entityType)}:${String(address.entityId)}`,
+            ),
+          ),
+        onSome: Effect.succeed,
+      }),
+    ),
+  );
 
 const addressKey = (address: EntityAddress.EntityAddress): string =>
   `${String(address.entityType)}\x00${String(address.entityId)}`;

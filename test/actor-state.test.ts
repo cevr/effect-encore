@@ -118,4 +118,30 @@ describe("Actor state protocol", () => {
         expect(String(exit.cause)).toContain("ActorStateUnavailable");
       }
     }));
+
+  test("waitForState resolves when predicate matches a future state", () =>
+    Effect.gen(function* () {
+      const makeRef = yield* Stateful.Context;
+      const ref = yield* makeRef("wait-future");
+
+      const fiber = yield* Stateful.waitForState<number>("wait-future", (n) => n >= 5).pipe(
+        Effect.forkScoped,
+      );
+      yield* Effect.sleep("20 millis");
+      yield* ref.execute(Stateful.Increment.make({ id: "wait-future", amount: 2 }));
+      yield* ref.execute(Stateful.Increment.make({ id: "wait-future", amount: 4 }));
+
+      const result = yield* Fiber.join(fiber);
+      expect(result).toBe(6);
+    }));
+
+  test("waitForState resolves immediately on a current state that matches", () =>
+    Effect.gen(function* () {
+      const makeRef = yield* Stateful.Context;
+      const ref = yield* makeRef("wait-current");
+      yield* ref.execute(Stateful.Increment.make({ id: "wait-current", amount: 7 }));
+
+      const result = yield* Stateful.waitForState<number>("wait-current", (n) => n >= 5);
+      expect(result).toBe(7);
+    }));
 });

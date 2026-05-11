@@ -5,6 +5,7 @@ export {
   listStateEntityIds,
   registerState,
   stateOf,
+  waitForStateOf,
   watchStateOf,
 } from "./actor-state.js";
 export type {
