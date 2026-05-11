@@ -28,6 +28,10 @@ export type {
   WorkflowActor,
   EntityIdReturn,
   ActorStateOptions,
+  ActorStateDef,
+  FromEntityOptions,
+  StateOf,
+  StateErrorOf,
   SenderContext,
 } from "./actor.js";
 export type { ActorStateHandle, ActorStateRegistryShape } from "./actor-state.js";

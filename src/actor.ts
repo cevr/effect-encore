@@ -73,7 +73,6 @@ import {
   listStateEntityIds,
   registerState,
   stateOf,
-  waitForStateOf,
   watchStateOf,
 } from "./actor-state.js";
 import type { ActorStateHandle, ActorStateUnavailable } from "./actor-state.js";
@@ -357,6 +356,38 @@ export interface ActorStateOptions<E = never, R = never> {
   readonly materialize?: Effect.Effect<unknown, E, R>;
 }
 
+/**
+ * Typed state declaration for an entity. When supplied via `fromEntity`'s
+ * options, `getState` / `watchState` / `waitForState` infer their return
+ * State and Error channels — callers no longer pass `<State>` generics at
+ * every call site.
+ *
+ * The `schema` is type-only — it is not used at runtime to validate the
+ * registered handle's emissions. Encore relies on the handle returning the
+ * declared type honestly; treat the schema as a typing contract, not a
+ * boundary parse.
+ */
+export interface ActorStateDef {
+  readonly schema?: Schema.Top;
+  readonly error?: Schema.Top;
+}
+
+export type StateOf<S extends ActorStateDef | undefined> = S extends {
+  readonly schema: infer Sch extends Schema.Top;
+}
+  ? Schema.Schema.Type<Sch>
+  : unknown;
+
+export type StateErrorOf<S extends ActorStateDef | undefined> = S extends {
+  readonly error: infer E extends Schema.Top;
+}
+  ? Schema.Schema.Type<E>
+  : never;
+
+export interface FromEntityOptions<S extends ActorStateDef | undefined = undefined> {
+  readonly state?: S;
+}
+
 // ── OperationHandle — per-op payload-only dispatch surface ─────────────────
 
 /**
@@ -451,6 +482,8 @@ type ActorOperationHandles<Name extends string, Defs extends OperationDefs> = {
 export type EntityActor<
   Name extends string,
   Defs extends OperationDefs,
+  State = unknown,
+  StateError = never,
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
 > = ActorOperationHandles<Name, Defs> &
   Pipeable.Pipeable & {
@@ -494,48 +527,39 @@ export type EntityActor<
       MessageStorage.MessageStorage | ActorAddressResolver
     >;
     readonly of: (handlers: ActorHandlers<Defs>) => ActorHandlers<Defs>;
-    readonly getState: <
-      State,
-      Error = never,
-      Requirements = never,
-      MaterializeError = never,
-      MaterializeRequirements = never,
-    >(
+    readonly getState: <MaterializeError = never, MaterializeRequirements = never>(
       entityId: string,
       options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
     ) => Effect.Effect<
       State,
-      Error | MaterializeError | ActorStateUnavailable,
-      ActorAddressResolver | ActorStateRegistry | Requirements | MaterializeRequirements
+      StateError | MaterializeError | ActorStateUnavailable,
+      | ActorAddressResolver
+      | ActorStateRegistry
+      | ActorClientService<Name, Defs>
+      | MaterializeRequirements
     >;
-    readonly watchState: <
-      State,
-      Error = never,
-      Requirements = never,
-      MaterializeError = never,
-      MaterializeRequirements = never,
-    >(
+    readonly watchState: <MaterializeError = never, MaterializeRequirements = never>(
       entityId: string,
       options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
     ) => Stream.Stream<
       State,
-      Error | MaterializeError | ActorStateUnavailable,
-      ActorAddressResolver | ActorStateRegistry | Requirements | MaterializeRequirements
+      StateError | MaterializeError | ActorStateUnavailable,
+      | ActorAddressResolver
+      | ActorStateRegistry
+      | ActorClientService<Name, Defs>
+      | MaterializeRequirements
     >;
-    readonly waitForState: <
-      State,
-      Error = never,
-      Requirements = never,
-      MaterializeError = never,
-      MaterializeRequirements = never,
-    >(
+    readonly waitForState: <MaterializeError = never, MaterializeRequirements = never>(
       entityId: string,
       predicate: (state: State) => boolean,
       options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
     ) => Effect.Effect<
       State,
-      Error | MaterializeError | ActorStateUnavailable,
-      ActorAddressResolver | ActorStateRegistry | Requirements | MaterializeRequirements
+      StateError | MaterializeError | ActorStateUnavailable,
+      | ActorAddressResolver
+      | ActorStateRegistry
+      | ActorClientService<Name, Defs>
+      | MaterializeRequirements
     >;
     readonly listStateEntityIds: () => Effect.Effect<
       ReadonlyArray<string>,
@@ -926,10 +950,15 @@ const makeWaitFor = <S, E>(
 
 // ── Actor.fromEntity ──────────────────────────────────────────────────────
 
-const fromEntity = <const Name extends string, const Defs extends OperationDefs>(
+const fromEntity = <
+  const Name extends string,
+  const Defs extends OperationDefs,
+  const StateDef extends ActorStateDef | undefined = undefined,
+>(
   name: Name,
   definitions: AssertNoReservedKeys<Defs>,
-): EntityActor<Name, Defs> => {
+  options?: FromEntityOptions<StateDef>,
+): EntityActor<Name, Defs, StateOf<StateDef>, StateErrorOf<StateDef>> => {
   for (const tag of Object.keys(definitions)) {
     if (RESERVED_KEYS.has(tag)) {
       throw new Error(
@@ -996,27 +1025,47 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
       return yield* ref.execute(buildOpValue(ACTIVATE_TAG, { entityId }) as never);
     });
 
+  const stateSchema = options?.state?.schema;
+  const errorSchema = options?.state?.error;
+  const decodeState = stateSchema
+    ? (raw: unknown): Effect.Effect<unknown, unknown> =>
+        Schema.decodeUnknownEffect(stateSchema)(raw) as Effect.Effect<unknown, unknown>
+    : (raw: unknown): Effect.Effect<unknown, unknown> => Effect.succeed(raw);
+  const decodeError = errorSchema
+    ? (raw: unknown): Effect.Effect<unknown, unknown> =>
+        Schema.decodeUnknownEffect(errorSchema)(raw) as Effect.Effect<unknown, unknown>
+    : null;
+  const decodeFailure = (cause: unknown): Effect.Effect<never, unknown> => {
+    if (decodeError === null || cause === undefined || cause === null) {
+      return Effect.fail(cause);
+    }
+    return Effect.flatMap(decodeError(cause), (decoded) => Effect.fail(decoded));
+  };
+
   const getStateFn = (
     entityId: string,
-    options?: ActorStateOptions<unknown, unknown>,
+    stateOptions?: ActorStateOptions<unknown, unknown>,
   ): Effect.Effect<
     unknown,
     unknown,
     ActorAddressResolver | ActorStateRegistry | ActorClientService<Name, Defs> | unknown
   > =>
     Effect.gen(function* () {
-      if (options?.materialize !== undefined) {
-        yield* options.materialize;
+      if (stateOptions?.materialize !== undefined) {
+        yield* stateOptions.materialize;
       } else {
         yield* activateFn(entityId);
       }
       const resolver = yield* ActorAddressResolver;
-      return yield* stateOf(resolveEntityAddress(resolver, entityAny, entityId));
+      const raw = yield* stateOf(resolveEntityAddress(resolver, entityAny, entityId)).pipe(
+        Effect.catch(decodeFailure),
+      );
+      return yield* decodeState(raw);
     });
 
   const watchStateFn = (
     entityId: string,
-    options?: ActorStateOptions<unknown, unknown>,
+    stateOptions?: ActorStateOptions<unknown, unknown>,
   ): Stream.Stream<
     unknown,
     unknown,
@@ -1024,33 +1073,52 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
   > =>
     Stream.unwrap(
       Effect.gen(function* () {
-        if (options?.materialize !== undefined) {
-          yield* options.materialize;
+        if (stateOptions?.materialize !== undefined) {
+          yield* stateOptions.materialize;
         } else {
           yield* activateFn(entityId);
         }
         const resolver = yield* ActorAddressResolver;
-        return watchStateOf(resolveEntityAddress(resolver, entityAny, entityId));
+        return watchStateOf(resolveEntityAddress(resolver, entityAny, entityId)).pipe(
+          Stream.catch((cause: unknown) => Stream.fromEffect(decodeFailure(cause))),
+          Stream.mapEffect(decodeState),
+        );
       }),
     );
 
   const waitForStateFn = (
     entityId: string,
     predicate: (state: unknown) => boolean,
-    options?: ActorStateOptions<unknown, unknown>,
+    stateOptions?: ActorStateOptions<unknown, unknown>,
   ): Effect.Effect<
     unknown,
     unknown,
     ActorAddressResolver | ActorStateRegistry | ActorClientService<Name, Defs> | unknown
   > =>
     Effect.gen(function* () {
-      if (options?.materialize !== undefined) {
-        yield* options.materialize;
+      if (stateOptions?.materialize !== undefined) {
+        yield* stateOptions.materialize;
       } else {
         yield* activateFn(entityId);
       }
       const resolver = yield* ActorAddressResolver;
-      return yield* waitForStateOf(resolveEntityAddress(resolver, entityAny, entityId), predicate);
+      const address = resolveEntityAddress(resolver, entityAny, entityId);
+      const decoded = watchStateOf(address).pipe(
+        Stream.catch((cause: unknown) => Stream.fromEffect(decodeFailure(cause))),
+        Stream.mapEffect(decodeState),
+        Stream.filter(predicate),
+        Stream.runHead,
+      );
+      const option = yield* decoded;
+      return yield* Option.match(option, {
+        onNone: () =>
+          Effect.die(
+            new Error(
+              `effect-encore/waitForState: state stream ended before predicate matched for ${String(address.entityType)}:${String(address.entityId)}`,
+            ),
+          ),
+        onSome: Effect.succeed,
+      });
     });
 
   const listStateEntityIdsFn = () => listStateEntityIds(String(entityAny.type));
@@ -1093,7 +1161,7 @@ const fromEntity = <const Name extends string, const Defs extends OperationDefs>
     listStateEntityIds: listStateEntityIdsFn,
   });
 
-  return actor as EntityActor<Name, Defs>;
+  return actor as EntityActor<Name, Defs, StateOf<StateDef>, StateErrorOf<StateDef>>;
 };
 
 // ── makeOperationHandle — build a single OperationHandle ─────────────────
@@ -1193,9 +1261,11 @@ const makeOperationHandle = <
 function toLayer<
   Name extends string,
   Defs extends OperationDefs,
+  State,
+  StateError,
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
 >(
-  actor: EntityActor<Name, Defs, Rpcs>,
+  actor: EntityActor<Name, Defs, State, StateError, Rpcs>,
 ): Layer.Layer<
   | ActorClientService<Name, Defs>
   | ActorMailbox
@@ -1209,10 +1279,12 @@ function toLayer<
 function toLayer<
   Name extends string,
   Defs extends OperationDefs,
+  State,
+  StateError,
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
   RX = never,
 >(
-  actor: EntityActor<Name, Defs, Rpcs>,
+  actor: EntityActor<Name, Defs, State, StateError, Rpcs>,
   build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
   options?: HandlerOptions,
   /* eslint-disable typescript-eslint/no-explicit-any -- implementation overload requires any */
@@ -1322,10 +1394,12 @@ function toLayer(
 function toTestLayer<
   Name extends string,
   Defs extends OperationDefs,
+  State,
+  StateError,
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
   RX = never,
 >(
-  actor: EntityActor<Name, Defs, Rpcs>,
+  actor: EntityActor<Name, Defs, State, StateError, Rpcs>,
   build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
   options?: HandlerOptions,
 ): Layer.Layer<
@@ -2044,41 +2118,45 @@ export const fromRpcs = <const Name extends string, const Rpcs extends ReadonlyA
 type WithProtocolDataLast = {
   (
     transform: <Rpcs extends Rpc.Any>(protocol: RpcGroup.RpcGroup<Rpcs>) => RpcGroup.RpcGroup<Rpcs>,
-  ): <Name extends string, Defs extends OperationDefs, Rpcs extends Rpc.Any>(
-    actor: EntityActor<Name, Defs, Rpcs>,
-  ) => EntityActor<Name, Defs, Rpcs>;
+  ): <Name extends string, Defs extends OperationDefs, State, StateError, Rpcs extends Rpc.Any>(
+    actor: EntityActor<Name, Defs, State, StateError, Rpcs>,
+  ) => EntityActor<Name, Defs, State, StateError, Rpcs>;
   <RpcsIn extends Rpc.Any, RpcsOut extends Rpc.Any>(
     transform: (protocol: RpcGroup.RpcGroup<RpcsIn>) => RpcGroup.RpcGroup<RpcsOut>,
-  ): <Name extends string, Defs extends OperationDefs>(
-    actor: EntityActor<Name, Defs, RpcsIn>,
-  ) => EntityActor<Name, Defs, RpcsOut>;
+  ): <Name extends string, Defs extends OperationDefs, State, StateError>(
+    actor: EntityActor<Name, Defs, State, StateError, RpcsIn>,
+  ) => EntityActor<Name, Defs, State, StateError, RpcsOut>;
 };
 
 type WithProtocolDataFirst = <
   Name extends string,
   Defs extends OperationDefs,
+  State,
+  StateError,
   RpcsIn extends Rpc.Any,
   RpcsOut extends Rpc.Any,
 >(
-  actor: EntityActor<Name, Defs, RpcsIn>,
+  actor: EntityActor<Name, Defs, State, StateError, RpcsIn>,
   transform: (protocol: RpcGroup.RpcGroup<RpcsIn>) => RpcGroup.RpcGroup<RpcsOut>,
-) => EntityActor<Name, Defs, RpcsOut>;
+) => EntityActor<Name, Defs, State, StateError, RpcsOut>;
 
 type WithProtocol = WithProtocolDataLast & WithProtocolDataFirst;
 
 const withProtocolImpl = <
   Name extends string,
   Defs extends OperationDefs,
+  State,
+  StateError,
   RpcsIn extends Rpc.Any,
   RpcsOut extends Rpc.Any,
 >(
-  actor: EntityActor<Name, Defs, RpcsIn>,
+  actor: EntityActor<Name, Defs, State, StateError, RpcsIn>,
   transform: (protocol: RpcGroup.RpcGroup<RpcsIn>) => RpcGroup.RpcGroup<RpcsOut>,
-): EntityActor<Name, Defs, RpcsOut> => {
+): EntityActor<Name, Defs, State, StateError, RpcsOut> => {
   const newEntity = Entity.fromRpcGroup(actor._meta.name, transform(actor._meta.entity.protocol));
   return Object.assign(Object.create(Pipeable.Prototype), actor, {
     _meta: { ...actor._meta, entity: newEntity },
-  }) as EntityActor<Name, Defs, RpcsOut>;
+  }) as EntityActor<Name, Defs, State, StateError, RpcsOut>;
 };
 
 export const withProtocol: WithProtocol = dual(2, withProtocolImpl);
@@ -2088,7 +2166,7 @@ export { CurrentAddress };
 // ── Any types + Type Guards ───────────────────────────────────────────────
 
 // eslint-disable-next-line typescript-eslint/no-explicit-any
-export type AnyEntityActor = EntityActor<any, any, any>;
+export type AnyEntityActor = EntityActor<any, any, any, any, any>;
 // eslint-disable-next-line typescript-eslint/no-explicit-any
 export type AnyWorkflowActor = WorkflowActor<any, any, any, any, any>;
 export type AnyActor = AnyEntityActor | AnyWorkflowActor;

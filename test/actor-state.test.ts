@@ -9,13 +9,17 @@ const TestShardingConfig = ShardingConfig.layer({
   entityTerminationTimeout: 0,
 });
 
-const Stateful = Actor.fromEntity("Stateful", {
-  Increment: {
-    payload: { id: Schema.String, amount: Schema.Number },
-    success: Schema.Number,
-    id: (p: { id: string }) => p.id,
+const Stateful = Actor.fromEntity(
+  "Stateful",
+  {
+    Increment: {
+      payload: { id: Schema.String, amount: Schema.Number },
+      success: Schema.Number,
+      id: (p: { id: string }) => p.id,
+    },
   },
-});
+  { state: { schema: Schema.Number } },
+);
 
 const StatefulLayer = Layer.provide(
   Actor.toTestLayer(
@@ -40,16 +44,43 @@ const StatefulLayer = Layer.provide(
 
 const test = it.scopedLive.layer(StatefulLayer);
 
+const Coerced = Actor.fromEntity(
+  "Coerced",
+  {
+    Touch: {
+      payload: { id: Schema.String },
+      id: (p: { id: string }) => p.id,
+    },
+  },
+  { state: { schema: Schema.NumberFromString } },
+);
+
+const CoercedLayer = Layer.provide(
+  Actor.toTestLayer(
+    Coerced,
+    Effect.gen(function* () {
+      yield* Actor.registerState({
+        get: Effect.succeed("42" as unknown as number),
+        watch: Stream.succeed("42" as unknown as number),
+      });
+      return Coerced.of({ Touch: () => Effect.void });
+    }),
+  ),
+  TestShardingConfig,
+);
+
+const coercedTest = it.scopedLive.layer(CoercedLayer);
+
 describe("Actor state protocol", () => {
   test("cold getState materializes an entity before reading registered state", () =>
     Effect.gen(function* () {
-      const value = yield* Stateful.getState<number>("cold-counter");
+      const value = yield* Stateful.getState("cold-counter");
       expect(value).toBe(0);
     }));
 
   test("cold watchState materializes an entity before subscribing to registered state", () =>
     Effect.gen(function* () {
-      const fiber = yield* Stateful.watchState<number>("cold-watch").pipe(
+      const fiber = yield* Stateful.watchState("cold-watch").pipe(
         Stream.take(2),
         Stream.runCollect,
         Effect.forkScoped,
@@ -67,14 +98,14 @@ describe("Actor state protocol", () => {
     Effect.gen(function* () {
       const makeRef = yield* Stateful.Context;
       const ref = yield* makeRef("counter");
-      const value = yield* Stateful.getState<number>("counter", {
+      const value = yield* Stateful.getState("counter", {
         materialize: ref.execute(Stateful.Increment.make({ id: "counter", amount: 2 })),
       });
       expect(value).toBe(2);
 
       const next = yield* ref.execute(Stateful.Increment.make({ id: "counter", amount: 3 }));
       expect(next).toBe(5);
-      expect(yield* Stateful.getState<number>("counter")).toBe(5);
+      expect(yield* Stateful.getState("counter")).toBe(5);
     }));
 
   test("watches state changes for one entity", () =>
@@ -83,7 +114,7 @@ describe("Actor state protocol", () => {
       const ref = yield* makeRef("watched");
       yield* ref.execute(Stateful.Increment.make({ id: "watched", amount: 1 }));
 
-      const fiber = yield* Stateful.watchState<number>("watched").pipe(
+      const fiber = yield* Stateful.watchState("watched").pipe(
         Stream.take(2),
         Stream.runCollect,
         Effect.forkScoped,
@@ -109,7 +140,7 @@ describe("Actor state protocol", () => {
         }),
         TestShardingConfig,
       );
-      const exit = yield* Stateless.getState<number>("missing").pipe(
+      const exit = yield* Stateless.getState("missing").pipe(
         Effect.provide(StatelessLayer),
         Effect.exit,
       );
@@ -124,7 +155,7 @@ describe("Actor state protocol", () => {
       const makeRef = yield* Stateful.Context;
       const ref = yield* makeRef("wait-future");
 
-      const fiber = yield* Stateful.waitForState<number>("wait-future", (n) => n >= 5).pipe(
+      const fiber = yield* Stateful.waitForState("wait-future", (n) => n >= 5).pipe(
         Effect.forkScoped,
       );
       yield* Effect.sleep("20 millis");
@@ -141,7 +172,14 @@ describe("Actor state protocol", () => {
       const ref = yield* makeRef("wait-current");
       yield* ref.execute(Stateful.Increment.make({ id: "wait-current", amount: 7 }));
 
-      const result = yield* Stateful.waitForState<number>("wait-current", (n) => n >= 5);
+      const result = yield* Stateful.waitForState("wait-current", (n) => n >= 5);
       expect(result).toBe(7);
     }));
+
+  coercedTest("getState decodes the registered handle through state.schema", () =>
+    Effect.gen(function* () {
+      const value = yield* Coerced.getState("decoded");
+      expect(value).toBe(42);
+    }),
+  );
 });
