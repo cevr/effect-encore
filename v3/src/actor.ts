@@ -327,6 +327,25 @@ export interface HandlerOptions {
   readonly mailboxCapacity?: number | "unbounded";
 }
 
+/**
+ * Options for `Actor.toLayer` / `Actor.toTestLayer` that extend
+ * `HandlerOptions` with a per-call scope builder.
+ *
+ * `withScope` runs before every handler invocation. It receives the resolved
+ * `EntityAddress` for the activation and returns a `Context` that is merged
+ * into the handler's runtime via `Effect.provide`. Tags declared in that
+ * Context become available to handlers via `yield* Tag`.
+ *
+ * Use this to derive per-entity services from the entity id (e.g. parse a
+ * tuple key, then build a workspace-scoped Context) without threading them
+ * as handler parameters or polluting the actor's outer Layer requirements.
+ */
+export interface ToLayerOptions<S = never, ES = never, RS = never> extends HandlerOptions {
+  readonly withScope?: (
+    address: EntityAddress.EntityAddress,
+  ) => Effect.Effect<Context.Context<S>, ES, RS>;
+}
+
 // ── ActorMeta — internal metadata ──────────────────────────────────────────
 
 export interface ActorMeta<
@@ -1342,10 +1361,13 @@ function toLayer<
   StateError,
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
   RX = never,
+  S = never,
+  ES = never,
+  RS = never,
 >(
   actor: EntityActor<Name, Defs, State, StateError, Rpcs>,
   build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
-  options?: HandlerOptions,
+  options?: ToLayerOptions<S, ES, RS>,
   /* eslint-disable typescript-eslint/no-explicit-any -- implementation overload requires any */
 ): Layer.Layer<
   | ActorClientService<Name, Defs>
@@ -1355,6 +1377,7 @@ function toLayer<
   | Snowflake.Generator,
   never,
   | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress>
+  | Exclude<RS, Scope.Scope | CurrentAddress | CurrentRunnerAddress | S>
   | Sharding.Sharding
   | Scope.Scope
   | Rpc.MiddlewareClient<Rpcs>
@@ -1390,7 +1413,7 @@ function toLayer<
 function toLayer(
   actor: any,
   build?: unknown,
-  options?: HandlerOptions,
+  options?: ToLayerOptions<unknown, unknown, unknown>,
 ): Layer.Layer<any, any, any> {
   /* eslint-enable typescript-eslint/no-explicit-any */
   if (isWorkflowActor(actor) && build !== undefined) {
@@ -1434,7 +1457,7 @@ function toLayer(
     return Layer.merge(clientLayer, consumerSupportLayers);
   }
 
-  const transformed = transformHandlers(build, actorDefinitions);
+  const transformed = transformHandlers(build, actorDefinitions, options?.withScope);
   const handlerLayer = actor._meta.entity.toLayer(transformed as never, {
     spanAttributes: options?.spanAttributes,
     maxIdleTime: options?.maxIdleTime,
@@ -1457,10 +1480,13 @@ function toTestLayer<
   StateError,
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
   RX = never,
+  S = never,
+  ES = never,
+  RS = never,
 >(
   actor: EntityActor<Name, Defs, State, StateError, Rpcs>,
   build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
-  options?: HandlerOptions,
+  options?: ToLayerOptions<S, ES, RS>,
 ): Layer.Layer<
   | ActorClientService<Name, Defs>
   | ActorMailboxShape
@@ -1468,7 +1494,8 @@ function toTestLayer<
   | ActorStateRegistryShape
   | Snowflake.Generator,
   never,
-  ShardingConfig.ShardingConfig
+  | Exclude<RS, Scope.Scope | CurrentAddress | CurrentRunnerAddress | S>
+  | ShardingConfig.ShardingConfig
 >;
 
 // Workflow overload
@@ -1495,7 +1522,7 @@ function toTestLayer<
 function toTestLayer(
   actor: any,
   build: unknown,
-  options?: HandlerOptions,
+  options?: ToLayerOptions<unknown, unknown, unknown>,
 ): Layer.Layer<any, any, any> {
   /* eslint-enable typescript-eslint/no-explicit-any */
   if (isWorkflowActor(actor)) {
@@ -1503,7 +1530,7 @@ function toTestLayer(
   }
 
   const actorDefinitions = actor._meta.internalDefinitions ?? actor._meta.definitions;
-  const transformed = transformHandlers(build, actorDefinitions);
+  const transformed = transformHandlers(build, actorDefinitions, options?.withScope);
   const handlerLayer = actor._meta.entity.toLayer(transformed as never, {
     spanAttributes: options?.spanAttributes,
     maxIdleTime: options?.maxIdleTime,
@@ -1550,7 +1577,13 @@ function toTestLayer(
 
 // ── Transform handlers from operation-first to request-first ───────────────
 
-const transformHandlers = (build: unknown, definitions?: OperationDefs): unknown => {
+const transformHandlers = (
+  build: unknown,
+  definitions?: OperationDefs,
+  withScope?: (
+    address: EntityAddress.EntityAddress,
+  ) => Effect.Effect<Context.Context<unknown>, unknown, unknown>,
+): unknown => {
   if (build != null && typeof build === "object" && !Effect.isEffect(build)) {
     const handlers = build as Record<string, Function>;
     const transformed: Record<string, Function> = {};
@@ -1567,12 +1600,20 @@ const transformHandlers = (build: unknown, definitions?: OperationDefs): unknown
         const operation = opaque
           ? { _tag: tag, _payload: raw }
           : { _tag: tag, ...((raw ?? {}) as object) };
-        return handler({ operation, request });
+        const body = handler({ operation, request }) as Effect.Effect<unknown, unknown, unknown>;
+        if (withScope === undefined) return body;
+        return Effect.gen(function* () {
+          const address = yield* CurrentAddress;
+          const context = yield* withScope(address);
+          return yield* Effect.provide(body, context);
+        });
       };
     }
     return transformed;
   }
-  return Effect.map(build as Effect.Effect<unknown>, (b) => transformHandlers(b, definitions));
+  return Effect.map(build as Effect.Effect<unknown>, (b) =>
+    transformHandlers(b, definitions, withScope),
+  );
 };
 
 // ── buildActorRef — value-dispatch ref ─────────────────────────────────────
