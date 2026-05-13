@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.12.1
+
+### Patch Changes
+
+- [`fa9f0b7`](https://github.com/cevr/effect-encore/commit/fa9f0b7e9077d947cbab8b4dfe42a7255895c149) Thanks [@cevr](https://github.com/cevr)! - Support Effect v4 beta.66 natively and treat concurrent duplicate actor sends as idempotent.
+
 ## 0.12.0
 
 ### Minor Changes
