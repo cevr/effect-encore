@@ -18,6 +18,7 @@ export type {
   ActorClientFactory,
   ActorStateClient,
   ActorStateClientService,
+  ActorLayerBuildContextExclusions,
   ActorMeta,
   ActorRef,
   OperationBrand,

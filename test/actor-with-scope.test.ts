@@ -13,8 +13,20 @@ class WorkspaceId extends Context.Service<WorkspaceId, string>()(
   "effect-encore/test/actor-with-scope.test/WorkspaceId",
 ) {}
 
+class LayerToken extends Context.Service<LayerToken, string>()(
+  "effect-encore/test/actor-with-scope.test/LayerToken",
+) {}
+
 const Scoped = Actor.fromEntity("Scoped", {
   Inspect: {
+    payload: { id: Schema.String },
+    success: Schema.String,
+    id: (p: { id: string }) => p.id,
+  },
+});
+
+const Captured = Actor.fromEntity("Captured", {
+  Read: {
     payload: { id: Schema.String },
     success: Schema.String,
     id: (p: { id: string }) => p.id,
@@ -37,7 +49,22 @@ const ScopedLayer = Layer.provide(
   TestShardingConfig,
 );
 
+const CapturedLayer = Layer.provide(
+  Layer.unwrap(
+    Actor.provideLayerBuildContext(
+      Effect.gen(function* () {
+        const layerToken = yield* LayerToken;
+        return Captured.of({
+          Read: () => Effect.succeed(layerToken),
+        });
+      }),
+    ).pipe(Effect.map((build) => Actor.toTestLayer(Captured, build))),
+  ),
+  Layer.merge(TestShardingConfig, Layer.succeed(LayerToken, "captured-layer-token")),
+);
+
 const scopedTest = it.scopedLive.layer(ScopedLayer);
+const capturedTest = it.scopedLive.layer(CapturedLayer);
 
 describe("Actor.toLayer({ withScope })", () => {
   scopedTest("handler reads a Tag built per-call from the entity address", () =>
@@ -58,6 +85,15 @@ describe("Actor.toLayer({ withScope })", () => {
       const b = yield* refTwo.execute(Scoped.Inspect.make({ id: "two" }));
       expect(a).toBe("workspace-for:one");
       expect(b).toBe("workspace-for:two");
+    }),
+  );
+
+  capturedTest("provideLayerBuildContext captures layer-built services", () =>
+    Effect.gen(function* () {
+      const makeRef = yield* Captured.Context;
+      const ref = yield* makeRef("alpha");
+      const value = yield* ref.execute(Captured.Read.make({ id: "alpha" }));
+      expect(value).toBe("captured-layer-token");
     }),
   );
 });

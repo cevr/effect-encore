@@ -416,6 +416,30 @@ export interface ActorStateClient<State, Error = never> {
   readonly listEntityIds: () => Effect.Effect<ReadonlyArray<string>>;
 }
 
+export type ActorLayerBuildContextExclusions =
+  | Scope.Scope
+  | CurrentAddress
+  | CurrentRunnerAddress
+  | ActorStateRegistry;
+
+export const provideLayerBuildContext = <A, E, R>(
+  build: Effect.Effect<A, E, R>,
+): Effect.Effect<
+  Effect.Effect<A, E, Extract<R, ActorLayerBuildContextExclusions>>,
+  never,
+  Exclude<R, ActorLayerBuildContextExclusions>
+> =>
+  Effect.context<Exclude<R, ActorLayerBuildContextExclusions>>().pipe(
+    Effect.map(
+      (ctx) =>
+        Effect.provideContext(build, ctx) as Effect.Effect<
+          A,
+          E,
+          Extract<R, ActorLayerBuildContextExclusions>
+        >,
+    ),
+  );
+
 /**
  * Typed state declaration for an entity. When supplied via `fromEntity`'s
  * options, `getState` / `watchState` / `waitForState` infer their return
@@ -2356,6 +2380,7 @@ export const Actor = {
   fromEntity,
   fromWorkflow,
   fromRpcs,
+  provideLayerBuildContext,
   withProtocol,
   toLayer,
   toTestLayer,
