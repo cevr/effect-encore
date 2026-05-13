@@ -1,5 +1,13 @@
 # effect-encore
 
+## 0.12.4
+
+### Patch Changes
+
+- [`5c9f9d1`](https://github.com/cevr/effect-encore/commit/5c9f9d1956c477e5ddad909f897e64eb008cff06) Thanks [@cevr](https://github.com/cevr)! - Expose actor-bound `Control` services from entity layers so applications can
+  run mailbox control operations without threading cluster storage and address
+  resolver requirements through their own services.
+
 ## 0.12.3
 
 ### Patch Changes
