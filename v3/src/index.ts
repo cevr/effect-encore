@@ -16,6 +16,8 @@ export type {
   AnyActor,
   ActorClientService,
   ActorClientFactory,
+  ActorStateClient,
+  ActorStateClientService,
   ActorMeta,
   ActorRef,
   OperationBrand,

@@ -36,6 +36,7 @@ import {
   MailboxError,
 } from "./actor-mailbox.js";
 import {
+  ActorStateRegistry,
   ActorStateRegistryLive,
   listStateEntityIds,
   registerState,
@@ -161,6 +162,7 @@ type ReservedKeys =
   | "_meta"
   | "$is"
   | "Context"
+  | "State"
   | "name"
   | "type"
   | "of"
@@ -181,6 +183,7 @@ const RESERVED_KEYS = new Set<string>([
   "_meta",
   "$is",
   "Context",
+  "State",
   "name",
   "type",
   "of",
@@ -378,6 +381,43 @@ export interface ActorStateOptions<E = never, R = never> {
   readonly materialize?: Effect.Effect<unknown, E, R>;
 }
 
+declare const ActorStateClientServiceId: unique symbol;
+
+export interface ActorStateClientService<Name extends string> {
+  readonly [ActorStateClientServiceId]: {
+    readonly name: Name;
+  };
+}
+
+export interface ActorStateClient<State, Error = never> {
+  readonly get: <MaterializeError = never, MaterializeRequirements = never>(
+    entityId: string,
+    options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
+  ) => Effect.Effect<
+    State,
+    Error | MaterializeError | ActorStateUnavailable,
+    MaterializeRequirements
+  >;
+  readonly watch: <MaterializeError = never, MaterializeRequirements = never>(
+    entityId: string,
+    options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
+  ) => Stream.Stream<
+    State,
+    Error | MaterializeError | ActorStateUnavailable,
+    MaterializeRequirements
+  >;
+  readonly waitFor: <MaterializeError = never, MaterializeRequirements = never>(
+    entityId: string,
+    predicate: (state: State) => boolean,
+    options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
+  ) => Effect.Effect<
+    State,
+    Error | MaterializeError | ActorStateUnavailable,
+    MaterializeRequirements
+  >;
+  readonly listEntityIds: () => Effect.Effect<ReadonlyArray<string>>;
+}
+
 /**
  * Typed state declaration for an entity. When supplied via `fromEntity`'s
  * options, `getState` / `watchState` / `waitForState` infer their return
@@ -514,6 +554,7 @@ export type EntityActor<
     readonly type: Name;
     readonly _meta: ActorMeta<Name, Defs, Rpcs>;
     readonly Context: Context.Tag<ActorClientService<Name, Defs>, ActorClientFactory<Name, Defs>>;
+    readonly State: Context.Tag<ActorStateClientService<Name>, ActorStateClient<State, StateError>>;
     /**
      * Stop accepting more work for this entity — clears the pending mailbox.
      * Distinct intent from `flush` ("clean slate"): use `interrupt` when you
@@ -1074,6 +1115,11 @@ const fromEntity = <
     ActorClientFactory<Name, Defs>
   >(`effect-encore/${name}/Client`);
 
+  const stateTag = Context.GenericTag<
+    ActorStateClientService<Name>,
+    ActorStateClient<StateOf<StateDef>, StateErrorOf<StateDef>>
+  >(`effect-encore/${name}/State`);
+
   const $is =
     (tag: string) =>
     (value: unknown): boolean =>
@@ -1227,6 +1273,7 @@ const fromEntity = <
     type: name,
     _meta: { name, definitions, internalDefinitions, entity },
     Context: contextTag,
+    State: stateTag,
     of: ofFn,
     interrupt: interruptFn,
     flush: flushFn,
@@ -1346,6 +1393,7 @@ function toLayer<
   actor: EntityActor<Name, Defs, State, StateError, Rpcs>,
 ): Layer.Layer<
   | ActorClientService<Name, Defs>
+  | ActorStateClientService<Name>
   | ActorMailboxShape
   | ActorAddressResolverShape
   | ActorStateRegistryShape
@@ -1371,6 +1419,7 @@ function toLayer<
   /* eslint-disable typescript-eslint/no-explicit-any -- implementation overload requires any */
 ): Layer.Layer<
   | ActorClientService<Name, Defs>
+  | ActorStateClientService<Name>
   | ActorMailboxShape
   | ActorAddressResolverShape
   | ActorStateRegistryShape
@@ -1453,8 +1502,11 @@ function toLayer(
     Snowflake.layerGenerator,
   );
 
+  const stateLayer = makeActorStateLayer(actor);
+
   if (build === undefined) {
-    return Layer.merge(clientLayer, consumerSupportLayers);
+    const baseLayer = Layer.merge(clientLayer, consumerSupportLayers);
+    return Layer.merge(baseLayer, Layer.provide(stateLayer, baseLayer));
   }
 
   const transformed = transformHandlers(build, actorDefinitions, options?.withScope);
@@ -1465,9 +1517,11 @@ function toLayer(
     mailboxCapacity: options?.mailboxCapacity,
   });
 
-  return layerPassthrough(
+  const baseLayer = layerPassthrough(
     Layer.merge(Layer.merge(handlerLayer, clientLayer), consumerSupportLayers),
   );
+
+  return Layer.merge(baseLayer, Layer.provide(stateLayer, baseLayer));
 }
 
 // ── Actor.toTestLayer ─────────────────────────────────────────────────────
@@ -1489,6 +1543,7 @@ function toTestLayer<
   options?: ToLayerOptions<S, ES, RS>,
 ): Layer.Layer<
   | ActorClientService<Name, Defs>
+  | ActorStateClientService<Name>
   | ActorMailboxShape
   | ActorAddressResolverShape
   | ActorStateRegistryShape
@@ -1572,8 +1627,81 @@ function toTestLayer(
     Snowflake.layerGenerator,
   );
 
-  return Layer.merge(factoryAndMailboxLayer, supportLayers);
+  const baseLayer = Layer.merge(factoryAndMailboxLayer, supportLayers);
+  const stateLayer = makeActorStateLayer(actor);
+
+  return Layer.merge(baseLayer, Layer.provide(stateLayer, baseLayer));
 }
+
+const makeActorStateLayer = <Name extends string, Defs extends OperationDefs, State, StateError>(
+  actor: EntityActor<Name, Defs, State, StateError>,
+): Layer.Layer<
+  ActorStateClientService<Name>,
+  never,
+  ActorAddressResolverShape | ActorStateRegistryShape | ActorClientService<Name, Defs>
+> =>
+  Layer.effect(
+    actor.State,
+    Effect.gen(function* () {
+      const resolver = yield* ActorAddressResolver;
+      const registry = yield* ActorStateRegistry;
+      const factory = yield* actor.Context;
+
+      const provideEffectSupport = <A, E, R>(
+        effect: Effect.Effect<A, E, R>,
+      ): Effect.Effect<
+        A,
+        E,
+        Exclude<
+          R,
+          ActorAddressResolverShape | ActorStateRegistryShape | ActorClientService<Name, Defs>
+        >
+      > =>
+        effect.pipe(
+          Effect.provideService(actor.Context, factory),
+          Effect.provideService(ActorStateRegistry, registry),
+          Effect.provideService(ActorAddressResolver, resolver),
+        ) as Effect.Effect<
+          A,
+          E,
+          Exclude<
+            R,
+            ActorAddressResolverShape | ActorStateRegistryShape | ActorClientService<Name, Defs>
+          >
+        >;
+
+      const provideStreamSupport = <A, E, R>(
+        stream: Stream.Stream<A, E, R>,
+      ): Stream.Stream<
+        A,
+        E,
+        Exclude<
+          R,
+          ActorAddressResolverShape | ActorStateRegistryShape | ActorClientService<Name, Defs>
+        >
+      > =>
+        stream.pipe(
+          Stream.provideService(actor.Context, factory),
+          Stream.provideService(ActorStateRegistry, registry),
+          Stream.provideService(ActorAddressResolver, resolver),
+        ) as Stream.Stream<
+          A,
+          E,
+          Exclude<
+            R,
+            ActorAddressResolverShape | ActorStateRegistryShape | ActorClientService<Name, Defs>
+          >
+        >;
+
+      return {
+        get: (entityId, options) => provideEffectSupport(actor.getState(entityId, options)),
+        watch: (entityId, options) => provideStreamSupport(actor.watchState(entityId, options)),
+        waitFor: (entityId, predicate, options) =>
+          provideEffectSupport(actor.waitForState(entityId, predicate, options)),
+        listEntityIds: () => provideEffectSupport(actor.listStateEntityIds()),
+      } satisfies ActorStateClient<State, StateError>;
+    }),
+  );
 
 // ── Transform handlers from operation-first to request-first ───────────────
 

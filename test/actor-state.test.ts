@@ -108,6 +108,18 @@ describe("Actor state protocol", () => {
       expect(yield* Stateful.getState("counter")).toBe(5);
     }));
 
+  test("State service exposes bound state operations", () =>
+    Effect.gen(function* () {
+      const state = yield* Stateful.State;
+      const makeRef = yield* Stateful.Context;
+      const ref = yield* makeRef("state-service");
+      yield* ref.execute(Stateful.Increment.make({ id: "state-service", amount: 3 }));
+
+      expect(yield* state.get("state-service")).toBe(3);
+      expect(yield* state.waitFor("state-service", (value) => value >= 3)).toBe(3);
+      expect(yield* state.listEntityIds()).toContain("state-service");
+    }));
+
   test("watches state changes for one entity", () =>
     Effect.gen(function* () {
       const makeRef = yield* Stateful.Context;

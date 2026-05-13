@@ -12,6 +12,7 @@ import type { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/
 import { Actor } from "../src/index.js";
 import type {
   ActorAddressResolver,
+  ActorStateClientService,
   ActorMailbox,
   CurrentAddress,
   ExecId,
@@ -38,6 +39,18 @@ const Order = Actor.fromEntity("Order", {
     id: () => "singleton",
   },
 });
+
+const StatefulCounter = Actor.fromEntity(
+  "StatefulCounter",
+  {
+    Add: {
+      payload: { id: Schema.String, amount: Schema.Number },
+      success: Schema.Number,
+      id: (p: { id: string }) => p.id,
+    },
+  },
+  { state: { schema: Schema.Number } },
+);
 
 const Greeter = Actor.fromWorkflow("Greeter", {
   payload: { name: Schema.String },
@@ -103,6 +116,15 @@ describe("type-level tests", () => {
 
   test("Greeter.execute returns Effect<string>", () => {
     const _check = (): Effect.Effect<string, never, unknown> => Greeter.execute({ name: "world" });
+    void _check;
+  });
+
+  test("State service hides actor state infrastructure requirements", () => {
+    const _check = (): Effect.Effect<number, unknown, ActorStateClientService<"StatefulCounter">> =>
+      Effect.gen(function* () {
+        const state = yield* StatefulCounter.State;
+        return yield* state.get("counter");
+      });
     void _check;
   });
 
