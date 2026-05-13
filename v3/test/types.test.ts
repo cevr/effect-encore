@@ -12,6 +12,7 @@ import type { WorkflowEngine, WorkflowInstance } from "@effect/workflow/Workflow
 import { Actor } from "../src/index.js";
 import type {
   ActorAddressResolverShape,
+  ActorControlClientService,
   ActorStateClientService,
   ActorMailboxShape,
   CurrentAddress,
@@ -124,6 +125,15 @@ describe("type-level tests", () => {
       Effect.gen(function* () {
         const state = yield* StatefulCounter.State;
         return yield* state.get("counter");
+      });
+    void _check;
+  });
+
+  test("Control service hides actor control infrastructure requirements", () => {
+    const _check = (): Effect.Effect<void, unknown, ActorControlClientService<"Order">> =>
+      Effect.gen(function* () {
+        const control = yield* Order.Control;
+        return yield* control.redeliver("widget");
       });
     void _check;
   });

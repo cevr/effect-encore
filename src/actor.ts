@@ -159,6 +159,7 @@ type ReservedKeys =
   | "_meta"
   | "$is"
   | "Context"
+  | "Control"
   | "State"
   | "name"
   | "type"
@@ -180,6 +181,7 @@ const RESERVED_KEYS = new Set<string>([
   "_meta",
   "$is",
   "Context",
+  "Control",
   "State",
   "name",
   "type",
@@ -416,6 +418,30 @@ export interface ActorStateClient<State, Error = never> {
   readonly listEntityIds: () => Effect.Effect<ReadonlyArray<string>>;
 }
 
+declare const ActorControlClientServiceId: unique symbol;
+
+export interface ActorControlClientService<Name extends string> {
+  readonly [ActorControlClientServiceId]: {
+    readonly name: Name;
+  };
+}
+
+export interface ActorControlClient {
+  /**
+   * Stop accepting more pending work for this actor id by clearing its mailbox.
+   * In-flight handler cancellation depends on cluster passivation support.
+   */
+  readonly interrupt: (entityId: string) => Effect.Effect<void, PersistenceError>;
+  /**
+   * Clear pending persisted work for this actor id.
+   */
+  readonly flush: (entityId: string) => Effect.Effect<void, PersistenceError>;
+  /**
+   * Mark persisted pending work for this actor id as redeliverable.
+   */
+  readonly redeliver: (entityId: string) => Effect.Effect<void, PersistenceError>;
+}
+
 export type ActorLayerBuildContextExclusions =
   | Scope.Scope
   | CurrentAddress
@@ -579,6 +605,7 @@ export type EntityActor<
       ActorClientService<Name, Defs>,
       ActorClientFactory<Name, Defs>
     >;
+    readonly Control: Context.Service<ActorControlClientService<Name>, ActorControlClient>;
     readonly State: Context.Service<
       ActorStateClientService<Name>,
       ActorStateClient<State, StateError>
@@ -1094,6 +1121,15 @@ const fromEntity = <
     ActorStateClient<StateOf<StateDef>, StateErrorOf<StateDef>>
   >;
 
+  class ActorControlContext extends Context.Service<ActorControlContext, ActorControlClient>()(
+    `effect-encore/${name}/Control`,
+  ) {}
+
+  const controlTag = ActorControlContext as unknown as Context.Service<
+    ActorControlClientService<Name>,
+    ActorControlClient
+  >;
+
   const $is =
     (tag: string) =>
     (value: unknown): boolean =>
@@ -1247,6 +1283,7 @@ const fromEntity = <
     type: name,
     _meta: { name, definitions, internalDefinitions, entity },
     Context: contextTag,
+    Control: controlTag,
     State: stateTag,
     of: ofFn,
     interrupt: interruptFn,
@@ -1367,13 +1404,14 @@ function toLayer<
   actor: EntityActor<Name, Defs, State, StateError, Rpcs>,
 ): Layer.Layer<
   | ActorClientService<Name, Defs>
+  | ActorControlClientService<Name>
   | ActorStateClientService<Name>
   | ActorMailbox
   | ActorAddressResolver
   | ActorStateRegistry
   | Snowflake.Generator,
   never,
-  Sharding.Sharding | Rpc.MiddlewareClient<Rpcs>
+  MessageStorage.MessageStorage | Sharding.Sharding | Rpc.MiddlewareClient<Rpcs>
 >;
 
 function toLayer<
@@ -1394,6 +1432,7 @@ function toLayer<
   /* eslint-disable typescript-eslint/no-explicit-any -- implementation overload requires any */
 ): Layer.Layer<
   | ActorClientService<Name, Defs>
+  | ActorControlClientService<Name>
   | ActorStateClientService<Name>
   | ActorMailbox
   | ActorAddressResolver
@@ -1403,6 +1442,7 @@ function toLayer<
   | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress | ActorStateRegistry>
   | Exclude<RH, Scope.Scope | CurrentAddress | CurrentRunnerAddress | ActorStateRegistry | S>
   | Exclude<RS, Scope.Scope | CurrentAddress | CurrentRunnerAddress | S>
+  | MessageStorage.MessageStorage
   | Sharding.Sharding
   | Rpc.MiddlewareClient<Rpcs>
 >;
@@ -1478,10 +1518,15 @@ function toLayer(
   );
 
   const stateLayer = makeActorStateLayer(actor);
+  const controlLayer = makeActorControlLayer(actor);
 
   if (build === undefined) {
     const baseLayer = Layer.merge(clientLayer, consumerSupportLayers);
-    return Layer.merge(baseLayer, Layer.provide(stateLayer, baseLayer));
+    return Layer.mergeAll(
+      baseLayer,
+      Layer.provide(stateLayer, baseLayer),
+      Layer.provide(controlLayer, baseLayer),
+    );
   }
 
   const transformed = transformHandlers(build, actorDefinitions, options?.withScope);
@@ -1496,7 +1541,11 @@ function toLayer(
     Layer.merge(Layer.merge(handlerLayer, clientLayer), consumerSupportLayers),
   );
 
-  return Layer.merge(baseLayer, Layer.provide(stateLayer, baseLayer));
+  return Layer.mergeAll(
+    baseLayer,
+    Layer.provide(stateLayer, baseLayer),
+    Layer.provide(controlLayer, baseLayer),
+  );
 }
 
 // ── Actor.toTestLayer ─────────────────────────────────────────────────────
@@ -1519,6 +1568,7 @@ function toTestLayer<
   options?: ToLayerOptions<S, ES, RS>,
 ): Layer.Layer<
   | ActorClientService<Name, Defs>
+  | ActorControlClientService<Name>
   | ActorStateClientService<Name>
   | ActorMailbox
   | ActorAddressResolver
@@ -1602,14 +1652,49 @@ function toTestLayer(
   const supportLayers = Layer.mergeAll(
     ActorAddressResolverLayer.fromConfig,
     ActorStateRegistry.Live,
+    MessageStorage.layerMemory,
     Snowflake.layerGenerator,
   );
 
   const baseLayer = Layer.merge(factoryAndMailboxLayer, supportLayers);
   const stateLayer = makeActorStateLayer(actor);
+  const controlLayer = makeActorControlLayer(actor);
 
-  return Layer.merge(baseLayer, Layer.provide(stateLayer, baseLayer));
+  return Layer.mergeAll(
+    baseLayer,
+    Layer.provide(stateLayer, baseLayer),
+    Layer.provide(controlLayer, baseLayer),
+  );
 }
+
+const makeActorControlLayer = <Name extends string, Defs extends OperationDefs>(
+  actor: EntityActor<Name, Defs>,
+): Layer.Layer<
+  ActorControlClientService<Name>,
+  never,
+  ActorAddressResolver | MessageStorage.MessageStorage
+> =>
+  Layer.effect(
+    actor.Control,
+    Effect.gen(function* () {
+      const resolver = yield* ActorAddressResolver;
+      const storage = yield* MessageStorage.MessageStorage;
+
+      const provideSupport = <A, E, R>(
+        effect: Effect.Effect<A, E, R>,
+      ): Effect.Effect<A, E, Exclude<R, ActorAddressResolver | MessageStorage.MessageStorage>> =>
+        effect.pipe(
+          Effect.provideService(ActorAddressResolver, resolver),
+          Effect.provideService(MessageStorage.MessageStorage, storage),
+        ) as Effect.Effect<A, E, Exclude<R, ActorAddressResolver | MessageStorage.MessageStorage>>;
+
+      return {
+        interrupt: (entityId) => provideSupport(actor.interrupt(entityId)),
+        flush: (entityId) => provideSupport(actor.flush(entityId)),
+        redeliver: (entityId) => provideSupport(actor.redeliver(entityId)),
+      } satisfies ActorControlClient;
+    }),
+  );
 
 const makeActorStateLayer = <Name extends string, Defs extends OperationDefs, State, StateError>(
   actor: EntityActor<Name, Defs, State, StateError>,

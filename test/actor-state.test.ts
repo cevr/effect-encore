@@ -120,6 +120,14 @@ describe("Actor state protocol", () => {
       expect(yield* state.listEntityIds()).toContain("state-service");
     }));
 
+  test("Control service exposes bound mailbox operations", () =>
+    Effect.gen(function* () {
+      const control = yield* Stateful.Control;
+      yield* control.redeliver("control-service");
+      yield* control.flush("control-service");
+      yield* control.interrupt("control-service");
+    }));
+
   test("watches state changes for one entity", () =>
     Effect.gen(function* () {
       const makeRef = yield* Stateful.Context;

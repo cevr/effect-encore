@@ -15,6 +15,8 @@ export type {
   AnyActor,
   ActorClientService,
   ActorClientFactory,
+  ActorControlClient,
+  ActorControlClientService,
   ActorStateClient,
   ActorStateClientService,
   ActorLayerBuildContextExclusions,
