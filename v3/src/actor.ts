@@ -1532,18 +1532,20 @@ function toLayer(
 
   const clientLayer = Layer.effect(
     actor.Context,
-    Effect.map(
-      actor._meta.entity.client,
-      (makeClient: Function) => (entityId: string) =>
+    Effect.gen(function* () {
+      const boundContext = yield* Effect.context<never>();
+      const makeClient = (yield* actor._meta.entity.client) as Function;
+      return (entityId: string) =>
         Effect.succeed(
           buildActorRef(
             actor._meta.name,
             entityId,
             actorDefinitions,
             makeClient(entityId) as RpcClient.RpcClient<Rpc.Any, never>,
+            boundContext,
           ),
-        ),
-    ),
+        );
+    }),
   );
 
   // Consumer hosts already have full `Sharding.Sharding` from
@@ -1863,8 +1865,14 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
   _entityId: string,
   definitions: Defs,
   rpcClient: RpcClient.RpcClient<Rpc.Any, never>,
+  boundContext?: Context.Context<never>,
 ): ActorRef<Name, Defs> => {
   const client = rpcClient as unknown as Record<string, Function>;
+
+  const bind = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    boundContext === undefined
+      ? effect
+      : (Effect.provide(effect, boundContext) as Effect.Effect<A, E, R>);
 
   const rpcArg = (
     op: { readonly _tag: string; readonly [key: string]: unknown },
@@ -1885,7 +1893,7 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
         );
       const def = definitions[tag] as OperationDef | undefined;
       const arg = rpcArg(op, def);
-      return arg !== undefined ? fn(arg) : fn();
+      return bind(arg !== undefined ? fn(arg) : fn());
     },
     send: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
       const tag = op["_tag"];
@@ -1901,7 +1909,7 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
       const pkInput = def?.payload && isOpaquePayload(def.payload) ? op["_payload"] : op;
       const { primaryKey } = resolveId(def, pkInput, tag);
       const execId = `${_entityId}\x00${tag}\x00${primaryKey}`;
-      return Effect.map(discardCall ?? Effect.void, () => makeExecId(execId));
+      return bind(Effect.map(discardCall ?? Effect.void, () => makeExecId(execId)));
     },
   } as ActorRef<Name, Defs>;
 };
