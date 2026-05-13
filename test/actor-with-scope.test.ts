@@ -33,6 +33,14 @@ const Captured = Actor.fromEntity("Captured", {
   },
 });
 
+const Dynamic = Actor.fromEntity("Dynamic", {
+  Read: {
+    payload: { id: Schema.String },
+    success: Schema.String,
+    id: (p: { id: string }) => p.id,
+  },
+});
+
 const ScopedLayer = Layer.provide(
   Actor.toTestLayer(
     Scoped,
@@ -63,8 +71,19 @@ const CapturedLayer = Layer.provide(
   Layer.merge(TestShardingConfig, Layer.succeed(LayerToken, "captured-layer-token")),
 );
 
+const DynamicLayer = Layer.provide(
+  Actor.toTestLayer(
+    Dynamic,
+    Dynamic.of({
+      Read: () => LayerToken,
+    }),
+  ),
+  Layer.merge(TestShardingConfig, Layer.succeed(LayerToken, "actor-layer-token")),
+);
+
 const scopedTest = it.scopedLive.layer(ScopedLayer);
 const capturedTest = it.scopedLive.layer(CapturedLayer);
+const dynamicTest = it.scopedLive.layer(DynamicLayer);
 
 describe("Actor.toLayer({ withScope })", () => {
   scopedTest("handler reads a Tag built per-call from the entity address", () =>
@@ -94,6 +113,17 @@ describe("Actor.toLayer({ withScope })", () => {
       const ref = yield* makeRef("alpha");
       const value = yield* ref.execute(Captured.Read.make({ id: "alpha" }));
       expect(value).toBe("captured-layer-token");
+    }),
+  );
+
+  dynamicTest("caller-provided services override actor layer services", () =>
+    Effect.gen(function* () {
+      const makeRef = yield* Dynamic.Context;
+      const ref = yield* makeRef("alpha");
+      const value = yield* ref
+        .execute(Dynamic.Read.make({ id: "alpha" }))
+        .pipe(Effect.provideService(LayerToken, "caller-token"));
+      expect(value).toBe("caller-token");
     }),
   );
 });

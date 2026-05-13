@@ -1874,7 +1874,7 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
       ? effect
       : (Effect.context<never>().pipe(
           Effect.flatMap((currentContext) =>
-            Effect.provide(effect, Context.merge(currentContext, boundContext)),
+            Effect.provide(effect, Context.merge(boundContext, currentContext)),
           ),
         ) as Effect.Effect<A, E, R>);
 
