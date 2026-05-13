@@ -1,5 +1,12 @@
 # effect-encore
 
+## 0.12.5
+
+### Patch Changes
+
+- [`25bad3c`](https://github.com/cevr/effect-encore/commit/25bad3cf018cb626ddb3809f706533af920416fe) Thanks [@cevr](https://github.com/cevr)! - Bind actor client refs to the layer-build context so `ActorRef.execute` and
+  `ActorRef.send` do not depend on the caller recreating cluster runtime services.
+
 ## 0.12.4
 
 ### Patch Changes
