@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.12.7
+
+### Patch Changes
+
+- [`bef28ac`](https://github.com/cevr/effect-encore/commit/bef28ac42de85ba74b57cff92d7e9bfa31ff150f) Thanks [@cevr](https://github.com/cevr)! - Preserve caller-provided actor ref context over the actor layer context.
+
 ## 0.12.6
 
 ### Patch Changes
