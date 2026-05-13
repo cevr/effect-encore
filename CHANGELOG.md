@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.12.3
+
+### Patch Changes
+
+- [`a5003af`](https://github.com/cevr/effect-encore/commit/a5003afb0a54644a85b0b4723b5a3d21668c4417) Thanks [@cevr](https://github.com/cevr)! - Add an actor build-context helper for capturing layer-provided services while leaving entity-scoped services to Encore.
+
 ## 0.12.2
 
 ### Patch Changes
