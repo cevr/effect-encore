@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.12.2
+
+### Patch Changes
+
+- [`bc7868e`](https://github.com/cevr/effect-encore/commit/bc7868e68ee8b48652ccfee4ed7cd3ee12b373a9) Thanks [@cevr](https://github.com/cevr)! - Expose actor-specific bound state services from `Actor.toLayer` and `Actor.toTestLayer`.
+
 ## 0.12.1
 
 ### Patch Changes
