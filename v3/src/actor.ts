@@ -1872,7 +1872,11 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
   const bind = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     boundContext === undefined
       ? effect
-      : (Effect.provide(effect, boundContext) as Effect.Effect<A, E, R>);
+      : (Effect.context<never>().pipe(
+          Effect.flatMap((currentContext) =>
+            Effect.provide(effect, Context.merge(currentContext, boundContext)),
+          ),
+        ) as Effect.Effect<A, E, R>);
 
   const rpcArg = (
     op: { readonly _tag: string; readonly [key: string]: unknown },
