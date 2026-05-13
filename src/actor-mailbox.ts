@@ -138,7 +138,10 @@ const fromSharding: Layer.Layer<ActorMailbox, never, Sharding.Sharding> = Layer.
     const sharding = yield* Sharding.Sharding;
 
     return {
-      send: (request) => sharding.sendOutgoing(request, true),
+      send: (request) =>
+        sharding
+          .sendOutgoing(request, true)
+          .pipe(Effect.catchTag("AlreadyProcessingMessage", () => Effect.void)),
     };
   }),
 );

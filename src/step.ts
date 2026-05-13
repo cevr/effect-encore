@@ -262,12 +262,10 @@ export const makeStepContext = <
           | undefined,
       });
 
-      const activityEffect = (activity as any).asEffect() as Effect.Effect<any, any, any>;
-
       if (opts.undo) {
-        return wf.withCompensation(activityEffect, opts.undo as any);
+        return wf.withCompensation(activity, opts.undo as any);
       }
-      return activityEffect;
+      return activity;
     }
 
     // Arity 3 + third is function → shorthand with undo
@@ -284,8 +282,7 @@ export const makeStepContext = <
         execute,
       });
 
-      const activityEffect = (activity as any).asEffect() as Effect.Effect<any, any, any>;
-      return wf.withCompensation(activityEffect, undo as any);
+      return wf.withCompensation(activity, undo as any);
     }
 
     // Arity 2 + second is Effect → shorthand
@@ -295,7 +292,7 @@ export const makeStepContext = <
       success: Schema.Unknown,
       execute,
     });
-    return (activity as any).asEffect() as Effect.Effect<any, any, any>;
+    return activity;
   };
 
   return {
@@ -319,10 +316,14 @@ export const makeStepContext = <
           execute: s.execute,
         }),
       );
-      return UpstreamActivity.raceAll(
-        id,
-        activities as unknown as Arr.NonEmptyReadonlyArray<UpstreamActivity.Any>,
-      );
+      return UpstreamDeferred.raceAll({
+        name: `Activity/${id}`,
+        success: Schema.Union(activities.map((activity) => activity.successSchema)) as Schema.Top,
+        error: Schema.Union(activities.map((activity) => activity.errorSchema)) as Schema.Top,
+        effects: activities as unknown as Arr.NonEmptyReadonlyArray<
+          Effect.Effect<unknown, unknown, unknown>
+        >,
+      }) as never;
     },
 
     raceSignals: (name, options) => UpstreamDeferred.raceAll({ name, ...options }),

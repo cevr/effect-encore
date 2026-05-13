@@ -26,7 +26,7 @@ const ScopedLayer = Layer.provide(
     Scoped,
     Effect.succeed(
       Scoped.of({
-        Inspect: () => Effect.map(WorkspaceId.asEffect(), (id) => id),
+        Inspect: () => WorkspaceId,
       }),
     ),
     {

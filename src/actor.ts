@@ -309,12 +309,13 @@ type HandlerRequest<Tag extends string, C extends OperationDef> = {
   readonly request: unknown;
 };
 
-type ActorHandlers<Defs extends OperationDefs> = {
-  readonly [Tag in keyof Defs & string]: (req: HandlerRequest<Tag, Defs[Tag]>) => Effect.Effect<
+type ActorHandlers<Defs extends OperationDefs, R = never> = {
+  readonly [Tag in keyof Defs & string]: (
+    req: HandlerRequest<Tag, Defs[Tag]>,
+  ) => Effect.Effect<
     Schema.Schema.Type<SuccessOf<Defs[Tag]>>,
     Schema.Schema.Type<ErrorOf<Defs[Tag]>>,
-    // eslint-disable-next-line typescript-eslint/no-explicit-any -- handler requirements must be open
-    any
+    R
   >;
 };
 
@@ -546,7 +547,7 @@ export type EntityActor<
       PersistenceError,
       MessageStorage.MessageStorage | ActorAddressResolver
     >;
-    readonly of: (handlers: ActorHandlers<Defs>) => ActorHandlers<Defs>;
+    readonly of: <R>(handlers: ActorHandlers<Defs, R>) => ActorHandlers<Defs, R>;
     readonly getState: <MaterializeError = never, MaterializeRequirements = never>(
       entityId: string,
       options?: ActorStateOptions<MaterializeError, MaterializeRequirements>,
@@ -1293,7 +1294,7 @@ function toLayer<
   | ActorStateRegistry
   | Snowflake.Generator,
   never,
-  Sharding.Sharding | Scope.Scope | Rpc.MiddlewareClient<Rpcs>
+  Sharding.Sharding | Rpc.MiddlewareClient<Rpcs>
 >;
 
 function toLayer<
@@ -1303,12 +1304,13 @@ function toLayer<
   StateError,
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
   RX = never,
+  RH = never,
   S = never,
   ES = never,
   RS = never,
 >(
   actor: EntityActor<Name, Defs, State, StateError, Rpcs>,
-  build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
+  build: ActorHandlers<Defs, RH> | Effect.Effect<ActorHandlers<Defs, RH>, never, RX>,
   options?: ToLayerOptions<S, ES, RS>,
   /* eslint-disable typescript-eslint/no-explicit-any -- implementation overload requires any */
 ): Layer.Layer<
@@ -1318,10 +1320,10 @@ function toLayer<
   | ActorStateRegistry
   | Snowflake.Generator,
   never,
-  | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress>
+  | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress | ActorStateRegistry>
+  | Exclude<RH, Scope.Scope | CurrentAddress | CurrentRunnerAddress | ActorStateRegistry | S>
   | Exclude<RS, Scope.Scope | CurrentAddress | CurrentRunnerAddress | S>
   | Sharding.Sharding
-  | Scope.Scope
   | Rpc.MiddlewareClient<Rpcs>
 >;
 
@@ -1422,12 +1424,13 @@ function toTestLayer<
   StateError,
   Rpcs extends Rpc.Any = DefRpcs<Defs>,
   RX = never,
+  RH = never,
   S = never,
   ES = never,
   RS = never,
 >(
   actor: EntityActor<Name, Defs, State, StateError, Rpcs>,
-  build: ActorHandlers<Defs> | Effect.Effect<ActorHandlers<Defs>, never, RX>,
+  build: ActorHandlers<Defs, RH> | Effect.Effect<ActorHandlers<Defs, RH>, never, RX>,
   options?: ToLayerOptions<S, ES, RS>,
 ): Layer.Layer<
   | ActorClientService<Name, Defs>
@@ -1436,6 +1439,8 @@ function toTestLayer<
   | ActorStateRegistry
   | Snowflake.Generator,
   never,
+  | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress | ActorStateRegistry>
+  | Exclude<RH, Scope.Scope | CurrentAddress | CurrentRunnerAddress | ActorStateRegistry | S>
   | Exclude<RS, Scope.Scope | CurrentAddress | CurrentRunnerAddress | S>
   | ShardingConfig.ShardingConfig
 >;

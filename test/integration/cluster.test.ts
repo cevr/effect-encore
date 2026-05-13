@@ -1,5 +1,5 @@
 import { describe, expect, it } from "effect-bun-test";
-import { Effect, Schema } from "effect";
+import { Effect, Exit, Schema } from "effect";
 import { TestRunner } from "effect/unstable/cluster";
 import { Actor } from "../../src/index.js";
 
@@ -84,6 +84,22 @@ describe("cluster integration", () => {
       yield* Effect.sleep("100 millis");
 
       const result = yield* OrderActor.Place.peek({ item: "dup", qty: 1 });
+      expect(result._tag).toBe("Success");
+    }).pipe(Effect.provide(orderHandlers), Effect.provide(TestCluster)));
+
+  test("concurrent duplicate sends are idempotent", () =>
+    Effect.gen(function* () {
+      const exits = yield* Effect.all(
+        Array.from({ length: 20 }, () =>
+          OrderActor.Place.send({ item: "herd", qty: 1 }).pipe(Effect.exit),
+        ),
+        { concurrency: "unbounded" },
+      );
+
+      expect(exits.every(Exit.isSuccess)).toBe(true);
+      yield* Effect.sleep("100 millis");
+
+      const result = yield* OrderActor.Place.peek({ item: "herd", qty: 1 });
       expect(result._tag).toBe("Success");
     }).pipe(Effect.provide(orderHandlers), Effect.provide(TestCluster)));
 
