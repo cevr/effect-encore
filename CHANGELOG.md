@@ -1,5 +1,12 @@
 # effect-encore
 
+## 0.12.6
+
+### Patch Changes
+
+- [`c9923dd`](https://github.com/cevr/effect-encore/commit/c9923dd9b50f562e6aa890977c73ba32f6bf59da) Thanks [@cevr](https://github.com/cevr)! - Merge bound actor-ref context with the caller context at invocation time so
+  request-local services remain available while actor runtime services stay hidden.
+
 ## 0.12.5
 
 ### Patch Changes
