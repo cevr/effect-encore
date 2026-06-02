@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.12.8
+
+### Patch Changes
+
+- [`fc0e36f`](https://github.com/cevr/effect-encore/commit/fc0e36f2e78092c33404028b53cbb69ca89cf79f) Thanks [@cevr](https://github.com/cevr)! - Support Effect v4 beta.75 workflow construction and addressing.
+
 ## 0.12.7
 
 ### Patch Changes
