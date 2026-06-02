@@ -121,6 +121,7 @@
             "options": {
               "diagnosticSeverity": {
                 "anyUnknownInErrorContext": "off",
+                "lazyEffect": "off",
                 "unnecessaryEffectGen": "off"
               }
             }

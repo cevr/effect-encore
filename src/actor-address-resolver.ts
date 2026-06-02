@@ -129,7 +129,7 @@ const fromConfig: Layer.Layer<ActorAddressResolver, never, ShardingConfig.Shardi
         const shardGroupFn = Context.get(workflow.annotations, ClusterSchema.ShardGroup);
         const shardGroup = shardGroupFn(entityId);
         return EntityAddress.make({
-          entityType: EntityType.make(`Workflow/${workflow.name}`),
+          entityType: EntityType.make(`Workflow/${workflow._tag}`),
           entityId,
           shardId: computeShardId(entityId, shardGroup, shardsPerGroup),
         });
@@ -190,7 +190,7 @@ const fromSharding: Layer.Layer<ActorAddressResolver, never, Sharding.Sharding> 
       const shardGroupFn = Context.get(workflow.annotations, ClusterSchema.ShardGroup);
       const shardGroup = shardGroupFn(entityId);
       return EntityAddress.make({
-        entityType: EntityType.make(`Workflow/${workflow.name}`),
+        entityType: EntityType.make(`Workflow/${workflow._tag}`),
         entityId,
         shardId: sharding.getShardId(entityId, shardGroup),
       });

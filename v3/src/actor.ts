@@ -1000,7 +1000,7 @@ const decodeValue = (
   const decode = Schema.decodeUnknown(schema as Schema.Schema<unknown, unknown, never>)(
     value,
   ) as Effect.Effect<unknown, unknown>;
-  return Effect.catchAll(decode, () => Effect.succeed(value));
+  return Effect.orElseSucceed(decode, () => value);
 };
 
 const mapCauseEncodedToPeekResult = (

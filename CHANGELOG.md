@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.12.8
+
+### Patch Changes
+
+- Support Effect v4 beta.75 workflow construction and addressing.
+
 ## 0.12.7
 
 ### Patch Changes

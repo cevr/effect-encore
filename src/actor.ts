@@ -2066,7 +2066,7 @@ const resolveWorkflowAddress = (
     const shardGroupFn = Context.get(workflow.annotations, ClusterSchema.ShardGroup);
     const shardGroup = shardGroupFn(entityId);
     return EntityAddress.make({
-      entityType: EntityType.make(`Workflow/${workflow.name}`),
+      entityType: EntityType.make(`Workflow/${workflow._tag}`),
       entityId,
       shardId: sharding.getShardId(entityId, shardGroup),
     });
@@ -2108,7 +2108,6 @@ const fromWorkflow = <
   def: WorkflowDef<Payload, Success, Error, Signals>,
 ): WorkflowActor<Name, Payload, Success, Error, Signals> => {
   const workflowOptions: Record<string, unknown> = {
-    name,
     payload: def.payload,
     // upstream UpstreamWorkflow takes `idempotencyKey`; encore exposes `id`.
     idempotencyKey: def.id,
@@ -2118,7 +2117,7 @@ const fromWorkflow = <
   if (def.suspendedRetrySchedule)
     workflowOptions["suspendedRetrySchedule"] = def.suspendedRetrySchedule;
 
-  let wf = (UpstreamWorkflow.make as Function)(workflowOptions) as UpstreamWorkflow.Workflow<
+  let wf = (UpstreamWorkflow.make as Function)(name, workflowOptions) as UpstreamWorkflow.Workflow<
     Name,
     Schema.Struct<Payload>,
     Success,
