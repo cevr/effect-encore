@@ -281,6 +281,15 @@ const SenderTest = ActorSenderLayer.layerMemory;
 // Sends are durably enqueued; the consumer's storage poll loop picks them up
 // on the next entityMessagePollInterval tick.
 yield * Order.Place.send({ item: "widget", qty: 3 });
+
+// Await the applied result from the same sender-only host — `.sendAndAwait`
+// fires a durable `send` then polls the persisted reply until terminal.
+// No local `Sharding` required (unlike `.execute`). The required `timeout`
+// guards against unbounded sender-side polling; a persisted Failure surfaces
+// in the error channel, and exceeding the timeout fails with
+// `SendAndAwaitTimeout`.
+const placed =
+  yield * Order.Place.sendAndAwait({ item: "widget", qty: 3 }, { timeout: "30 seconds" });
 ```
 
 `ActorMailboxLayer.fromConfig` rejects non-persisted requests with `MailboxError` (only persisted requests can cross the storage boundary), mirroring upstream's persisted gate. Use `ActorMailboxLayer.fromSharding` when the host already has `Sharding.Sharding` and prefers the `notifyLocal`-accelerated path. The underlying `ActorMailboxLayer` / `ActorAddressResolverLayer` Tags remain exposed for advanced wiring (e.g. ops-only hosts that need address resolution but not `.send`).

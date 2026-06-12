@@ -1,4 +1,4 @@
-export { Actor, CurrentAddress, fromRpcs, withProtocol } from "./actor.js";
+export { Actor, CurrentAddress, fromRpcs, SendAndAwaitTimeout, withProtocol } from "./actor.js";
 export {
   ActorStateRegistry,
   ActorStateRegistryLive,

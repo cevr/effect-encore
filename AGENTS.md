@@ -41,6 +41,7 @@ const Counter = Actor.fromEntity("Counter", {
 // dispatch:
 yield * Counter.Increment.execute({ id: "loc-A", amount: 5 });
 yield * Counter.Increment.send({ id: "loc-A", amount: 5 }); // discard, returns ExecId
+yield * Counter.Increment.sendAndAwait({ id: "loc-A", amount: 5 }, { timeout: "30 seconds" }); // send + poll reply → success value; no local Sharding required
 yield * Counter.Increment.executionId({ id: "loc-A", amount: 5 }); // pure; returns ExecId
 yield * Counter.Increment.peek({ id: "loc-A", amount: 5 }); // PeekResult
 yield * Counter.Increment.watch({ id: "loc-A", amount: 5 }); // Stream<PeekResult>

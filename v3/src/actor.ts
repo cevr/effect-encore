@@ -55,6 +55,7 @@ import { layerMemory as workflowEngineLayerMemory } from "@effect/workflow/Workf
 import {
   Cause,
   Context,
+  Data,
   Duration,
   Effect,
   Exit,
@@ -83,6 +84,21 @@ import {
 } from "./receipt.js";
 import { EncoreMessageStorage } from "./storage.js";
 import type { EncoreMessageStorageShape } from "./storage.js";
+
+// ── Errors ─────────────────────────────────────────────────────────────────
+
+/**
+ * Raised by `Op.sendAndAwait` when the entity's reply does not become terminal
+ * within the required `timeout`. Carries the `entityType` + `execId` of the
+ * awaited operation and the normalized `timeout` that elapsed.
+ */
+export class SendAndAwaitTimeout extends Data.TaggedError(
+  "effect-encore/actor/SendAndAwaitTimeout",
+)<{
+  readonly entityType: string;
+  readonly execId: string;
+  readonly timeout: Duration.Duration;
+}> {}
 
 // ── Layer passthrough polyfill ─────────────────────────────────────────────
 // Layer.passthrough was removed in Effect 3.x. Polyfill it so input services
@@ -546,6 +562,49 @@ export interface OperationHandle<
     ExecId<Schema.Schema.Type<SuccessOf<C>>, Schema.Schema.Type<ErrorOf<C>>>,
     MailboxError | PersistenceError | MailboxFull | AlreadyProcessingMessage,
     ActorMailboxShape | ActorAddressResolverShape | Snowflake.Generator
+  >;
+  /**
+   * Fire a durable `send` and then poll the persisted reply until it becomes
+   * terminal, returning the applied result. Composes `send` + `peek` so a
+   * sender-only host can block on an entity's outcome.
+   *
+   * Semantics:
+   * 1. Works **without local Sharding** — usable from `ActorSenderLayer` /
+   *    `senderMongo`-style hosts (ActorMailbox + ActorAddressResolver +
+   *    Snowflake.Generator + MessageStorage), unlike `.execute` which requires
+   *    `ActorClientService`.
+   * 2. Dedup: if a prior `send` with the same `primaryKey` already has a
+   *    terminal persisted reply, the mailbox dedups and `sendAndAwait` returns
+   *    that persisted result immediately (matches `send`/`peek` semantics).
+   * 3. Ops with a future `deliverAt` poll until delivery + processing — the
+   *    `timeout` must exceed the `deliverAt` delay.
+   * 4. The default poll interval is `makeWaitFor`'s 200ms `Schedule.spaced`;
+   *    override via `schedule`.
+   *
+   * A persisted `Failure` reply surfaces in the error channel; `Defect` and
+   * `Interrupted` replies die; exceeding the (required) `timeout` fails with
+   * `SendAndAwaitTimeout`.
+   */
+  readonly sendAndAwait: (
+    payload: PayloadInput<C>,
+    options: {
+      readonly timeout: Duration.DurationInput; // REQUIRED — unbounded sender-side polling in a request-scoped host is a foot-gun
+      // eslint-disable-next-line typescript-eslint/no-explicit-any
+      readonly schedule?: Schedule.Schedule<any, unknown>;
+    },
+  ) => Effect.Effect<
+    Schema.Schema.Type<SuccessOf<C>>,
+    | Schema.Schema.Type<ErrorOf<C>>
+    | MailboxError
+    | PersistenceError
+    | MailboxFull
+    | AlreadyProcessingMessage
+    | MalformedMessage
+    | SendAndAwaitTimeout,
+    | ActorMailboxShape
+    | ActorAddressResolverShape
+    | Snowflake.Generator
+    | MessageStorage.MessageStorage
   >;
   readonly executionId: (
     payload: PayloadInput<C>,
@@ -1374,6 +1433,32 @@ const makeOperationHandle = <
     return makeExecId(`${entityId}\x00${tag}\x00${primaryKey}`);
   };
 
+  // .send dispatches via ActorMailbox + ActorAddressResolver. The two
+  // mailbox layers (`fromConfig` storage-only, `fromSharding` delegating)
+  // satisfy this same call site — producer-only hosts wire `fromConfig`
+  // and consumer hosts wire `fromSharding`. No `notifyLocal` deadlock.
+  // Extracted as a local so `sendAndAwait` can reuse it.
+  const sendFn = (payload: unknown) =>
+    Effect.gen(function* () {
+      const mailbox = yield* ActorMailbox;
+      const resolver = yield* ActorAddressResolver;
+      const snowflakeGen = yield* Snowflake.Generator;
+      const { entityId } = idOf(payload);
+      const address = resolver.resolveEntity(entityAny, entityId);
+      const request = yield* buildOutgoingRequestForSend(
+        entityAny,
+        tag,
+        def,
+        address,
+        // buildOpValue always returns an object with a `_tag` field — see
+        // its definition above. TS widens the literal away though.
+        buildOpValue(tag, payload) as { readonly _tag: string; readonly [key: string]: unknown },
+        snowflakeGen,
+      );
+      yield* mailbox.send(request);
+      return execId(payload);
+    });
+
   const handle: OperationHandle<Name, Tag, C> = {
     _tag: "OperationHandle" as const,
     name: tag,
@@ -1384,29 +1469,48 @@ const makeOperationHandle = <
         const ref = yield* factory(entityId);
         return yield* ref.execute(buildOpValue(tag, payload) as never);
       })) as never,
-    // .send dispatches via ActorMailbox + ActorAddressResolver. The two
-    // mailbox layers (`fromConfig` storage-only, `fromSharding` delegating)
-    // satisfy this same call site — producer-only hosts wire `fromConfig`
-    // and consumer hosts wire `fromSharding`. No `notifyLocal` deadlock.
-    send: ((payload: unknown) =>
+    send: sendFn as never,
+    sendAndAwait: ((
+      payload: unknown,
+      options: {
+        readonly timeout: Duration.DurationInput;
+        // eslint-disable-next-line typescript-eslint/no-explicit-any
+        readonly schedule?: Schedule.Schedule<any, unknown>;
+      },
+    ) =>
       Effect.gen(function* () {
-        const mailbox = yield* ActorMailbox;
-        const resolver = yield* ActorAddressResolver;
-        const snowflakeGen = yield* Snowflake.Generator;
-        const { entityId } = idOf(payload);
-        const address = resolver.resolveEntity(entityAny, entityId);
-        const request = yield* buildOutgoingRequestForSend(
-          entityAny,
-          tag,
-          def,
-          address,
-          // buildOpValue always returns an object with a `_tag` field — see
-          // its definition above. TS widens the literal away though.
-          buildOpValue(tag, payload) as { readonly _tag: string; readonly [key: string]: unknown },
-          snowflakeGen,
+        const eid = yield* sendFn(payload);
+        const result = yield* makeWaitFor(
+          (e) => peekImpl(entityAny, e as string, definitions),
+          eid,
+          { schedule: options.schedule } as never,
+        ).pipe(
+          Effect.timeoutFail({
+            duration: options.timeout,
+            onTimeout: () =>
+              new SendAndAwaitTimeout({
+                entityType: String(entityAny.type),
+                execId: eid as string,
+                timeout: Duration.decode(options.timeout),
+              }),
+          }),
         );
-        yield* mailbox.send(request);
-        return execId(payload);
+        switch (result._tag) {
+          case "Success":
+            return result.value;
+          case "Failure":
+            return yield* Effect.fail(result.error);
+          case "Defect":
+            return yield* Effect.die(result.cause);
+          case "Interrupted":
+            return yield* Effect.die(
+              new Error(`effect-encore/sendAndAwait: ${String(eid)} was interrupted`),
+            );
+          default:
+            return yield* Effect.die(
+              new Error("effect-encore/sendAndAwait: waitFor returned a non-terminal result"),
+            );
+        }
       })) as never,
     executionId: ((payload: unknown) => Effect.succeed(execId(payload))) as never,
     peek: ((payload: unknown) =>
