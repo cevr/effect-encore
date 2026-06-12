@@ -25,3 +25,20 @@ export {
 export { CANCEL_TAG } from "./mailbox.ts";
 export type { EntityIdReturn } from "./addressing.ts";
 export { actorStreamUrl } from "./addressing.ts";
+
+// Workflow half — adapter over DurableStreamsWorkflowEngine.
+export {
+  fromWorkflow,
+  workflowEngineLayer,
+  type WorkflowActor,
+  type WorkflowDef,
+} from "./workflow.ts";
+export {
+  makeSignal,
+  makeStepContext,
+  type WorkflowSignal,
+  type WorkflowStepContext,
+  type SignalDef,
+  type SignalDefs,
+  type StepRunOptions,
+} from "./step.ts";
