@@ -1,0 +1,53 @@
+{
+  "name": "@durable-streams/server",
+  "version": "0.3.7",
+  "description": "Node.js reference server implementation for Durable Streams",
+  "keywords": [
+    "durable-streams",
+    "server",
+    "streaming",
+    "typescript"
+  ],
+  "bugs": {
+    "url": "https://github.com/durable-streams/durable-streams/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "Durable Stream contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/durable-streams/durable-streams.git",
+    "directory": "packages/server"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@durable-streams/client": "workspace:*",
+    "@durable-streams/state": "workspace:*",
+    "@neophi/sieve-cache": "^1.0.0",
+    "@opentelemetry/api": "^1.9.0",
+    "lmdb": "^3.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

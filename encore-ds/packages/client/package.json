@@ -1,0 +1,53 @@
+{
+  "name": "@durable-streams/client",
+  "version": "0.2.6",
+  "description": "TypeScript client for the Durable Streams protocol",
+  "keywords": [
+    "client",
+    "durable-streams",
+    "streaming",
+    "typescript"
+  ],
+  "bugs": {
+    "url": "https://github.com/durable-streams/durable-streams/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "Durable Stream contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/durable-streams/durable-streams.git",
+    "directory": "packages/client"
+  },
+  "files": [
+    "dist",
+    "src",
+    "skills",
+    "bin",
+    "!skills/_artifacts"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@microsoft/fetch-event-source": "^2.0.1",
+    "fastq": "^1.19.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
