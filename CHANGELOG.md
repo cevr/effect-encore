@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.13.0
+
+### Minor Changes
+
+- [`a1b3921`](https://github.com/cevr/effect-encore/commit/a1b3921e74db65ded1a498a92596411c4d5df9a4) Thanks [@cevr](https://github.com/cevr)! - Add `Op.sendAndAwait(payload, { timeout, schedule? })` to entity operation handles: fire a durable send and poll the persisted reply until terminal, without requiring local Sharding. Sender-only hosts (ActorSenderLayer / storage-backed sender runtimes) can now await an entity's applied result instead of being limited to fire-and-forget send. Persisted Failure replies surface in the error channel; Defect/Interrupted die; exceeding the (required) timeout fails with the new `SendAndAwaitTimeout` tagged error. Also exported: `SendAndAwaitTimeout`.
+
 ## 0.12.8
 
 ### Patch Changes
