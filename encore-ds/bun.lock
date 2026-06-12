@@ -5,60 +5,27 @@
     "": {
       "name": "encore-ds",
       "dependencies": {
-        "@durable-streams/client": "workspace:*",
-        "@durable-streams/state": "workspace:*",
+        "@durable-streams/client": "^0.2.6",
+        "@durable-streams/state": "^0.3.1",
         "@tanstack/db": "^0.6.0",
         "effect": "4.0.0-beta.75",
         "eventsource-parser": "^3.0.0",
       },
       "devDependencies": {
-        "@durable-streams/server": "workspace:*",
+        "@durable-streams/server": "^0.3.7",
         "@types/node": "^22.10.0",
         "@typescript/native-preview": "7.0.0-dev.20260507.1",
         "typescript": "^6.0.3",
         "vitest": "^3.2.0",
       },
     },
-    "packages/client": {
-      "name": "@durable-streams/client",
-      "version": "0.2.6",
-      "dependencies": {
-        "@microsoft/fetch-event-source": "^2.0.1",
-        "fastq": "^1.19.1",
-      },
-    },
-    "packages/server": {
-      "name": "@durable-streams/server",
-      "version": "0.3.7",
-      "dependencies": {
-        "@durable-streams/client": "workspace:*",
-        "@durable-streams/state": "workspace:*",
-        "@neophi/sieve-cache": "^1.0.0",
-        "@opentelemetry/api": "^1.9.0",
-        "lmdb": "^3.3.0",
-      },
-    },
-    "packages/state": {
-      "name": "@durable-streams/state",
-      "version": "0.3.1",
-      "dependencies": {
-        "@durable-streams/client": "workspace:*",
-        "@standard-schema/spec": "^1.0.0",
-      },
-      "peerDependencies": {
-        "@tanstack/db": ">=0.6.0 <1.0.0",
-      },
-      "optionalPeers": [
-        "@tanstack/db",
-      ],
-    },
   },
   "packages": {
-    "@durable-streams/client": ["@durable-streams/client@workspace:packages/client"],
+    "@durable-streams/client": ["@durable-streams/client@0.2.6", "", { "dependencies": { "@microsoft/fetch-event-source": "^2.0.1", "fastq": "^1.19.1" }, "bin": { "intent": "bin/intent.js" } }, "sha512-uHKKbWpsKLhFMeGjG0PgM6LXE3oEIi7FHKlJZkmYGxcqd4Yjjd/QEvnQnDzteRP4Av1uJVM8qjTL7kfKsgeS/w=="],
 
-    "@durable-streams/server": ["@durable-streams/server@workspace:packages/server"],
+    "@durable-streams/server": ["@durable-streams/server@0.3.7", "", { "dependencies": { "@durable-streams/client": "0.2.6", "@durable-streams/state": "0.3.1", "@neophi/sieve-cache": "^1.0.0", "lmdb": "^3.3.0" } }, "sha512-3vF1EjCn+DhqZn5f7/aqW/E9sN4UGUhhYVn5LoeD7lP7sAdCy1M5sFCdI+tUe6B+5l7ORKNxU9lhgY7HfYa+Zw=="],
 
-    "@durable-streams/state": ["@durable-streams/state@workspace:packages/state"],
+    "@durable-streams/state": ["@durable-streams/state@0.3.1", "", { "dependencies": { "@durable-streams/client": "0.2.6", "@standard-schema/spec": "^1.0.0" }, "peerDependencies": { "@tanstack/db": ">=0.6.0 <1.0.0" }, "optionalPeers": ["@tanstack/db"], "bin": { "intent": "bin/intent.js" } }, "sha512-HYhw520Bfl9+L3MJgWpzLQjByP5y/uNNasOqSSFfyWhFxZeaKHM6Go2P79YFfTJPmXh4ZHEh1jOgIfrumqT6hA=="],
 
     "@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.27.7", "", { "os": "aix", "cpu": "ppc64" }, "sha512-EKX3Qwmhz1eMdEJokhALr0YiD0lhQNwDqkPYyPhiSwKrh7/4KRjQc04sZ8db+5DVVnZ1LmbNDI1uAMPEUBnQPg=="],
 
@@ -145,8 +112,6 @@
     "@msgpackr-extract/msgpackr-extract-win32-x64": ["@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4", "", { "os": "win32", "cpu": "x64" }, "sha512-CmCXPQrkbwExx3j946/PtHWHbYJiCRBRDl4BlkRQcJB/YOwQxJRTpoo7aTsortjgoJ1x7opzTSxn7C+ASSLVjQ=="],
 
     "@neophi/sieve-cache": ["@neophi/sieve-cache@1.5.0", "", {}, "sha512-9T3nD5q51X1d4QYW6vouKW9hBSb2Tb/wB/2XoTr4oP5SCGtp3a7aTHHewQFylred1B21/Bhev6gy4x01FPBcbQ=="],
-
-    "@opentelemetry/api": ["@opentelemetry/api@1.9.1", "", {}, "sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q=="],
 
     "@rollup/rollup-android-arm-eabi": ["@rollup/rollup-android-arm-eabi@4.61.1", "", { "os": "android", "cpu": "arm" }, "sha512-JnBB8MdXj45cajvTuO5FmPlvFVJRQgvrz1uSEl3NwqFnReAPGwb8EanbGi4z2nRaqLzjJSv5/JmycoTKlRZxHA=="],
 

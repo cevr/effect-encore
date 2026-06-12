@@ -3,9 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "description": "Declarative actors + durable workflows on DurableTable + Durable Streams (no @effect/cluster).",
-  "workspaces": [
-    "packages/*"
-  ],
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -22,14 +19,14 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@durable-streams/client": "workspace:*",
-    "@durable-streams/state": "workspace:*",
+    "@durable-streams/client": "^0.2.6",
+    "@durable-streams/state": "^0.3.1",
     "@tanstack/db": "^0.6.0",
     "effect": "4.0.0-beta.75",
     "eventsource-parser": "^3.0.0"
   },
   "devDependencies": {
-    "@durable-streams/server": "workspace:*",
+    "@durable-streams/server": "^0.3.7",
     "@types/node": "^22.10.0",
     "@typescript/native-preview": "7.0.0-dev.20260507.1",
     "typescript": "^6.0.3",
