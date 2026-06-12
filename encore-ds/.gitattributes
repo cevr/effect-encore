@@ -1,0 +1,5 @@
+# Vendored third-party source, forked + migrated from Effect 3 -> 4 (not
+# published as Effect 4 packages). Collapsed in diffs; excluded from language
+# stats. Reviewable, but not original work under review.
+vendor/** linguist-vendored
+bun.lock linguist-generated
