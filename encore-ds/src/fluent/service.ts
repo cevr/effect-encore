@@ -83,18 +83,22 @@ export interface ServiceConfig<Name extends string, H extends Handlers> {
   readonly descriptors?: Partial<Record<keyof H, HandlerDescriptor>>;
 }
 
+/** Derives an execution id from a call's input + options. Captures the kind's identity contract. */
+type IdentityFn = (input: unknown, options?: InvokeOptions) => string;
+
 const compileHandler = (
-  serviceName: string,
+  definitionName: string,
   key: string,
   handler: GeneratorHandler,
   descriptor: HandlerDescriptor | undefined,
+  deriveId: IdentityFn,
 ): CompiledHandler => {
   // `input` carries the handler argument (decoded via the descriptor's input
-  // schema, default opaque). `__id` carries the idempotency key so callers
-  // control execution identity (fresh per call, or shared for dedup).
+  // schema, default opaque). `__id` carries the execution id — its derivation is
+  // the kind's identity contract (fresh per call for service; keyed for workflow).
   const inputSchema = descriptor?.input ?? Schema.Unknown;
   const outputSchema = descriptor?.output ?? Schema.Unknown;
-  const wf = Workflow.make(`${serviceName}/${key}`, {
+  const wf = Workflow.make(`${definitionName}/${key}`, {
     payload: { input: inputSchema, __id: Schema.String },
     idempotencyKey: (p: { readonly __id: string }) => p.__id,
     success: outputSchema,
@@ -113,7 +117,7 @@ const compileHandler = (
   ) as Layer.Layer<never, never, WorkflowEngine>;
 
   const payloadFor = (input: unknown, options?: InvokeOptions) =>
-    ({ input, __id: options?.idempotencyKey ?? crypto.randomUUID() }) as never;
+    ({ input, __id: deriveId(input, options) }) as never;
 
   const execute = (
     input: unknown,
@@ -134,13 +138,59 @@ const compileHandler = (
   return { key, workflow: wf, layer, execute, send };
 };
 
-/** Define a stateless durable service. */
-export const service = <const Name extends string, H extends Handlers>(
-  def: ServiceConfig<Name, H>,
+const compileDefinition = <Name extends string, H extends Handlers>(
+  name: Name,
+  handlers: H,
+  descriptors: Partial<Record<keyof H, HandlerDescriptor>> | undefined,
+  deriveId: IdentityFn,
 ): ServiceDefinition<Name, H> => ({
-  name: def.name,
-  handlers: def.handlers,
-  _compiled: Object.entries(def.handlers).map(([key, handler]) =>
-    compileHandler(def.name, key, handler, def.descriptors?.[key as keyof H]),
+  name,
+  handlers,
+  _compiled: Object.entries(handlers).map(([key, handler]) =>
+    compileHandler(name, key, handler as GeneratorHandler, descriptors?.[key as keyof H], deriveId),
   ),
 });
+
+// service — stateless; each call a fresh durable execution (override via
+// InvokeOptions.idempotencyKey).
+const freshIdentity: IdentityFn = (_input, options) =>
+  options?.idempotencyKey ?? crypto.randomUUID();
+
+/** Define a stateless durable service — each call is a fresh invocation. */
+export const service = <const Name extends string, H extends Handlers>(
+  def: ServiceConfig<Name, H>,
+): ServiceDefinition<Name, H> =>
+  compileDefinition(def.name, def.handlers, def.descriptors, freshIdentity);
+
+// ── workflow — keyed; one durable run per key ──────────────────────────────
+
+/** A workflow definition is structurally a definition; the kind differs in identity. */
+export type WorkflowDefinition<Name extends string, H extends Handlers> = ServiceDefinition<Name, H>;
+
+export interface WorkflowConfig<Name extends string, H extends Handlers> {
+  readonly name: Name;
+  readonly handlers: H;
+  readonly descriptors?: Partial<Record<keyof H, HandlerDescriptor>>;
+  /**
+   * Derives the run key from a handler's input. Same key → same durable run
+   * (one-run-per-key). Default: the input itself if a string, else its JSON form.
+   * Must be deterministic.
+   */
+  readonly key?: (input: any) => string;
+}
+
+const defaultKey = (input: unknown): string =>
+  typeof input === "string" ? input : JSON.stringify(input);
+
+/**
+ * Define a keyed durable workflow — one primary run per key. Unlike `service`
+ * (fresh per call), invoking a workflow handler with the same key resolves to the
+ * same durable execution by default.
+ */
+export const workflow = <const Name extends string, H extends Handlers>(
+  def: WorkflowConfig<Name, H>,
+): WorkflowDefinition<Name, H> => {
+  const keyFn = def.key ?? defaultKey;
+  const keyedIdentity: IdentityFn = (input, options) => options?.idempotencyKey ?? keyFn(input);
+  return compileDefinition(def.name, def.handlers, def.descriptors, keyedIdentity);
+};

@@ -15,9 +15,12 @@ export {
 } from "./free.ts";
 export {
   service,
+  workflow,
   schemas,
   type ServiceDefinition,
   type ServiceConfig,
+  type WorkflowDefinition,
+  type WorkflowConfig,
   type HandlerDescriptor,
   type InvokeOptions,
   type Handlers,

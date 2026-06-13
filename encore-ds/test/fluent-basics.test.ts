@@ -14,6 +14,7 @@ import {
   type ServiceDefinition,
   serviceLayer,
   spawn,
+  workflow,
   workflowEngineLayer,
 } from "../src/fluent/index.ts";
 import { Fiber, Schema } from "effect";
@@ -334,5 +335,65 @@ describe("fluent service slice — run / all / race", () => {
     } finally {
       await ingress.dispose();
     }
+  });
+
+  it("WORKFLOW: keyed — same input is one durable run by default (no idempotencyKey)", async () => {
+    let calls = 0;
+    const order = workflow({
+      name: "order",
+      handlers: {
+        *process(orderId: string) {
+          return yield* run(() => {
+            calls += 1;
+            return `processed:${orderId}`;
+          }, { name: "p" });
+        },
+      },
+      // default key = the string input
+    });
+
+    const layer = wire(order);
+    const out = (await runScoped(
+      Effect.gen(function* () {
+        const c = client(order);
+        const a = yield* c.process("o-1");
+        const b = yield* c.process("o-1"); // same key, no idempotencyKey passed
+        return { a, b };
+      }).pipe(Effect.provide(layer)),
+    )) as { a: string; b: string };
+
+    expect(calls).toBe(1); // workflow dedups by key by default (service would not)
+    expect(out.a).toBe("processed:o-1");
+    expect(out.b).toBe(out.a);
+  });
+
+  it("WORKFLOW: custom key fn derives the run key from a struct input", async () => {
+    let calls = 0;
+    const wf = workflow({
+      name: "keyed",
+      handlers: {
+        *compute(input: { id: string; n: number }) {
+          return yield* run(() => {
+            calls += 1;
+            return input.n;
+          }, { name: "k" });
+        },
+      },
+      key: (input) => input.id,
+    });
+
+    const layer = wire(wf);
+    const out = (await runScoped(
+      Effect.gen(function* () {
+        const c = client(wf);
+        const first = yield* c.compute({ id: "same", n: 1 });
+        const second = yield* c.compute({ id: "same", n: 2 }); // same key → same run
+        return { first, second };
+      }).pipe(Effect.provide(layer)),
+    )) as { first: number; second: number };
+
+    expect(calls).toBe(1);
+    expect(out.first).toBe(1);
+    expect(out.second).toBe(1); // returns the first run's recorded result
   });
 });

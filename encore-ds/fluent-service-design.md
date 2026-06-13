@@ -1,10 +1,25 @@
-# encore-ds — fluent module design (slice 1: `service` + `run`/`all`/`race`)
+# encore-ds — fluent module design
 
 A second authoring surface for `encore-ds`, shaped after
 `fluent-firegrid` (firegrid tutorial `examples/tutorial`), lowering onto
 `@effect/workflow` + the existing `DurableStreamsWorkflowEngine` — **no custom
 durable journal**. Lives alongside the `Actor.*` surface as a new module; reuses
 the engine + the Activity/Deferred lowering already proven in `step.ts`.
+
+## Status (delivered)
+
+| Slice | Surface | Tests |
+| --- | --- | --- |
+| 1 | `service` + free `run` / `all` / `race`; `serviceLayer` + Effect-form `client(def)` | run-once, memoize, sequential, all, race |
+| 2 | `select` (tagged race → `{ tag, future }`), `spawn` (local fiber) | select, spawn |
+| 3 | `schemas({ input, output })` descriptors; `InvokeOptions.idempotencyKey` (cross-call dedup) | dedup, schemas |
+| 4 | `makeRuntime({ services, engine })` ingress; `client(ingress, def)` / `sendClient` | ingress, ingress-send |
+| 5 | `workflow({ name, handlers, key? })` — keyed, one-run-per-key | keyed-default, custom-key |
+
+13 fluent conformance tests, all green; v4 `tsgo` typecheck clean. Still deferred:
+`object` + `state`/`sharedState`, durable `signal`/`awakeable`/`deferred`,
+compensation/retry on `run`, cross-definition durable `call`/`send` child sessions,
+replay-stable durable `race`, and `iface` descriptor-only contracts.
 
 ## The shape (three distinct things)
 
@@ -76,45 +91,53 @@ request). Author signatures annotate the Effect directly or lean on inference.
 
 ```ts
 // service.ts — handler inference
-type GeneratorHandler = (input: any) => Generator<any, any, any>
-type HandlerInput<H>  = H extends (input: infer I) => any ? I : never
-type HandlerOutput<H> = H extends (...a: any) => Generator<any, infer O, any> ? O : never
+type GeneratorHandler = (input: any) => Generator<any, any, any>;
+type HandlerInput<H> = H extends (input: infer I) => any ? I : never;
+type HandlerOutput<H> = H extends (...a: any) => Generator<any, infer O, any> ? O : never;
 
 interface DefinitionConfig<Name extends string, H extends Record<string, GeneratorHandler>> {
-  readonly name: Name
-  readonly handlers: H
-  readonly descriptors?: Partial<Record<keyof H, HandlerDescriptor>>  // slice 1: input/output schemas, default Schema.Unknown
+  readonly name: Name;
+  readonly handlers: H;
+  readonly descriptors?: Partial<Record<keyof H, HandlerDescriptor>>; // slice 1: input/output schemas, default Schema.Unknown
 }
 
 interface ServiceDefinition<Name extends string, H> {
-  readonly name: Name
-  readonly _compiled: ReadonlyArray<CompiledHandler>   // internal: { key, workflow, body } per handler
+  readonly name: Name;
+  readonly _compiled: ReadonlyArray<CompiledHandler>; // internal: { key, workflow, body } per handler
 }
 
 export const service: <Name extends string, H extends Record<string, GeneratorHandler>>(
   def: DefinitionConfig<Name, H>,
-) => ServiceDefinition<Name, H>
+) => ServiceDefinition<Name, H>;
 ```
 
 ```ts
 // runtime.ts
 interface Ingress {
-  readonly runPromise: <A, E>(effect: Effect.Effect<A, E, WorkflowEngine>) => Promise<A>
-  readonly runFork:    <A, E>(effect: Effect.Effect<A, E, WorkflowEngine>) => Fiber<A, E>
-  readonly [InternalEngine]: WorkflowEngine // captured engine, used by client()
+  readonly runPromise: <A, E>(effect: Effect.Effect<A, E, WorkflowEngine>) => Promise<A>;
+  readonly runFork: <A, E>(effect: Effect.Effect<A, E, WorkflowEngine>) => Fiber<A, E>;
+  readonly [InternalEngine]: WorkflowEngine; // captured engine, used by client()
 }
 
 export const makeRuntime: (config: {
-  readonly services: ReadonlyArray<ServiceDefinition<string, any>>
-  readonly engine: { readonly streamUrl: string }
-}) => Effect.Effect<Ingress, never, Scope.Scope>   // scoped: owns the engine lifecycle
+  readonly services: ReadonlyArray<ServiceDefinition<string, any>>;
+  readonly engine: { readonly streamUrl: string };
+}) => Effect.Effect<Ingress, never, Scope.Scope>; // scoped: owns the engine lifecycle
 
 // typed proxy bound to the ingress
-type CallClient<H> = { readonly [K in keyof H]: (input: HandlerInput<H[K]>) => Promise<HandlerOutput<H[K]>> }
-type SendClient<H> = { readonly [K in keyof H]: (input: HandlerInput<H[K]>) => Promise<ExecId> }
+type CallClient<H> = {
+  readonly [K in keyof H]: (input: HandlerInput<H[K]>) => Promise<HandlerOutput<H[K]>>;
+};
+type SendClient<H> = { readonly [K in keyof H]: (input: HandlerInput<H[K]>) => Promise<ExecId> };
 
-export const client:     <Name extends string, H>(ingress: Ingress, def: ServiceDefinition<Name, H>) => CallClient<H>
-export const sendClient: <Name extends string, H>(ingress: Ingress, def: ServiceDefinition<Name, H>) => SendClient<H>
+export const client: <Name extends string, H>(
+  ingress: Ingress,
+  def: ServiceDefinition<Name, H>,
+) => CallClient<H>;
+export const sendClient: <Name extends string, H>(
+  ingress: Ingress,
+  def: ServiceDefinition<Name, H>,
+) => SendClient<H>;
 ```
 
 ## Compilation: handler → Workflow
@@ -126,14 +149,14 @@ const wf = Workflow.make({
   name: `${serviceName}/${handlerKey}`,
   payload: Schema.Struct({ input: descriptor?.input ?? Schema.Unknown, __id: Schema.String }),
   success: descriptor?.output ?? Schema.Unknown,
-  error:   descriptor?.error,
-  idempotencyKey: (p) => p.__id,           // see "Invocation identity"
-})
+  error: descriptor?.error,
+  idempotencyKey: (p) => p.__id, // see "Invocation identity"
+});
 
 // generator body → Effect, lowered with Effect.fnUntraced; R = WorkflowEngine | WorkflowInstance
-const body = (payload, _executionId) => Effect.fnUntraced(handler)(payload.input)
+const body = (payload, _executionId) => Effect.fnUntraced(handler)(payload.input);
 
-const handlerLayer = wf.toLayer(body)      // Layer<never, never, WorkflowEngine>
+const handlerLayer = wf.toLayer(body); // Layer<never, never, WorkflowEngine>
 ```
 
 `makeRuntime` merges all handler layers, provides one `workflowEngineLayer(engine)`,
@@ -145,21 +168,21 @@ maps each handler key to `(input) => ingress.runPromise(wf.execute({ input, __id
 ```ts
 // run(action, { name }) | run(name, action)  — action is a thunk or an Effect
 export const run = (a, b?): Effect.Effect<any, any, WorkflowEngine | WorkflowInstance> => {
-  const { name, action, options } = resolveRunArgs(a, b)   // missing name → Effect.fail(DurableExecutionError)
+  const { name, action, options } = resolveRunArgs(a, b); // missing name → Effect.fail(DurableExecutionError)
   return Activity.make({
     name,
     success: options?.success ?? Schema.Unknown,
-    error:   options?.error,
-    execute: toEffect(action),                              // thunk → Effect.suspend/promise; Effect passthrough
-  })
-}
+    error: options?.error,
+    execute: toEffect(action), // thunk → Effect.suspend/promise; Effect passthrough
+  });
+};
 
 // name-free: durable identity is each inner run's name
-export const all  = <Ops extends readonly Effect.Effect<any, any, any>[]>(ops: Ops) =>
-  Effect.all(ops, { concurrency: "unbounded" })
+export const all = <Ops extends readonly Effect.Effect<any, any, any>[]>(ops: Ops) =>
+  Effect.all(ops, { concurrency: "unbounded" });
 
 export const race = (ops: NonEmptyReadonlyArray<Effect.Effect<any, any, any>>) =>
-  Effect.raceAll(ops)
+  Effect.raceAll(ops);
 ```
 
 - **`run`**: identical lowering to `step.ts`'s `ctx.run`, minus `withCompensation`
@@ -177,40 +200,40 @@ export const race = (ops: NonEmptyReadonlyArray<Effect.Effect<any, any, any>>) =
 ## Usage (target ergonomics)
 
 ```ts
-import { Effect } from "effect"
-import { service, run, all, race, makeRuntime, client } from "encore-ds/fluent"
+import { Effect } from "effect";
+import { service, run, all, race, makeRuntime, client } from "encore-ds/fluent";
 
 const incidentReview = service({
   name: "incidentReview",
   handlers: {
     *hello(name: string) {
-      return yield* run(() => `Hello, ${name}!`, { name: "compose" })
+      return yield* run(() => `Hello, ${name}!`, { name: "compose" });
     },
     *parallel(input: IncidentInput) {
-      const triage  = run(() => classify(input), { name: "classify" })
-      const context = run(() => collect(input),  { name: "collect" })
-      const [t, c]  = yield* all([triage, context])
-      return `${t.route}+${c.summary}`
+      const triage = run(() => classify(input), { name: "classify" });
+      const context = run(() => collect(input), { name: "collect" });
+      const [t, c] = yield* all([triage, context]);
+      return `${t.route}+${c.summary}`;
     },
     *fastest(id: string) {
       return yield* race([
-        run(() => primary(id),   { name: "primary" }),
+        run(() => primary(id), { name: "primary" }),
         run(() => secondary(id), { name: "secondary" }),
-      ])
+      ]);
     },
   },
-})
+});
 
 const program = Effect.gen(function* () {
-  const ingress  = yield* makeRuntime({ services: [incidentReview], engine: { streamUrl } })
-  const incidents = client(ingress, incidentReview)
+  const ingress = yield* makeRuntime({ services: [incidentReview], engine: { streamUrl } });
+  const incidents = client(ingress, incidentReview);
 
-  const greeting = await incidents.hello("world")
-  const summary  = await incidents.parallel({ incidentId: "inc-1", severity: 3 })
-  return { greeting, summary }
-})
+  const greeting = await incidents.hello("world");
+  const summary = await incidents.parallel({ incidentId: "inc-1", severity: 3 });
+  return { greeting, summary };
+});
 
-Effect.runPromise(Effect.scoped(program))
+Effect.runPromise(Effect.scoped(program));
 ```
 
 Define → `makeRuntime` (collect + register + engine, one call) → `client(ingress, def)`.
@@ -244,4 +267,7 @@ Real `DurableStreamTestServer` (mirrors `tiny-workflow.test.ts`):
    full Effect-Schema IO is slice 2.
 6. **`object` / `workflow` / `state` / signals / `select` / `spawn` / `call` /
    `send` child sessions** — later slices.
+
+```
+
 ```
