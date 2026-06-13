@@ -62,6 +62,11 @@ interface CompiledHandler {
     input: unknown,
     options?: InvokeOptions,
   ) => Effect.Effect<unknown, unknown, WorkflowEngine>;
+  /** Fire-and-forget dispatch; resolves to the execution id, not the result. */
+  readonly send: (
+    input: unknown,
+    options?: InvokeOptions,
+  ) => Effect.Effect<string, unknown, WorkflowEngine>;
 }
 
 export interface ServiceDefinition<Name extends string, H extends Handlers> {
@@ -107,17 +112,26 @@ const compileHandler = (
     bodyFn(payload.input),
   ) as Layer.Layer<never, never, WorkflowEngine>;
 
+  const payloadFor = (input: unknown, options?: InvokeOptions) =>
+    ({ input, __id: options?.idempotencyKey ?? crypto.randomUUID() }) as never;
+
   const execute = (
     input: unknown,
     options?: InvokeOptions,
   ): Effect.Effect<unknown, unknown, WorkflowEngine> =>
-    wf.execute({ input, __id: options?.idempotencyKey ?? crypto.randomUUID() } as never) as Effect.Effect<
-      unknown,
+    wf.execute(payloadFor(input, options)) as Effect.Effect<unknown, unknown, WorkflowEngine>;
+
+  const send = (
+    input: unknown,
+    options?: InvokeOptions,
+  ): Effect.Effect<string, unknown, WorkflowEngine> =>
+    wf.execute(payloadFor(input, options), { discard: true }) as Effect.Effect<
+      string,
       unknown,
       WorkflowEngine
     >;
 
-  return { key, workflow: wf, layer, execute };
+  return { key, workflow: wf, layer, execute, send };
 };
 
 /** Define a stateless durable service. */

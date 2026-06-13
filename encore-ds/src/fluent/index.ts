@@ -24,7 +24,16 @@ export {
   type HandlerInput,
   type HandlerOutput,
 } from "./service.ts";
-export { serviceLayer, client, type CallClient } from "./runtime.ts";
+export {
+  serviceLayer,
+  makeRuntime,
+  client,
+  sendClient,
+  type Ingress,
+  type CallClient,
+  type BoundClient,
+  type SendClient,
+} from "./runtime.ts";
 
 // Engine layer re-exported for convenience — provide alongside serviceLayer.
 export { workflowEngineLayer } from "../workflow.ts";

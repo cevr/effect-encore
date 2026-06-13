@@ -4,10 +4,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   all,
   client,
+  makeRuntime,
   race,
   run,
   schemas,
   select,
+  sendClient,
   service,
   type ServiceDefinition,
   serviceLayer,
@@ -284,5 +286,53 @@ describe("fluent service slice — run / all / race", () => {
     )) as { input: number; value: number };
 
     expect(out).toEqual({ input: 7, value: 49 });
+  });
+
+  it("INGRESS: makeRuntime + client(ingress, def) returns Promises with no Effect.provide", async () => {
+    const svc = service({
+      name: "ingress",
+      handlers: {
+        *hello(name: string) {
+          return yield* run(() => `Hi, ${name}`, { name: "compose" });
+        },
+      },
+    });
+
+    const ingress = makeRuntime({ services: [svc], engine: { streamUrl: engineUrl() } });
+    try {
+      const calls = client(ingress, svc);
+      const out = await calls.hello("ada");
+      expect(out).toBe("Hi, ada");
+    } finally {
+      await ingress.dispose();
+    }
+  });
+
+  it("INGRESS-SEND: sendClient dispatches; result correlated by shared idempotencyKey", async () => {
+    let calls = 0;
+    const svc = service({
+      name: "ingressSend",
+      handlers: {
+        *work(input: string) {
+          return yield* run(() => {
+            calls += 1;
+            return `${input}!`;
+          }, { name: "w" });
+        },
+      },
+    });
+
+    const ingress = makeRuntime({ services: [svc], engine: { streamUrl: engineUrl() } });
+    try {
+      const send = sendClient(ingress, svc);
+      const call = client(ingress, svc);
+      const execId = await send.work("go", { idempotencyKey: "k" });
+      const result = await call.work("go", { idempotencyKey: "k" });
+      expect(typeof execId).toBe("string");
+      expect(result).toBe("go!");
+      expect(calls).toBe(1); // send + call hit the same durable execution
+    } finally {
+      await ingress.dispose();
+    }
   });
 });
