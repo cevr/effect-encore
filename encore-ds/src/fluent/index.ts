@@ -2,7 +2,17 @@
 // Slice 1: `service` + free `run` / `all` / `race`, registered via
 // `serviceLayer` and invoked through `client`.
 
-export { run, all, race, type RunOptions, type RunAction, type FluentRequirements } from "./free.ts";
+export {
+  run,
+  all,
+  race,
+  select,
+  spawn,
+  type RunOptions,
+  type RunAction,
+  type SelectResult,
+  type FluentRequirements,
+} from "./free.ts";
 export {
   service,
   type ServiceDefinition,
