@@ -1,7 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- client proxy erases per-handler types behind the inferred surface */
 import { type Effect, Layer } from "effect";
 import type { WorkflowEngine } from "effect/unstable/workflow/WorkflowEngine";
-import type { HandlerInput, HandlerOutput, Handlers, ServiceDefinition } from "./service.ts";
+import type {
+  HandlerInput,
+  HandlerOutput,
+  Handlers,
+  InvokeOptions,
+  ServiceDefinition,
+} from "./service.ts";
 
 // ─────────────────────────────────────────────────────────────────────────
 // runtime.ts — registration + client surface (slice 1, plain-layer form).
@@ -20,27 +26,34 @@ import type { HandlerInput, HandlerOutput, Handlers, ServiceDefinition } from ".
 export const serviceLayer = (
   ...defs: ReadonlyArray<ServiceDefinition<string, any>>
 ): Layer.Layer<never, never, WorkflowEngine> =>
-  Layer.mergeAll(...(defs.flatMap((d) => d._compiled.map((h) => h.layer)) as [
-    Layer.Layer<never, never, WorkflowEngine>,
-    ...Array<Layer.Layer<never, never, WorkflowEngine>>,
-  ]));
+  Layer.mergeAll(
+    ...(defs.flatMap((d) => d._compiled.map((h) => h.layer)) as [
+      Layer.Layer<never, never, WorkflowEngine>,
+      ...Array<Layer.Layer<never, never, WorkflowEngine>>,
+    ]),
+  );
 
 export type CallClient<H extends Handlers> = {
   readonly [K in keyof H]: (
     input: HandlerInput<H[K]>,
+    options?: InvokeOptions,
   ) => Effect.Effect<HandlerOutput<H[K]>, unknown, WorkflowEngine>;
 };
 
 /**
  * Typed call surface for a service. `client(def).handler(input)` invokes a
- * handler as a fresh durable execution and returns its decoded result.
+ * handler as a fresh durable execution and returns its decoded result. Pass
+ * `{ idempotencyKey }` to share an execution across calls (durable dedup).
  */
 export const client = <Name extends string, H extends Handlers>(
   def: ServiceDefinition<Name, H>,
 ): CallClient<H> => {
-  const out: Record<string, (input: unknown) => Effect.Effect<unknown, unknown, WorkflowEngine>> = {};
+  const out: Record<
+    string,
+    (input: unknown, options?: InvokeOptions) => Effect.Effect<unknown, unknown, WorkflowEngine>
+  > = {};
   for (const h of def._compiled) {
-    out[h.key] = (input: unknown) => h.execute(input);
+    out[h.key] = (input: unknown, options?: InvokeOptions) => h.execute(input, options);
   }
   return out as CallClient<H>;
 };

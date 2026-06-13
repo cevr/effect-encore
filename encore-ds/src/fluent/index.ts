@@ -15,8 +15,11 @@ export {
 } from "./free.ts";
 export {
   service,
+  schemas,
   type ServiceDefinition,
   type ServiceConfig,
+  type HandlerDescriptor,
+  type InvokeOptions,
   type Handlers,
   type HandlerInput,
   type HandlerOutput,

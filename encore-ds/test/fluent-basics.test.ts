@@ -6,6 +6,7 @@ import {
   client,
   race,
   run,
+  schemas,
   select,
   service,
   type ServiceDefinition,
@@ -13,7 +14,7 @@ import {
   spawn,
   workflowEngineLayer,
 } from "../src/fluent/index.ts";
-import { Fiber } from "effect";
+import { Fiber, Schema } from "effect";
 
 let server: DurableStreamTestServer;
 let baseUrl: string;
@@ -224,5 +225,64 @@ describe("fluent service slice — run / all / race", () => {
         .pipe(Effect.provide(wire(svc))),
     );
     expect(out).toBe("inc:main+inc:bg");
+  });
+
+  it("SERVICE-DEDUP: same idempotencyKey shares one durable execution across calls", async () => {
+    let calls = 0;
+    const svc = service({
+      name: "dedup",
+      handlers: {
+        *work(input: string) {
+          return yield* run(() => {
+            calls += 1;
+            return `${input}:${calls}`;
+          }, { name: "w" });
+        },
+      },
+    });
+
+    // One engine layer shared across both calls — durable dedup needs it.
+    const layer = wire(svc);
+    const out = (await runScoped(
+      Effect.gen(function* () {
+        const c = client(svc);
+        const a = yield* c.work("x", { idempotencyKey: "k" });
+        const b = yield* c.work("x", { idempotencyKey: "k" });
+        return { a, b };
+      }).pipe(Effect.provide(layer)),
+    )) as { a: string; b: string };
+
+    expect(calls).toBe(1); // second call returns the recorded execution
+    expect(out.a).toBe(out.b);
+    expect(out.a).toBe("x:1");
+  });
+
+  it("SERVICE-SCHEMAS: typed descriptor drives the durable I/O boundary", async () => {
+    // Proves a non-Unknown descriptor compiles and runs end to end (typed input
+    // + typed struct output through the workflow payload/success schemas). The
+    // transform-round-trip proof (e.g. Schema.Date string<->Date) is deferred.
+    const svc = service({
+      name: "typed",
+      handlers: {
+        *square(n: number) {
+          const value = yield* run(() => n * n, { name: "sq" });
+          return { input: n, value };
+        },
+      },
+      descriptors: {
+        square: schemas({
+          input: Schema.Number,
+          output: Schema.Struct({ input: Schema.Number, value: Schema.Number }),
+        }),
+      },
+    });
+
+    const out = (await runScoped(
+      client(svc)
+        .square(7)
+        .pipe(Effect.provide(wire(svc))),
+    )) as { input: number; value: number };
+
+    expect(out).toEqual({ input: 7, value: 49 });
   });
 });
