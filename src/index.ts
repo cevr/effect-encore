@@ -80,3 +80,4 @@ export type { ActorAddressResolverShape } from "./actor-address-resolver.js";
 export { ActorMailbox, ActorMailboxLayer, MailboxError } from "./actor-mailbox.js";
 export type { ActorMailboxShape } from "./actor-mailbox.js";
 export { ActorSenderLayer } from "./actor-sender.js";
+export * as S2WorkflowEngine from "./s2-workflow/index.js";

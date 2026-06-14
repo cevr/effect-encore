@@ -9,6 +9,7 @@ dist
 # code coverage
 coverage
 *.lcov
+test/s2-lite-*/
 
 # logs
 logs

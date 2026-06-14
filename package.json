@@ -32,8 +32,8 @@
     "typecheck:v3": "tsgo --noEmit -p v3/tsconfig.json",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
-    "fmt": "oxfmt",
-    "fmt:check": "oxfmt --check",
+    "fmt": "oxfmt --ignore-path .oxfmtignore",
+    "fmt:check": "oxfmt --ignore-path .oxfmtignore --check",
     "test": "bun test --tsconfig-override=tsconfig.json",
     "test:v3": "cd v3 && bun test --tsconfig-override=tsconfig.json ./test/",
     "test:watch": "bun test --watch",
@@ -43,6 +43,9 @@
     "release": "bun run build && changeset publish",
     "version": "changeset version",
     "prepare": "lefthook install && effect-tsgo patch"
+  },
+  "dependencies": {
+    "@s2-dev/streamstore": "0.24.1"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.6.0",

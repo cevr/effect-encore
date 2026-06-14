@@ -29,7 +29,14 @@
     "typescript/no-unnecessary-type-conversion": "off",
     "typescript/no-redundant-type-constituents": "off"
   },
-  "ignorePatterns": ["**/dist/**", "**/node_modules/**", "**/*.d.ts", "**/bin/**", "**/scripts/**"],
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/*.d.ts",
+    "**/bin/**",
+    "**/scripts/**",
+    "encore-ds/**"
+  ],
   "overrides": [
     {
       "files": ["**/*.test.ts", "**/*.test.tsx", "**/tests/**"],
