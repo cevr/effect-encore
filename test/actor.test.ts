@@ -436,6 +436,32 @@ describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () 
       expect(String(fromSend)).toBe(String(fromCompute));
     }),
   );
+
+  // Round-2 --deep regression: the LOWER-LEVEL value-dispatch ref path. D1 only
+  // repaired `OperationHandle.send`; the public, documented `ref.send(op)` still
+  // re-derived the primary key from the struct-spread `make(payload)` op, whose
+  // dropped prototype made `def.id` (which calls `p.routingKey()`) throw
+  // "routingKey is not a function". `ref.send(make(payload))` MUST agree with
+  // `executionId(payload)`/`peek` exactly as `handle.send(payload)` does.
+  routedTest(
+    "ref.send(make(payload)) ExecId === executionId(payload) for a class-instance id",
+    () =>
+      Effect.gen(function* () {
+        const payload = new RoutingKey({ region: "us", seq: 7 });
+        const makeRef = yield* Routed.Context;
+        // entityId === routingKey() === "us-7", so the ref binds to that entity.
+        const ref = yield* makeRef("us-7");
+        // `make(payload)` spreads the class into a plain struct (prototype gone).
+        // Without the src fix the ref re-derives the id from that struct and the
+        // missing `routingKey` method THROWS; with the fix it derives from the
+        // carried live instance.
+        const op = Routed.Process.make(payload);
+        const fromRefSend = yield* ref.send(op);
+        expect(String(fromRefSend)).toBe("us-7\x00Process\x00us-7");
+        const fromCompute = yield* Routed.Process.executionId(payload);
+        expect(String(fromRefSend)).toBe(String(fromCompute));
+      }),
+  );
 });
 
 describe("Actor.withProtocol", () => {

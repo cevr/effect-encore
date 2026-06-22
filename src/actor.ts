@@ -106,6 +106,31 @@ const layerPassthrough = <ROut, E, RIn>(
 // dependency stays one-directional (`actor.ts` → `client.ts`). They are
 // imported at the top of this file.
 
+// Hidden carrier for the ORIGINAL id-input on an OperationValue built by
+// `make`/`buildOpValue`. `buildOpValue` spreads `Schema.Class` payloads into a
+// plain struct (`{ _tag, ...fields }`), which drops the prototype — so any
+// `def.id` that reads a prototype method (e.g. `p.routingKey()`) would throw or
+// diverge if re-derived from the spread op. We stash the live instance under a
+// non-enumerable symbol so the value-dispatch ref (`buildActorRef.send` /
+// `.execute`) can recover it for primary-key derivation, keeping `ref.send(op)`
+// in lockstep with `OperationHandle.executionId`/`peek` (which read the live
+// payload). Non-enumerable + symbol-keyed ⇒ invisible to struct spreads, JSON,
+// and the wire envelope, so nothing downstream of the id derivation sees it.
+const ORIGINAL_ID_PAYLOAD = Symbol.for("effect-encore/OperationValue/originalIdPayload");
+
+const attachOriginalIdPayload = <T extends object>(op: T, payload: unknown): T => {
+  Object.defineProperty(op, ORIGINAL_ID_PAYLOAD, {
+    value: payload,
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+  return op;
+};
+
+const readOriginalIdPayload = (op: { readonly [key: string]: unknown }): unknown =>
+  (op as { readonly [ORIGINAL_ID_PAYLOAD]?: unknown })[ORIGINAL_ID_PAYLOAD];
+
 // ── Operation DSL ──────────────────────────────────────────────────────────
 
 /**
@@ -909,9 +934,13 @@ const fromEntity = <
   const buildOpValue = (tag: string, payload: unknown) => {
     const def = internalDefinitions[tag] as OperationDef | undefined;
     const opaque = def?.payload !== undefined && isOpaquePayload(def.payload);
-    return opaque
+    const op = opaque
       ? { _tag: tag, _payload: payload }
       : { _tag: tag, ...(payload != null && typeof payload === "object" ? payload : {}) };
+    // Preserve the live id-input so the value-dispatch ref derives the ExecId
+    // from the same value `executionId`/`peek` use — class payloads keep their
+    // prototype here even though the struct spread above dropped it.
+    return attachOriginalIdPayload(op, payload);
   };
 
   class ActorClientContext extends Context.Service<
@@ -1748,7 +1777,18 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
       const arg = rpcArg(op, def);
       const discardCall =
         arg !== undefined ? fn(arg, { discard: true }) : fn(undefined, { discard: true });
-      const pkInput = def?.payload && isOpaquePayload(def.payload) ? op["_payload"] : op;
+      // Prefer the ORIGINAL id-input carried by `make`/`buildOpValue` (a live
+      // `Schema.Class` instance keeps its prototype here). Re-deriving the id
+      // from the struct-spread `op` would drop prototype methods and throw or
+      // mint a divergent ExecId — diverging from `executionId`/`peek`. Fall
+      // back to the spread-derived input for hand-built ops with no carrier.
+      const carried = readOriginalIdPayload(op);
+      const pkInput =
+        carried !== undefined
+          ? carried
+          : def?.payload && isOpaquePayload(def.payload)
+            ? op["_payload"]
+            : op;
       const { primaryKey } = resolveId(def, pkInput, tag);
       const execId = ExecIdCodec.encode({ entityId: _entityId, tag, primaryKey });
       return bind(Effect.map(discardCall ?? Effect.void, () => execId));
