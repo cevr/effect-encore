@@ -265,23 +265,27 @@ yield * ProcessOrder.ManagerApproval.succeed({ token, value: decision });
 
 ### Sender-Only (Client Layer)
 
-`.send()` (fire-and-forget dispatch) goes through `ActorMailbox` + `ActorAddressResolver` Tags. Consumer hosts that already have full `Sharding.Sharding` get the wiring for free from `Actor.toLayer`.
+`.send()` (fire-and-forget dispatch) goes through the deep `Client` transport seam — one `Context.Service` Tag that owns the wire-envelope builder plus the mailbox/resolver/snowflake strategy internally. Consumer hosts that already have full `Sharding.Sharding` get the wiring for free from `Actor.toLayer`.
 
-Sender-only / ops-only hosts that must NOT register entity managers use `ActorSenderLayer` — bundles the three Tags on the `fromConfig` variants. Requires only `MessageStorage` + `ShardingConfig`, no `Sharding` runtime, no `notifyLocal` deadlock:
+Sender-only / ops-only hosts that must NOT register entity managers wire ONE `Client.layer.*` adapter. `Client.layer.fromConfig` dispatches through `MessageStorage` directly — requires only `MessageStorage` + `ShardingConfig`, no `Sharding` runtime, no `notifyLocal` deadlock:
 
 ```ts
 import { Layer } from "effect";
 import { MessageStorage, ShardingConfig } from "effect/unstable/cluster";
-import { ActorSenderLayer } from "effect-encore";
+import { ClientLayer } from "effect-encore";
 
-const SenderSupport = ActorSenderLayer.layer.pipe(
+const SenderSupport = ClientLayer.fromConfig.pipe(
   Layer.provide(MessageStorage.layerMemory), // or your durable storage
   Layer.provide(ShardingConfig.layer()),
 );
 
 // Or, for tests / single-process setups — bundle includes in-memory
 // storage and default sharding config:
-const SenderTest = ActorSenderLayer.layerMemory;
+const SenderTest = ClientLayer.memory;
+
+// (Consumer hosts that already host the cluster runtime use
+// `ClientLayer.fromSharding`, which dispatches via `sharding.sendOutgoing`
+// and bundles its own `Snowflake.Generator`.)
 
 // Sends are durably enqueued; the consumer's storage poll loop picks them up
 // on the next entityMessagePollInterval tick.

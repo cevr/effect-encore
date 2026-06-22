@@ -1,5 +1,11 @@
 /**
- * ActorSender — bundle for hosts that send messages without hosting actors.
+ * ActorSender — internal bundle for hosts that send messages without hosting
+ * actors.
+ *
+ * PACKAGE-INTERNAL (E5): this is the building block behind the public
+ * `Client.layer.fromConfig` / `Client.layer.memory` adapters (`client.ts`),
+ * the host-facing deep transport seam. It is no longer exported from the
+ * package barrel — wire a `Client.layer.*` adapter instead.
  *
  * Sender-only hosts always need the same three Tags: `ActorMailbox` to
  * enqueue, `ActorAddressResolver` to compute the destination shard, and
@@ -11,12 +17,7 @@
  * so the dependency graph stays explicit at the host boundary.
  *
  * `ActorSenderLayer.layerMemory` is the trivial-case bundle: in-memory
- * storage + default sharding config + the three Tags. Use it in tests and
- * single-process toy setups where there's no shared storage to coordinate
- * with a separate consumer.
- *
- * Advanced hosts (e.g. ops-only, no `.send`) keep using the underlying
- * `ActorMailboxLayer` / `ActorAddressResolverLayer` factories directly.
+ * storage + default sharding config + the three Tags.
  */
 import { MessageStorage, ShardingConfig, Snowflake } from "effect/unstable/cluster";
 import { Layer } from "effect";
@@ -27,17 +28,9 @@ import { type ActorMailbox, ActorMailboxLayer } from "./actor-mailbox.js";
  * Sender bundle (no providers). Requires
  * `MessageStorage | ShardingConfig`.
  *
- * @example
- * ```ts
- * import { Layer } from "effect";
- * import { MessageStorage, ShardingConfig } from "effect/unstable/cluster";
- * import { ActorSenderLayer } from "effect-encore";
- *
- * const SenderSupport = ActorSenderLayer.layer.pipe(
- *   Layer.provide(MessageStorage.layerMemory),
- *   Layer.provide(ShardingConfig.layer()),
- * );
- * ```
+ * Composed internally by `Client.layer.fromConfig`
+ * (`client.ts`); hosts wire `Client.layer.fromConfig` rather than this bundle
+ * directly.
  */
 const layer: Layer.Layer<
   ActorMailbox | ActorAddressResolver | Snowflake.Generator,
