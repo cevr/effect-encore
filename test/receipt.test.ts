@@ -2,6 +2,7 @@ import { describe, expect, test } from "effect-bun-test";
 import { Schema } from "effect";
 import {
   Defect,
+  ExecIdCodec,
   Failure,
   Interrupted,
   Pending,
@@ -27,6 +28,29 @@ describe("ExecId", () => {
     const r1 = makeExecId("Place:pk-123");
     const r2 = makeExecId("Place:pk-123");
     expect(r1).toBe(r2);
+  });
+
+  test("ExecIdCodec.encode mints the frozen \\x00-joined wire format", () => {
+    const execId = ExecIdCodec.encode({
+      entityId: "Order",
+      tag: "Place",
+      primaryKey: "pk-123",
+    });
+    expect(String(execId)).toBe("Order\x00Place\x00pk-123");
+  });
+
+  test("ExecIdCodec round-trips a 3-tuple", () => {
+    const components = { entityId: "Order", tag: "Place", primaryKey: "pk-123" };
+    expect(ExecIdCodec.decode(ExecIdCodec.encode(components))).toEqual(components);
+  });
+
+  test("ExecIdCodec.decode collapses a single-segment workflow id", () => {
+    const execId = "exec-42";
+    expect(ExecIdCodec.decode(execId)).toEqual({
+      entityId: execId,
+      tag: execId,
+      primaryKey: execId,
+    });
   });
 });
 

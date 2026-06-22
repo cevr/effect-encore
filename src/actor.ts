@@ -60,6 +60,7 @@ import { makeSignal, makeStepContext } from "./step.js";
 import type { ExecId, PeekResult } from "./receipt.js";
 import {
   Defect,
+  ExecIdCodec,
   Failure,
   Interrupted,
   Suspended,
@@ -814,21 +815,6 @@ const compileRpc = (actorName: string, tag: string, def: OperationDef): Rpc.Any 
 
 // ── peek — internal implementation ───────────────────────────────────────
 
-const parseExecId = (execId: string) => {
-  const firstSep = execId.indexOf("\x00");
-  const secondSep = firstSep >= 0 ? execId.indexOf("\x00", firstSep + 1) : -1;
-  return {
-    entityId: firstSep >= 0 ? execId.slice(0, firstSep) : execId,
-    tag:
-      secondSep >= 0
-        ? execId.slice(firstSep + 1, secondSep)
-        : firstSep >= 0
-          ? execId.slice(firstSep + 1)
-          : execId,
-    primaryKey: secondSep >= 0 ? execId.slice(secondSep + 1) : execId,
-  };
-};
-
 // ── OutgoingRequest builder for .send dispatch ───────────────────────────
 // Produces the same OutgoingRequest shape as upstream `Sharding.makeClient`
 // but bypasses Sharding entirely so the host doesn't need a registered
@@ -991,7 +977,7 @@ const peekImpl = (
   PersistenceError | MalformedMessage,
   MessageStorage.MessageStorage | ActorAddressResolver
 > => {
-  const parsed = parseExecId(execId);
+  const parsed = ExecIdCodec.decode(execId);
 
   return Effect.gen(function* () {
     const storage = yield* MessageStorage.MessageStorage;
@@ -1382,7 +1368,7 @@ const makeOperationHandle = <
 
   const execId = (payload: unknown) => {
     const { entityId, primaryKey } = idOf(payload);
-    return makeExecId(`${entityId}\x00${tag}\x00${primaryKey}`);
+    return ExecIdCodec.encode({ entityId, tag, primaryKey });
   };
 
   // .send dispatches via ActorMailbox + ActorAddressResolver. The two
@@ -1953,8 +1939,8 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
         arg !== undefined ? fn(arg, { discard: true }) : fn(undefined, { discard: true });
       const pkInput = def?.payload && isOpaquePayload(def.payload) ? op["_payload"] : op;
       const { primaryKey } = resolveId(def, pkInput, tag);
-      const execId = `${_entityId}\x00${tag}\x00${primaryKey}`;
-      return bind(Effect.map(discardCall ?? Effect.void, () => makeExecId(execId)));
+      const execId = ExecIdCodec.encode({ entityId: _entityId, tag, primaryKey });
+      return bind(Effect.map(discardCall ?? Effect.void, () => execId));
     },
   } as ActorRef<Name, Defs>;
 };

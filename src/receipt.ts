@@ -14,6 +14,42 @@ export type ExecId<Success = unknown, Error = unknown> = string & {
 export const makeExecId = <S = unknown, E = unknown>(id: string): ExecId<S, E> =>
   id as ExecId<S, E>;
 
+// ── ExecIdCodec — single mint/parse boundary ─────────────────────────────
+//
+// The entity ExecId wire format is `${entityId}\x00${tag}\x00${primaryKey}`.
+// This 3-tuple is persisted into `cluster_messages` dedup identity, so the
+// byte layout is a FROZEN wire contract — centralizing construction here must
+// not normalize/escape segments. `encode` is the single mint; `decode` is the
+// verbatim parse (single-separator and no-separator fallbacks preserved), so a
+// no-separator id (single-segment workflow `makeExecId(executionId)`) decodes
+// to `entityId == tag == primaryKey == execId`.
+
+export interface ExecIdComponents {
+  readonly entityId: string;
+  readonly tag: string;
+  readonly primaryKey: string;
+}
+
+export const ExecIdCodec = {
+  encode: <S = unknown, E = unknown>(components: ExecIdComponents): ExecId<S, E> =>
+    makeExecId<S, E>(`${components.entityId}\x00${components.tag}\x00${components.primaryKey}`),
+
+  decode: (execId: string): ExecIdComponents => {
+    const firstSep = execId.indexOf("\x00");
+    const secondSep = firstSep >= 0 ? execId.indexOf("\x00", firstSep + 1) : -1;
+    return {
+      entityId: firstSep >= 0 ? execId.slice(0, firstSep) : execId,
+      tag:
+        secondSep >= 0
+          ? execId.slice(firstSep + 1, secondSep)
+          : firstSep >= 0
+            ? execId.slice(firstSep + 1)
+            : execId,
+      primaryKey: secondSep >= 0 ? execId.slice(secondSep + 1) : execId,
+    };
+  },
+};
+
 // ── PeekResult ───────────────────────────────────────────────────────────
 
 export type PeekResult<A = unknown, E = unknown> =

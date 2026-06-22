@@ -48,8 +48,9 @@ export type {
   SignalDef,
   SignalDefs,
 } from "./step.js";
-export type { ExecId, PeekResult } from "./receipt.js";
+export type { ExecId, ExecIdComponents, PeekResult } from "./receipt.js";
 export {
+  ExecIdCodec,
   makeExecId,
   PeekResultSchema,
   Pending,
