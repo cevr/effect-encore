@@ -1,6 +1,6 @@
 # ADR-0001 — Actor-runtime seams: Client, State&lt;A&gt;, ReplySource
 
-- **Status:** proposed → accepted on publish
+- **Status:** accepted
 - **Date:** 2026-06-22
 - **Scope:** effect-encore `src/` (v4-only). The `v3/` tree is frozen and out of scope.
 

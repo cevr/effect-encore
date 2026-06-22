@@ -18,17 +18,17 @@ Interrupted | Defect | Suspended`. What `peek(execId)` returns and `waitFor` pol
 
 ## Seams (where behaviour is swapped without editing in place)
 
-- **Client** _(port target — candidate #1)_ — the unified transport seam. One Tag owning
+- **Client** _(landed — seam #1)_ — the unified transport seam. One Tag owning
   `send / resolve / peek / flush / redeliver` plus the wire-envelope builder, with adapters
   `Client.layer.{fromConfig, fromSharding, memory, test}`. Supersedes the hand-assembled
   mailbox+resolver+Snowflake triad. Address resolution (`fromConfig`/`fromSharding`, carrying the
   shard-parity invariant) survives as an **internal strategy** the Client holds, not a public Tag.
-- **State\<A\>** _(port target — candidate #2)_ — the per-entity mutable state handle:
+- **State\<A\>** _(landed — seam #2)_ — the per-entity mutable state handle:
   `get / set / update / changes`, with **per-State mutation serialization** (concurrent `update`s
   linearized). Grown from the read-only `ActorStateHandle` (`get`+`watch`). In-process
   (`SubscriptionRef`) today; durable per-entity backing (`cluster_states` + CAS) is a deferred
   follow-up, not in the port.
-- **ReplySource** _(port target — candidate #3, NEW)_ — the await-engine's seam:
+- **ReplySource** _(landed — seam #3)_ — the await-engine's seam:
   `(ExecId) => Effect<PeekResult>`. Lifts the mechanism (ExecId mint/parse, Exit→PeekResult mapping,
   the `waitFor` poll loop) out of `actor.ts` into `receipt.ts`, so the reply-source is swappable and
   the Exit-classification logic is unit-testable. **Default adapter = `MessageStorage`** (the existing
