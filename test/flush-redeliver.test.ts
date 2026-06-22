@@ -1,7 +1,8 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Schema } from "effect";
 import { TestRunner } from "effect/unstable/cluster";
-import { Actor } from "../src/index.js";
+import type { Client } from "../src/index.js";
+import { Actor, ClientLayer } from "../src/index.js";
 
 const FlushActor = Actor.fromEntity("FlushActor", {
   Process: {
@@ -86,5 +87,35 @@ describe("Actor.redeliver", () => {
       const after = yield* RedeliverActor.Process.peek({ input: "test" });
       expect(after._tag).toBe("Success");
     }).pipe(Effect.provide(redeliverHandlers), Effect.provide(TestCluster)),
+  );
+});
+
+// Regression for the type-vs-runtime divergence on the public `EntityActor`
+// control ops: after `flush`/`redeliver`/`interrupt` were repointed through
+// `Client.use(...)`, they REQUIRE the deep `Client` Tag at runtime. The
+// declared R-channel must say so — providing exactly the DECLARED deps must
+// make `flush` succeed. Before the fix the declared R omitted `Client`, so a
+// host satisfying the type without `Client` crashed with
+// `Service not found: effect-encore/client`.
+describe("Actor.flush declared R-channel", () => {
+  // Type-level probe: the declared requirement of `flush`/`redeliver`/
+  // `interrupt` is EXACTLY `Client` — annotating with `Client` typechecks, and
+  // (by exhaustiveness of the single-Tag union) nothing else leaks. If the old
+  // storage+resolver union were still declared, this annotation would fail.
+  const _flushR: Effect.Effect<void, unknown, Client> = FlushActor.flush("x");
+  const _redeliverR: Effect.Effect<void, unknown, Client> = FlushActor.redeliver("x");
+  const _interruptR: Effect.Effect<void, unknown, Client> = FlushActor.interrupt("x");
+  void _flushR;
+  void _redeliverR;
+  void _interruptR;
+
+  it.scopedLive("succeeds when provided only the declared `Client` dependency", () =>
+    Effect.gen(function* () {
+      // Provide EXACTLY the declared R (`Client`) via the self-contained memory
+      // adapter — no handler layer, no TestCluster. This is the probe that
+      // previously died with `Service not found: effect-encore/client`.
+      const result = yield* FlushActor.flush("declared-deps-only").pipe(Effect.exit);
+      expect(result._tag).toBe("Success");
+    }).pipe(Effect.provide(ClientLayer.memory)),
   );
 });

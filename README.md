@@ -1,17 +1,16 @@
 # effect-encore
 
-Declarative actors and durable workflows for `@effect/cluster`.
+Declarative actors and durable workflows for effect v4 (`effect/unstable/cluster`).
 
 ```bash
 bun add effect-encore
 ```
 
-Peer dependency: `effect >= 4.0.0-beta.64`.
-For v3 `@effect/cluster` compat: `import { Actor } from "effect-encore/v3"`.
+Peer dependency: `effect >= 4.0.0-beta.66`. v4-only — for `effect@3` / `@effect/cluster` compat, pin the last `0.12.x` release.
 
 ## Why
 
-`@effect/cluster` requires custom `Schema.Class`, `Rpc.make`, `RpcGroup`, `Entity.make`, handler wiring, and a hand-rolled client service. Workflows add `Activity`, `DurableDeferred`, `DurableClock`, and `Workflow.make` on top. effect-encore compresses both into a declarative DSL — define entities and workflows as plain objects, get typed actors with execute/send/peek/watch/waitFor and a step DSL for durable orchestration.
+Effect's cluster API (`effect/unstable/cluster`) requires custom `Schema.Class`, `Rpc.make`, `RpcGroup`, `Entity.make`, handler wiring, and a hand-rolled client service. Workflows add `Activity`, `DurableDeferred`, `DurableClock`, and `Workflow.make` on top. effect-encore compresses both into a declarative DSL — define entities and workflows as plain objects, get typed actors with execute/send/peek/watch/waitFor and a step DSL for durable orchestration.
 
 ## Core API
 
@@ -141,24 +140,29 @@ const OrderLive = Actor.toLayer(
 ### Entity State
 
 Long-lived entity handlers can expose live, in-memory state without a
-side-channel registry in the host app. Register the state from the entity scope;
-clients read or watch it through the actor, keyed by the same `entityId` used
-for operations.
+side-channel registry in the host app. Build a `State<A>` value over the backing
+cell, register it from the entity scope, and mutate through it; clients read or
+watch it through the actor, keyed by the same `entityId` used for operations.
+
+`State<A>` is a typed view over the cell plus a subscribable change stream:
+`State.get` / `State.set` / `State.update` / `State.updateAndGet` / `State.modify`
+serialize their read/apply/write/publish through a per-`State` lock, and
+`State.changes` is a replay-1 stream of every committed write.
 
 ```ts
 const CounterLive = Actor.toLayer(
   Counter,
   Effect.gen(function* () {
-    const state = yield* SubscriptionRef.make(0);
+    const ref = yield* SubscriptionRef.make(0);
+    const state = yield* Actor.State.make(
+      () => SubscriptionRef.get(ref),
+      (value) => SubscriptionRef.set(ref, value),
+    );
 
-    yield* Actor.registerState({
-      get: SubscriptionRef.get(state),
-      watch: SubscriptionRef.changes(state),
-    });
+    yield* Actor.registerState(state);
 
     return Counter.of({
-      Increment: ({ operation }) =>
-        SubscriptionRef.updateAndGet(state, (n) => n + operation.amount),
+      Increment: ({ operation }) => Actor.State.updateAndGet(state, (n) => n + operation.amount),
     });
   }),
 );
@@ -260,23 +264,27 @@ yield * ProcessOrder.ManagerApproval.succeed({ token, value: decision });
 
 ### Sender-Only (Client Layer)
 
-`.send()` (fire-and-forget dispatch) goes through `ActorMailbox` + `ActorAddressResolver` Tags. Consumer hosts that already have full `Sharding.Sharding` get the wiring for free from `Actor.toLayer`.
+`.send()` (fire-and-forget dispatch) goes through the deep `Client` transport seam — one `Context.Service` Tag that owns the wire-envelope builder plus the mailbox/resolver/snowflake strategy internally. Consumer hosts that already have full `Sharding.Sharding` get the wiring for free from `Actor.toLayer`.
 
-Sender-only / ops-only hosts that must NOT register entity managers use `ActorSenderLayer` — bundles the three Tags on the `fromConfig` variants. Requires only `MessageStorage` + `ShardingConfig`, no `Sharding` runtime, no `notifyLocal` deadlock:
+Sender-only / ops-only hosts that must NOT register entity managers wire ONE `Client.layer.*` adapter. `Client.layer.fromConfig` dispatches through `MessageStorage` directly — requires only `MessageStorage` + `ShardingConfig`, no `Sharding` runtime, no `notifyLocal` deadlock:
 
 ```ts
 import { Layer } from "effect";
 import { MessageStorage, ShardingConfig } from "effect/unstable/cluster";
-import { ActorSenderLayer } from "effect-encore";
+import { ClientLayer } from "effect-encore";
 
-const SenderSupport = ActorSenderLayer.layer.pipe(
+const SenderSupport = ClientLayer.fromConfig.pipe(
   Layer.provide(MessageStorage.layerMemory), // or your durable storage
   Layer.provide(ShardingConfig.layer()),
 );
 
 // Or, for tests / single-process setups — bundle includes in-memory
 // storage and default sharding config:
-const SenderTest = ActorSenderLayer.layerMemory;
+const SenderTest = ClientLayer.memory;
+
+// (Consumer hosts that already host the cluster runtime use
+// `ClientLayer.fromSharding`, which dispatches via `sharding.sendOutgoing`
+// and bundles its own `Snowflake.Generator`.)
 
 // Sends are durably enqueued; the consumer's storage poll loop picks them up
 // on the next entityMessagePollInterval tick.

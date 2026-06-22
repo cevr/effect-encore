@@ -1,7 +1,6 @@
 import { describe, test } from "effect-bun-test";
 import { Effect, Schema } from "effect";
 import type { Cause, Duration, Layer, Scope, Stream } from "effect";
-import type { Snowflake } from "effect/unstable/cluster";
 import type {
   AlreadyProcessingMessage,
   MailboxFull,
@@ -11,10 +10,9 @@ import type { Execution } from "effect/unstable/workflow/Workflow";
 import type { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
 import { Actor } from "../src/index.js";
 import type {
-  ActorAddressResolver,
   ActorControlClientService,
   ActorStateClientService,
-  ActorMailbox,
+  Client,
   CurrentAddress,
   ExecId,
   MailboxError,
@@ -82,13 +80,15 @@ type _PeekResultHasSuspended = Assert<
 >;
 
 describe("type-level tests", () => {
-  // The new `.send` boundary moved from `ActorClientService` to
-  // ActorMailbox + ActorAddressResolver + Snowflake.Generator. We pin the
-  // exact E/R contract once (here) so accidental drift fails fast; the
-  // remaining `.send` tests stay loose with `unknown` to avoid noise on
-  // signature-level changes elsewhere.
+  // E5: the `.send` requirement collapses from the former
+  // `ActorMailbox | ActorAddressResolver | Snowflake.Generator` triad to the
+  // single deep `Client` transport Tag (decision #1, CONTEXT.md:21-25). The
+  // wire-builder + mailbox/resolver/snowflake strategy are pulled INSIDE the
+  // seam, so a producer composes the one `Client` Tag into its `R`. We pin the
+  // exact E/R contract once (here); the remaining `.send` tests stay loose with
+  // `unknown` to avoid noise on signature-level changes elsewhere.
   type SendError = MailboxError | PersistenceError | MailboxFull | AlreadyProcessingMessage;
-  type SendR = ActorMailbox | ActorAddressResolver | Snowflake.Generator;
+  type SendR = Client;
   test("Place.send pins the exact error union and required services", () => {
     const _check = (): Effect.Effect<ExecId<string, OrderError>, SendError, SendR> =>
       Order.Place.send({ item: "widget" });
@@ -233,6 +233,30 @@ describe("type-level tests", () => {
   test("withProtocol preserves Name and Defs — data-first", () => {
     const _direct = Actor.withProtocol(Order, (protocol) => protocol);
     void _direct;
+  });
+
+  // E4: `registerState` consumes a `State<A>` (decision #2 consume-point), NOT
+  // a `{get, watch}` handle. `ActorStateHandle` is registry-internal and left
+  // the public barrel — only `State<A>` is the public state vocabulary.
+  test("registerState consumes a State<A> built via Actor.State.make", () => {
+    const _check = Effect.gen(function* () {
+      const state = yield* Actor.State.make(
+        (): Effect.Effect<number> => Effect.succeed(0),
+        (_value: number) => Effect.void,
+      );
+      yield* Actor.registerState(state);
+      yield* Actor.State.updateAndGet(state, (n) => n + 1);
+    });
+    void _check;
+  });
+
+  test("registerState rejects the legacy {get, watch} handle", () => {
+    const _check = Effect.gen(function* () {
+      yield* Effect.void;
+      // @ts-expect-error — registerState now takes a State<A>, not {get, watch}
+      yield* Actor.registerState({ get: Effect.succeed(0), watch: undefined });
+    });
+    void _check;
   });
 });
 

@@ -5,8 +5,6 @@ import {
   EntityAddress,
   EntityId,
   EntityType,
-  Envelope,
-  Message,
   MessageStorage,
   Sharding,
   type ShardingConfig,
@@ -20,31 +18,20 @@ import type {
   MalformedMessage,
   PersistenceError,
 } from "effect/unstable/cluster/ClusterError";
-import * as Headers from "effect/unstable/http/Headers";
-import type { Rpc, RpcClient, RpcGroup, RpcMessage } from "effect/unstable/rpc";
+import type { Rpc, RpcClient, RpcGroup } from "effect/unstable/rpc";
 import { Rpc as RpcMod } from "effect/unstable/rpc";
 import { Workflow as UpstreamWorkflow } from "effect/unstable/workflow";
-import {
-  ActorAddressResolver,
-  ActorAddressResolverLayer,
-  type ActorAddressResolverShape,
-} from "./actor-address-resolver.js";
-import {
-  ActorMailbox,
-  ActorMailboxLayer,
-  type ActorMailboxShape,
-  MailboxError,
-} from "./actor-mailbox.js";
+import { ActorAddressResolver, ActorAddressResolverLayer } from "./actor-address-resolver.js";
+import type { MailboxError, ActorMailboxShape } from "./actor-mailbox.js";
+import { ActorMailbox, ActorMailboxLayer } from "./actor-mailbox.js";
 import type { Execution } from "effect/unstable/workflow/Workflow";
 import type { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
 import { layerMemory as workflowEngineLayerMemory } from "effect/unstable/workflow/WorkflowEngine";
 import {
-  Cause,
   Context,
   Data,
   Duration,
   Effect,
-  Exit,
   Layer,
   Option,
   Pipeable,
@@ -53,22 +40,33 @@ import {
   Schema,
   Stream,
 } from "effect";
-import type { DateTime, Scope } from "effect";
+import type { DateTime, Exit, Scope } from "effect";
 import { dual } from "effect/Function";
 import type { SignalDefs, WorkflowSignal, WorkflowStepContext } from "./step.js";
 import { makeSignal, makeStepContext } from "./step.js";
 import type { ExecId, PeekResult } from "./receipt.js";
 import {
-  Defect,
-  Failure,
-  Interrupted,
+  ExecIdCodec,
+  Pending,
+  ReplySource,
+  ReplySourceLayer,
   Suspended,
+  defaultReplySource,
   isTerminal,
   makeExecId,
-  Pending,
-  Success,
+  mapExitToWorkflowPeekResult,
 } from "./receipt.js";
 import { EncoreMessageStorage } from "./storage.js";
+import {
+  Client,
+  clientServiceLayer,
+  isOpaquePayload,
+  makeTestMailboxImpl,
+  resolveEntityAddress,
+  resolveId,
+  layer as ClientLayer,
+} from "./client.js";
+import type { EntityIdReturn, OperationDef, OperationDefs } from "./client.js";
 import {
   ActorStateRegistry,
   listStateEntityIds,
@@ -76,7 +74,8 @@ import {
   stateOf,
   watchStateOf,
 } from "./actor-state.js";
-import type { ActorStateHandle, ActorStateUnavailable } from "./actor-state.js";
+import type { ActorStateUnavailable } from "./actor-state.js";
+import * as State from "./state.js";
 import { entityIdCodec } from "./entity-id-codec.js";
 
 // ── Errors ─────────────────────────────────────────────────────────────────
@@ -102,30 +101,35 @@ const layerPassthrough = <ROut, E, RIn>(
 ): Layer.Layer<ROut | RIn, E, RIn> =>
   Layer.merge(Layer.effectContext(Effect.context<RIn>()), layer);
 
-// ── Payload classification ─────────────────────────────────────────────────
-// Schema.Class has `fields`; scalars like Schema.String don't.
-const isOpaquePayload = (payload: unknown): boolean =>
-  Schema.isSchema(payload) && !("fields" in (payload as object));
+// Payload classification (`isOpaquePayload`) and the id-fn resolver
+// (`resolveId`) live in `client.ts` alongside the transport seam so the runtime
+// dependency stays one-directional (`actor.ts` → `client.ts`). They are
+// imported at the top of this file.
 
-// ── id-fn resolver ─────────────────────────────────────────────────────────
-// Internal helper: invoke `def.id(payload)` and normalize the result to a
-// `{entityId, primaryKey}` pair. String returns map entityId === primaryKey;
-// object returns may diverge, with primaryKey defaulting to entityId.
-const resolveId = (
-  def: OperationDef | undefined,
-  payload: unknown,
-  fallbackTag: string,
-): { readonly entityId: string; readonly primaryKey: string } => {
-  const idFn = def?.["id"] as ((p: unknown) => EntityIdReturn) | undefined;
-  if (!idFn) {
-    return { entityId: fallbackTag, primaryKey: fallbackTag };
-  }
-  const result = idFn(payload as never);
-  if (typeof result === "string") {
-    return { entityId: result, primaryKey: result };
-  }
-  return { entityId: result.entityId, primaryKey: result.primaryKey ?? result.entityId };
+// Hidden carrier for the ORIGINAL id-input on an OperationValue built by
+// `make`/`buildOpValue`. `buildOpValue` spreads `Schema.Class` payloads into a
+// plain struct (`{ _tag, ...fields }`), which drops the prototype — so any
+// `def.id` that reads a prototype method (e.g. `p.routingKey()`) would throw or
+// diverge if re-derived from the spread op. We stash the live instance under a
+// non-enumerable symbol so the value-dispatch ref (`buildActorRef.send` /
+// `.execute`) can recover it for primary-key derivation, keeping `ref.send(op)`
+// in lockstep with `OperationHandle.executionId`/`peek` (which read the live
+// payload). Non-enumerable + symbol-keyed ⇒ invisible to struct spreads, JSON,
+// and the wire envelope, so nothing downstream of the id derivation sees it.
+const ORIGINAL_ID_PAYLOAD = Symbol.for("effect-encore/OperationValue/originalIdPayload");
+
+const attachOriginalIdPayload = <T extends object>(op: T, payload: unknown): T => {
+  Object.defineProperty(op, ORIGINAL_ID_PAYLOAD, {
+    value: payload,
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+  return op;
 };
+
+const readOriginalIdPayload = (op: { readonly [key: string]: unknown }): unknown =>
+  (op as { readonly [ORIGINAL_ID_PAYLOAD]?: unknown })[ORIGINAL_ID_PAYLOAD];
 
 // ── Operation DSL ──────────────────────────────────────────────────────────
 
@@ -137,36 +141,26 @@ const resolveId = (
  *   `${dedup_key}:${event_action}` for dedup so distinct event actions on
  *   the same key get distinct execIds). primaryKey defaults to entityId
  *   when omitted.
+ *
+ * Defined in `client.ts` (the transport seam owns the OperationDef shape);
+ * re-exported here so the public barrel surface is unchanged.
  */
-export type EntityIdReturn = string | { readonly entityId: string; readonly primaryKey?: string };
+export type { EntityIdReturn, OperationDef, OperationDefs };
 
 /**
  * Requirement bundle for hosts that send messages to actors.
  *
- * Producer-side ops (`send`, `ask`, `peek`, `cancel`, etc.) compose into
- * the same three-Tag union: `MessageStorage` to persist envelopes,
- * `ActorAddressResolver` to compute the destination shard, and `Sharding`
- * to drive the cluster client. Use `Actor.SenderContext` in `R` instead
- * of re-listing the union at every producer-op signature.
+ * Producer-side `.send` composes into a single transport Tag — the deep
+ * `Client` seam (decision #1, `CONTEXT.md:21-25`) — which owns the
+ * wire-envelope builder and the mailbox/resolver/snowflake strategy internally.
+ * Use `Actor.SenderContext` in `R` instead of re-listing the former
+ * `MessageStorage | ActorAddressResolver | Sharding` triad at every producer-op
+ * signature.
  *
- * Constructors live in `ActorSenderLayer.layer` / `layerMemory` (which
- * also supply `Snowflake.Generator` for request-id minting).
+ * Wire ONE `Client.layer.*` adapter (`fromConfig` / `fromSharding` / `memory` /
+ * `test`) at the host boundary to satisfy it.
  */
-export type SenderContext =
-  | MessageStorage.MessageStorage
-  | ActorAddressResolver
-  | Sharding.Sharding;
-
-export interface OperationDef {
-  readonly payload?: Schema.Top | Schema.Struct.Fields;
-  readonly success?: Schema.Top;
-  readonly error?: Schema.Top;
-  readonly persisted?: boolean;
-  readonly id: (payload: never) => EntityIdReturn;
-  readonly deliverAt?: (payload: never) => DateTime.DateTime;
-}
-
-export type OperationDefs = Record<string, OperationDef>;
+export type SenderContext = Client;
 
 // ── Reserved key guard ─────────────────────────────────────────────────────
 
@@ -559,7 +553,7 @@ export interface OperationHandle<
   ) => Effect.Effect<
     ExecId<Schema.Schema.Type<SuccessOf<C>>, Schema.Schema.Type<ErrorOf<C>>>,
     MailboxError | PersistenceError | MailboxFull | AlreadyProcessingMessage,
-    ActorMailbox | ActorAddressResolver | Snowflake.Generator
+    Client
   >;
   /**
    * Fire a durable `send` and then poll the persisted reply until it becomes
@@ -567,9 +561,9 @@ export interface OperationHandle<
    * sender-only host can block on an entity's outcome.
    *
    * Semantics:
-   * 1. Works **without local Sharding** — usable from `ActorSenderLayer` /
-   *    `senderMongo`-style hosts (ActorMailbox + ActorAddressResolver +
-   *    Snowflake.Generator + MessageStorage), unlike `.execute` which requires
+   * 1. Works **without local Sharding** — usable from a `Client.layer.memory` /
+   *    `Client.layer.fromConfig` sender host (the `Client` transport seam +
+   *    `MessageStorage` for the `peek` loop), unlike `.execute` which requires
    *    `ActorClientService`.
    * 2. Dedup: if a prior `send` with the same `primaryKey` already has a
    *    terminal persisted reply, the mailbox dedups and `sendAndAwait` returns
@@ -599,7 +593,7 @@ export interface OperationHandle<
     | AlreadyProcessingMessage
     | MalformedMessage
     | SendAndAwaitTimeout,
-    ActorMailbox | ActorAddressResolver | Snowflake.Generator | MessageStorage.MessageStorage
+    Client | MessageStorage.MessageStorage | ActorAddressResolver
   >;
   readonly executionId: (
     payload: PayloadInput<C>,
@@ -676,27 +670,9 @@ export type EntityActor<
      * which is not yet a public API in effect-cluster. In practice, in-flight
      * handlers run to completion; only queued/pending work is cleared.
      */
-    readonly interrupt: (
-      entityId: string,
-    ) => Effect.Effect<
-      void,
-      PersistenceError,
-      MessageStorage.MessageStorage | ActorAddressResolver
-    >;
-    readonly flush: (
-      actorId: string,
-    ) => Effect.Effect<
-      void,
-      PersistenceError,
-      MessageStorage.MessageStorage | ActorAddressResolver
-    >;
-    readonly redeliver: (
-      actorId: string,
-    ) => Effect.Effect<
-      void,
-      PersistenceError,
-      MessageStorage.MessageStorage | ActorAddressResolver
-    >;
+    readonly interrupt: (entityId: string) => Effect.Effect<void, PersistenceError, Client>;
+    readonly flush: (actorId: string) => Effect.Effect<void, PersistenceError, Client>;
+    readonly redeliver: (actorId: string) => Effect.Effect<void, PersistenceError, Client>;
     readonly of: <R>(handlers: ActorHandlers<Defs, R>) => ActorHandlers<Defs, R>;
     readonly getState: <MaterializeError = never, MaterializeRequirements = never>(
       entityId: string,
@@ -813,150 +789,13 @@ const compileRpc = (actorName: string, tag: string, def: OperationDef): Rpc.Any 
 };
 
 // ── peek — internal implementation ───────────────────────────────────────
-
-const parseExecId = (execId: string) => {
-  const firstSep = execId.indexOf("\x00");
-  const secondSep = firstSep >= 0 ? execId.indexOf("\x00", firstSep + 1) : -1;
-  return {
-    entityId: firstSep >= 0 ? execId.slice(0, firstSep) : execId,
-    tag:
-      secondSep >= 0
-        ? execId.slice(firstSep + 1, secondSep)
-        : firstSep >= 0
-          ? execId.slice(firstSep + 1)
-          : execId,
-    primaryKey: secondSep >= 0 ? execId.slice(secondSep + 1) : execId,
-  };
-};
-
-// ── OutgoingRequest builder for .send dispatch ───────────────────────────
-// Produces the same OutgoingRequest shape as upstream `Sharding.makeClient`
-// but bypasses Sharding entirely so the host doesn't need a registered
-// entity manager. The mailbox's `send` decides what to do with the request
-// (saveRequest vs. sendOutgoing).
 //
-// Captures fiber.currentContext into the OutgoingRequest to mirror upstream's
-// `makeClient`. MessageStorage duplicate decoding reads `message.context` —
-// empty context is wrong for any schema that requires services at decode time.
-const buildOutgoingRequestForSend = (
-  // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs erased
-  entity: ClusterEntity.Entity<string, any>,
-  tag: string,
-  def: OperationDef | undefined,
-  address: EntityAddress.EntityAddress,
-  opValue: { readonly _tag: string; readonly [key: string]: unknown },
-  snowflakeGen: Snowflake.Generator["Service"],
-): Effect.Effect<Message.OutgoingRequest<Rpc.Any>> =>
-  Effect.gen(function* () {
-    const rpc = entity.protocol.requests.get(tag);
-    if (!rpc) {
-      throw new Error(`effect-encore: rpc "${tag}" not found on entity "${entity.type}"`);
-    }
-    // eslint-disable-next-line typescript-eslint/no-explicit-any -- payloadSchema type-erased
-    const payloadSchema = rpc.payloadSchema as Schema.Top;
-
-    let payload: unknown;
-    if (!def?.payload) {
-      // Zero-payload op. compileRpc still creates an EmptyPayloadClass.
-      // eslint-disable-next-line typescript-eslint/no-explicit-any -- class constructor
-      payload = new (payloadSchema as any)({});
-    } else if (isOpaquePayload(def.payload)) {
-      payload = opValue["_payload"];
-    } else {
-      const { _tag: _t, ...fields } = opValue;
-      void _t;
-      // eslint-disable-next-line typescript-eslint/no-explicit-any -- class constructor
-      payload = new (payloadSchema as any)(fields);
-    }
-
-    const fiberContext = yield* Effect.context<never>();
-
-    const envelope = Envelope.makeRequest({
-      requestId: snowflakeGen.nextUnsafe(),
-      address,
-      tag: tag as never,
-      payload: payload as never,
-      headers: Headers.empty,
-    });
-
-    // Mirror upstream `Sharding.makeClient` annotation derivation
-    // (`Sharding.js:702`): `rpc.annotations` is the static annotation context,
-    // but the per-request `OutgoingRequest.annotations` is computed by reading
-    // `ClusterSchema.Dynamic` (a transformer fn) from the static annotations
-    // and applying it to the envelope. The Persisted gate at sendOutgoing reads
-    // `message.annotations` for OutgoingRequest specifically — `Context.empty()`
-    // here would silently route persisted requests as non-persisted.
-    // eslint-disable-next-line typescript-eslint/no-explicit-any -- annotations type-erased
-    const rpcAnnotations = rpc.annotations as Context.Context<never>;
-    const dynamicFn = Context.get(rpcAnnotations, ClusterSchema.Dynamic);
-    // eslint-disable-next-line typescript-eslint/no-explicit-any -- envelope shape erased through Dynamic
-    const annotations = dynamicFn(rpcAnnotations, envelope as any);
-
-    return new Message.OutgoingRequest({
-      rpc,
-      // eslint-disable-next-line typescript-eslint/no-explicit-any -- mirror of Sharding.makeClient
-      context: fiberContext as any,
-      envelope,
-      lastReceivedReply: Option.none(),
-      respond: () => Effect.void,
-      annotations,
-    });
-  });
-
-const resolveEntityAddress = (
-  resolver: ActorAddressResolverShape,
-  // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs erased
-  entity: ClusterEntity.Entity<string, any>,
-  actorId: string,
-): EntityAddress.EntityAddress => resolver.resolveEntity(entity, actorId);
-
-// Test ActorMailbox impl that routes a prebuilt OutgoingRequest back through
-// the entity's per-entity test rpcClient (with `{ discard: true }`). Used by
-// `toTestLayer`. NOT exported — production hosts use the real factories.
-const makeTestMailboxImpl = (
-  makeClient: (entityId: string) => Effect.Effect<RpcClient.RpcClient<Rpc.Any, never>>,
-): ActorMailboxShape => ({
-  send: (request) =>
-    Effect.gen(function* () {
-      const envelope = request.envelope;
-      const entityId = envelope.address.entityId as string;
-      const tag = envelope.tag;
-      const payload = envelope.payload;
-      const rpcClient = yield* makeClient(entityId);
-      // eslint-disable-next-line typescript-eslint/no-explicit-any -- rpcClient type-erased
-      const fn = (rpcClient as unknown as Record<string, Function>)[tag];
-      if (!fn) {
-        return yield* new MailboxError({
-          cause: new Error(
-            `effect-encore test mailbox: unknown rpc "${String(tag)}" on entity "${String(envelope.address.entityType)}"`,
-          ),
-        });
-      }
-      yield* fn(payload, { discard: true }) as Effect.Effect<void>;
-    }),
-});
-
-const flushImpl = (
-  // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased
-  entity: ClusterEntity.Entity<string, any>,
-  actorId: string,
-): Effect.Effect<void, PersistenceError, MessageStorage.MessageStorage | ActorAddressResolver> =>
-  Effect.gen(function* () {
-    const storage = yield* MessageStorage.MessageStorage;
-    const resolver = yield* ActorAddressResolver;
-    yield* storage.clearAddress(resolveEntityAddress(resolver, entity, actorId));
-  });
-
-const redeliverImpl = (
-  // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased
-  entity: ClusterEntity.Entity<string, any>,
-  actorId: string,
-): Effect.Effect<void, PersistenceError, MessageStorage.MessageStorage | ActorAddressResolver> =>
-  Effect.gen(function* () {
-    const storage = yield* MessageStorage.MessageStorage;
-    const resolver = yield* ActorAddressResolver;
-    yield* storage.resetAddress(resolveEntityAddress(resolver, entity, actorId));
-  });
+// The OutgoingRequest builder (`buildOutgoingRequestForSend`), the test-mailbox
+// router (`makeTestMailboxImpl`), the address helper (`resolveEntityAddress`),
+// and the `flush`/`redeliver` storage ops all moved INSIDE the `Client` seam
+// (`client.ts`, decision #1). `actor.ts` imports the ones it still needs
+// directly (`resolveEntityAddress` for the state/rerun ops) and routes
+// dispatch + control through the `Client` Tag.
 
 // ── rerun — surgical per-execId clear via deleteEnvelope ─────────────────
 
@@ -981,6 +820,19 @@ const rerunImpl = (
     yield* storage.deleteEnvelope(maybeRequestId.value);
   });
 
+// The entity await-engine is lifted into `receipt.ts` as the `ReplySource`
+// seam (the Exit-classification mappers + the storage-backed peek loop).
+// `peekImpl` resolves the seam from context *optionally* and falls back to the
+// `defaultReplySource` value when no `ReplySource` is provided — so the seam
+// stays swappable (provide a `ReplySource` layer at the runtime root to swap
+// the reply source wholesale) WITHOUT leaking `ReplySource` into the R-channel.
+// This keeps `peekImpl`/`watchImpl` requiring only `MessageStorage |
+// ActorAddressResolver` (matching the public `peek`/`watch`/`waitFor`/
+// `sendAndAwait` interface), so a sender-only `Client.layer.memory` /
+// `Client.layer.fromConfig` host — which bundles no `ReplySource` — still
+// self-satisfies at runtime. The
+// `defaultReplySource` adapter is the exact storage-backed loop that lived
+// inline here, so the live path is behavior-preserving.
 const peekImpl = (
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased
   entity: ClusterEntity.Entity<string, any>,
@@ -990,82 +842,12 @@ const peekImpl = (
   PeekResult,
   PersistenceError | MalformedMessage,
   MessageStorage.MessageStorage | ActorAddressResolver
-> => {
-  const parsed = parseExecId(execId);
-
-  return Effect.gen(function* () {
-    const storage = yield* MessageStorage.MessageStorage;
-    const resolver = yield* ActorAddressResolver;
-    const address = resolveEntityAddress(resolver, entity, parsed.entityId);
-
-    const maybeRequestId = yield* storage.requestIdForPrimaryKey({
-      address,
-      tag: parsed.tag,
-      id: parsed.primaryKey,
-    });
-
-    if (Option.isNone(maybeRequestId)) {
-      return Pending as PeekResult;
-    }
-
-    const replies = yield* storage.repliesForUnfiltered([maybeRequestId.value]);
-    const last = replies[replies.length - 1];
-
-    if (!last || last._tag !== "WithExit") {
-      return Pending as PeekResult;
-    }
-
-    const def = definitions?.[parsed.tag];
-    return yield* mapExitToPeekResult(last.exit, def);
+> =>
+  Effect.gen(function* () {
+    const provided = yield* Effect.serviceOption(ReplySource);
+    const replySource = Option.getOrElse(provided, () => defaultReplySource);
+    return yield* replySource.peek(entity, execId, definitions);
   });
-};
-
-const decodeValue = (schema: Schema.Top | undefined, value: unknown): Effect.Effect<unknown> => {
-  if (!schema) return Effect.succeed(value);
-  const decode = Schema.decodeUnknownEffect(schema)(value) as Effect.Effect<unknown, unknown>;
-  return Effect.map(Effect.option(decode), (opt) => (Option.isSome(opt) ? opt.value : value));
-};
-
-const mapExitToPeekResult = (
-  exit: RpcMessage.ExitEncoded<unknown, unknown>,
-  def?: OperationDef,
-): Effect.Effect<PeekResult> => {
-  if (exit._tag === "Success") {
-    return Effect.map(decodeValue(def?.success, exit.value), Success);
-  }
-
-  const cause = exit.cause[0];
-  if (!cause) return Effect.succeed(Pending);
-
-  switch (cause._tag) {
-    case "Fail":
-      return Effect.map(decodeValue(def?.error, cause.error), Failure);
-    case "Die":
-      return Effect.succeed(Defect(cause.defect));
-    case "Interrupt":
-      return Effect.succeed(Interrupted);
-    default:
-      return Effect.succeed(Pending);
-  }
-};
-
-// Workflow poll returns a real Exit.Exit, not encoded — walk Cause tree
-const mapExitToWorkflowPeekResult = (exit: Exit.Exit<unknown, unknown>): PeekResult => {
-  if (Exit.isSuccess(exit)) {
-    return Success(exit.value);
-  }
-  const cause = exit.cause;
-  const errorOpt = Cause.findErrorOption(cause);
-  if (Option.isSome(errorOpt)) return Failure(errorOpt.value);
-
-  const defectResult = Cause.findDefect(cause);
-  if (defectResult._tag === "Success") return Defect(defectResult.success);
-
-  const interruptResult = Cause.findInterrupt(cause);
-  if (interruptResult._tag === "Success") return Interrupted;
-
-  return Pending;
-};
 
 // ── watch — internal implementation ──────────────────────────────────────
 
@@ -1152,9 +934,13 @@ const fromEntity = <
   const buildOpValue = (tag: string, payload: unknown) => {
     const def = internalDefinitions[tag] as OperationDef | undefined;
     const opaque = def?.payload !== undefined && isOpaquePayload(def.payload);
-    return opaque
+    const op = opaque
       ? { _tag: tag, _payload: payload }
       : { _tag: tag, ...(payload != null && typeof payload === "object" ? payload : {}) };
+    // Preserve the live id-input so the value-dispatch ref derives the ExecId
+    // from the same value `executionId`/`peek` use — class payloads keep their
+    // prototype here even though the struct spread above dropped it.
+    return attachOriginalIdPayload(op, payload);
   };
 
   class ActorClientContext extends Context.Service<
@@ -1197,13 +983,19 @@ const fromEntity = <
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- Entity<Name> → Entity<string> widening
   const entityAny = entity as unknown as ClusterEntity.Entity<string, any>;
 
-  const flushFn = (actorId: string) => flushImpl(entityAny, actorId);
-  const redeliverFn = (actorId: string) => redeliverImpl(entityAny, actorId);
+  // flush/redeliver/interrupt route through the deep `Client` seam (decision
+  // #1: the control ops moved inside the Client). The host wires ONE
+  // `Client.layer.*` adapter; the requirement collapses to the single `Client`
+  // Tag.
+  const flushFn = (actorId: string) => Client.use((client) => client.flush(entityAny, actorId));
+  const redeliverFn = (actorId: string) =>
+    Client.use((client) => client.redeliver(entityAny, actorId));
 
-  // interrupt — rewired from Effect.die to clearAddress. Distinct intent from
+  // interrupt — rewired from Effect.die to flush. Distinct intent from
   // flush ("stop accepting more work" vs "clean slate"). Programmatic
   // in-flight cancellation requires Sharding.passivate (not yet public).
-  const interruptFn = (entityId: string) => flushImpl(entityAny, entityId);
+  const interruptFn = (entityId: string) =>
+    Client.use((client) => client.flush(entityAny, entityId));
 
   const ofFn = <T>(handlers: T): T => handlers;
   const activateFn = (
@@ -1382,31 +1174,31 @@ const makeOperationHandle = <
 
   const execId = (payload: unknown) => {
     const { entityId, primaryKey } = idOf(payload);
-    return makeExecId(`${entityId}\x00${tag}\x00${primaryKey}`);
+    return ExecIdCodec.encode({ entityId, tag, primaryKey });
   };
 
-  // .send dispatches via ActorMailbox + ActorAddressResolver. The two
-  // mailbox layers (`fromConfig` storage-only, `fromSharding` delegating)
-  // satisfy this same call site — producer-only hosts wire `fromConfig`
-  // and consumer hosts wire `fromSharding`. No `notifyLocal` deadlock.
+  // .send dispatches through the deep `Client` seam (decision #1). The Client
+  // owns the wire-envelope builder + the mailbox/resolver/snowflake strategy
+  // internally, so the producer-side requirement collapses from the former
+  // `ActorMailbox | ActorAddressResolver | Snowflake.Generator` triad to a
+  // single `Client` Tag. The host wires ONE `Client.layer.*` adapter
+  // (`fromConfig` producer / `fromSharding` consumer / `memory` / `test`).
   // Extracted as a local so `sendAndAwait` can reuse it.
   const sendFn = (payload: unknown) =>
     Effect.gen(function* () {
-      const mailbox = yield* ActorMailbox;
-      const resolver = yield* ActorAddressResolver;
-      const snowflakeGen = yield* Snowflake.Generator;
-      const { entityId } = idOf(payload);
-      const address = resolver.resolveEntity(entityAny, entityId);
-      const request = yield* buildOutgoingRequestForSend(
+      const client = yield* Client;
+      // Pass the ORIGINAL `payload` as `idPayload` so the minted ExecId is
+      // derived from the same value `executionId`/`peek` use (via `def.id`).
+      // `buildOpValue` reconstructs class payloads as a struct spread, which
+      // loses prototype/method/`instanceof` semantics — re-deriving the id from
+      // it inside `Client.send` would drift for `Schema.Class` payloads.
+      return yield* client.send(
         entityAny,
         tag,
         def,
-        address,
         buildOpValue(tag, payload) as { readonly _tag: string; readonly [key: string]: unknown },
-        snowflakeGen,
+        payload,
       );
-      yield* mailbox.send(request);
-      return execId(payload);
     });
 
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- handle types erased
@@ -1508,9 +1300,11 @@ function toLayer<
   | ActorClientService<Name, Defs>
   | ActorControlClientService<Name>
   | ActorStateClientService<Name>
+  | Client
   | ActorMailbox
   | ActorAddressResolver
   | ActorStateRegistry
+  | ReplySource
   | Snowflake.Generator,
   never,
   MessageStorage.MessageStorage | Sharding.Sharding | Rpc.MiddlewareClient<Rpcs>
@@ -1536,9 +1330,11 @@ function toLayer<
   | ActorClientService<Name, Defs>
   | ActorControlClientService<Name>
   | ActorStateClientService<Name>
+  | Client
   | ActorMailbox
   | ActorAddressResolver
   | ActorStateRegistry
+  | ReplySource
   | Snowflake.Generator,
   never,
   | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress | ActorStateRegistry>
@@ -1608,17 +1404,32 @@ function toLayer(
 
   // Consumer hosts already have full `Sharding.Sharding` from
   // `ClusterRunnerSocket.layer` / similar — wire ActorMailbox + ActorAddressResolver
-  // from that. Producer-only hosts must wire `fromConfig` variants explicitly
+  // from that. Producer-only hosts must wire `Client.layer.fromConfig` explicitly
   // at the runtime root.
   //
-  // `Snowflake.layerGenerator` is needed by `OperationHandle.send` to build
-  // the `OutgoingRequest`. `Sharding.layer` consumes it internally but
-  // doesn't expose it, so we provide a fresh generator at this surface.
-  const consumerSupportLayers = Layer.mergeAll(
+  // `Snowflake.layerGenerator` is needed by `Client.send` to build the
+  // `OutgoingRequest`. `Sharding.layer` consumes it internally but doesn't
+  // expose it, so we provide a fresh generator at this surface.
+  //
+  // The deep `Client` Tag is composed over those same transport siblings
+  // (`clientServiceLayer` requires `ActorMailbox | ActorAddressResolver |
+  // Snowflake | MessageStorage`; the first three come from this merge, the last
+  // from the consumer's Sharding stack), AND the raw transport Tags stay
+  // exposed because `peek`/`getState`/`rerun` still require
+  // `MessageStorage | ActorAddressResolver` directly.
+  const transportSupportLayers = Layer.mergeAll(
     ActorMailboxLayer.fromSharding,
     ActorAddressResolverLayer.fromSharding,
     ActorStateRegistry.Live,
+    ReplySourceLayer.fromMessageStorage,
     Snowflake.layerGenerator,
+  );
+  // `Layer.fresh` for the same reason as in `toTestLayer`: the shared
+  // module-level `clientServiceLayer` must be rebuilt per-actor over THIS
+  // actor's transport, not memoized to the first build.
+  const consumerSupportLayers = Layer.merge(
+    transportSupportLayers,
+    Layer.provide(Layer.fresh(clientServiceLayer), transportSupportLayers),
   );
 
   const stateLayer = makeActorStateLayer(actor);
@@ -1674,9 +1485,11 @@ function toTestLayer<
   | ActorClientService<Name, Defs>
   | ActorControlClientService<Name>
   | ActorStateClientService<Name>
+  | Client
   | ActorMailbox
   | ActorAddressResolver
   | ActorStateRegistry
+  | ReplySource
   | Snowflake.Generator,
   never,
   | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress | ActorStateRegistry>
@@ -1757,10 +1570,26 @@ function toTestLayer(
     ActorAddressResolverLayer.fromConfig,
     ActorStateRegistry.Live,
     MessageStorage.layerMemory,
+    ReplySourceLayer.fromMessageStorage,
     Snowflake.layerGenerator,
   );
 
-  const baseLayer = Layer.merge(factoryAndMailboxLayer, supportLayers);
+  // The injected test `ActorMailbox` (`factoryAndMailboxLayer`) plus the
+  // pure-data resolver/storage/snowflake in `supportLayers` satisfy the deep
+  // `Client`'s requirements — so `.send` (now `Client`-channeled) resolves
+  // through the test mailbox, routing the prebuilt request back through the
+  // per-entity test rpcClient with `{ discard: true }`.
+  const transportSupportLayers = Layer.merge(factoryAndMailboxLayer, supportLayers);
+  // `Layer.fresh`: `clientServiceLayer` is a shared module-level Layer, so
+  // without `fresh` Effect's identity-based memoization would build the deep
+  // `Client` ONCE and reuse that build (capturing the FIRST actor's test
+  // mailbox) across every `toTestLayer` in the same runtime — routing a
+  // second actor's `.send` to the wrong per-entity rpcClient. `fresh` forces a
+  // per-actor build over this actor's own transport.
+  const baseLayer = Layer.merge(
+    transportSupportLayers,
+    Layer.provide(Layer.fresh(clientServiceLayer), transportSupportLayers),
+  );
   const stateLayer = makeActorStateLayer(actor);
   const controlLayer = makeActorControlLayer(actor);
 
@@ -1773,24 +1602,21 @@ function toTestLayer(
 
 const makeActorControlLayer = <Name extends string, Defs extends OperationDefs>(
   actor: EntityActor<Name, Defs>,
-): Layer.Layer<
-  ActorControlClientService<Name>,
-  never,
-  ActorAddressResolver | MessageStorage.MessageStorage
-> =>
+): Layer.Layer<ActorControlClientService<Name>, never, Client> =>
   Layer.effect(
     actor.Control,
     Effect.gen(function* () {
-      const resolver = yield* ActorAddressResolver;
-      const storage = yield* MessageStorage.MessageStorage;
+      // The control ops route through the deep `Client` seam (decision #1), so
+      // the layer captures the single `Client` Tag at build time and closes it
+      // over each op — collapsing the requirement to `never` per method, in
+      // lockstep with the rewired `actor.interrupt/flush/redeliver` (which now
+      // require exactly `Client`).
+      const client = yield* Client;
 
       const provideSupport = <A, E, R>(
         effect: Effect.Effect<A, E, R>,
-      ): Effect.Effect<A, E, Exclude<R, ActorAddressResolver | MessageStorage.MessageStorage>> =>
-        effect.pipe(
-          Effect.provideService(ActorAddressResolver, resolver),
-          Effect.provideService(MessageStorage.MessageStorage, storage),
-        ) as Effect.Effect<A, E, Exclude<R, ActorAddressResolver | MessageStorage.MessageStorage>>;
+      ): Effect.Effect<A, E, Exclude<R, Client>> =>
+        effect.pipe(Effect.provideService(Client, client));
 
       return {
         interrupt: (entityId) => provideSupport(actor.interrupt(entityId)),
@@ -1951,10 +1777,21 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
       const arg = rpcArg(op, def);
       const discardCall =
         arg !== undefined ? fn(arg, { discard: true }) : fn(undefined, { discard: true });
-      const pkInput = def?.payload && isOpaquePayload(def.payload) ? op["_payload"] : op;
+      // Prefer the ORIGINAL id-input carried by `make`/`buildOpValue` (a live
+      // `Schema.Class` instance keeps its prototype here). Re-deriving the id
+      // from the struct-spread `op` would drop prototype methods and throw or
+      // mint a divergent ExecId — diverging from `executionId`/`peek`. Fall
+      // back to the spread-derived input for hand-built ops with no carrier.
+      const carried = readOriginalIdPayload(op);
+      const pkInput =
+        carried !== undefined
+          ? carried
+          : def?.payload && isOpaquePayload(def.payload)
+            ? op["_payload"]
+            : op;
       const { primaryKey } = resolveId(def, pkInput, tag);
-      const execId = `${_entityId}\x00${tag}\x00${primaryKey}`;
-      return bind(Effect.map(discardCall ?? Effect.void, () => makeExecId(execId)));
+      const execId = ExecIdCodec.encode({ entityId: _entityId, tag, primaryKey });
+      return bind(Effect.map(discardCall ?? Effect.void, () => execId));
     },
   } as ActorRef<Name, Defs>;
 };
@@ -2571,10 +2408,13 @@ const isWorkflow = (actor: AnyActor): actor is AnyWorkflowActor => actor._tag ==
 
 export const Actor = {
   CurrentAddress,
-  registerState: registerState as <State, Error = never, Requirements = never>(
-    handle: ActorStateHandle<State, Error, Requirements>,
+  registerState: registerState as <A, Error = never, Requirements = never>(
+    state: State.State<A, Error, Requirements>,
   ) => Effect.Effect<void, never, ActorStateRegistry | CurrentAddress | Scope.Scope>,
   entityIdCodec,
+  State,
+  Client,
+  ClientLayer,
   fromEntity,
   fromWorkflow,
   fromRpcs,

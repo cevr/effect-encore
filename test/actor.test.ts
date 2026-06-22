@@ -377,6 +377,93 @@ describe("deliverAt", () => {
   });
 });
 
+describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () => {
+  // Regression for the --deep finding: `OperationHandle.send` must derive its
+  // ExecId from the ORIGINAL payload, not from the reconstructed `opValue`.
+  // `buildOpValue` spreads a class payload's fields into a plain object, which
+  // loses the class prototype (methods/`instanceof`). If `def.id` depends on a
+  // prototype method, re-deriving the id from `opValue` inside `Client.send`
+  // would throw or diverge from `executionId`/`peek`, which read the instance.
+  //
+  // `RoutingKey.routingKey()` lives only on the prototype, so a plain spread of
+  // the instance fields does NOT carry it — exercising the divergence directly.
+  class RoutingKey extends Schema.Class<RoutingKey>("test/RoutingKey")({
+    region: Schema.String,
+    seq: Schema.Number,
+  }) {
+    // Derives the id from instance fields via a prototype method. A struct-spread
+    // reconstruction of this instance drops `routingKey`, so calling it on the
+    // op value would throw "routingKey is not a function".
+    routingKey(): string {
+      return `${this.region}-${this.seq}`;
+    }
+    [PrimaryKey.symbol](): string {
+      return this.routingKey();
+    }
+  }
+
+  const Routed = Actor.fromEntity("Routed", {
+    Process: {
+      payload: RoutingKey,
+      success: Schema.String,
+      persisted: true,
+      // id depends on the class instance (prototype method), NOT a bare field.
+      id: (p: RoutingKey) => p.routingKey(),
+    },
+  });
+
+  const RoutedTest = Layer.provide(
+    Actor.toTestLayer(Routed, {
+      Process: ({ operation }) => Effect.succeed(`routed: ${operation.routingKey()}`),
+    }),
+    TestShardingConfig,
+  );
+
+  const routedTest = it.scopedLive.layer(RoutedTest);
+
+  routedTest("send(payload) ExecId === executionId(payload) for a class-instance id", () =>
+    Effect.gen(function* () {
+      const payload = new RoutingKey({ region: "us", seq: 7 });
+      // Without the fix, `Client.send` re-derives the id from the struct-spread
+      // `opValue`, whose `routingKey` method is gone — so this either throws or
+      // mints a divergent ExecId. With the fix, send derives from `payload`.
+      const fromSend = yield* Routed.Process.send(payload);
+      // entityId === primaryKey === "us-7" (from routingKey()).
+      expect(String(fromSend)).toBe("us-7\x00Process\x00us-7");
+      // `executionId` and `peek` share the same `execId(payload)` derivation, so
+      // matching `executionId` is exactly the parity `peek` relies on.
+      const fromCompute = yield* Routed.Process.executionId(payload);
+      expect(String(fromSend)).toBe(String(fromCompute));
+    }),
+  );
+
+  // Round-2 --deep regression: the LOWER-LEVEL value-dispatch ref path. D1 only
+  // repaired `OperationHandle.send`; the public, documented `ref.send(op)` still
+  // re-derived the primary key from the struct-spread `make(payload)` op, whose
+  // dropped prototype made `def.id` (which calls `p.routingKey()`) throw
+  // "routingKey is not a function". `ref.send(make(payload))` MUST agree with
+  // `executionId(payload)`/`peek` exactly as `handle.send(payload)` does.
+  routedTest(
+    "ref.send(make(payload)) ExecId === executionId(payload) for a class-instance id",
+    () =>
+      Effect.gen(function* () {
+        const payload = new RoutingKey({ region: "us", seq: 7 });
+        const makeRef = yield* Routed.Context;
+        // entityId === routingKey() === "us-7", so the ref binds to that entity.
+        const ref = yield* makeRef("us-7");
+        // `make(payload)` spreads the class into a plain struct (prototype gone).
+        // Without the src fix the ref re-derives the id from that struct and the
+        // missing `routingKey` method THROWS; with the fix it derives from the
+        // carried live instance.
+        const op = Routed.Process.make(payload);
+        const fromRefSend = yield* ref.send(op);
+        expect(String(fromRefSend)).toBe("us-7\x00Process\x00us-7");
+        const fromCompute = yield* Routed.Process.executionId(payload);
+        expect(String(fromRefSend)).toBe(String(fromCompute));
+      }),
+  );
+});
+
 describe("Actor.withProtocol", () => {
   test("transforms the entity protocol", () => {
     const original = Counter._meta.entity;

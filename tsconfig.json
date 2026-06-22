@@ -100,12 +100,12 @@
           {
             "target": "service",
             "pattern": "default",
-            "skipLeadingPath": ["src/", "v3/src/"]
+            "skipLeadingPath": ["src/"]
           },
           {
             "target": "error",
             "pattern": "default",
-            "skipLeadingPath": ["src/", "v3/src/"]
+            "skipLeadingPath": ["src/"]
           }
         ],
         "overrides": [
@@ -113,10 +113,9 @@
             "include": [
               "src/actor.ts",
               "src/actor-state.ts",
-              "src/step.ts",
-              "v3/src/actor.ts",
-              "v3/src/actor-state.ts",
-              "v3/src/step.ts"
+              "src/receipt.ts",
+              "src/state.ts",
+              "src/step.ts"
             ],
             "options": {
               "diagnosticSeverity": {
@@ -127,7 +126,7 @@
             }
           },
           {
-            "include": ["test/**/*.ts", "v3/test/**/*.ts", "**/test/**/*.ts", "**/*.test.ts"],
+            "include": ["test/**/*.ts", "**/test/**/*.ts", "**/*.test.ts"],
             "options": {
               "diagnosticSeverity": {
                 "anyUnknownInErrorContext": "off",
