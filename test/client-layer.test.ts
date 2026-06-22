@@ -220,11 +220,19 @@ describe("Client.layer.fromSharding", () => {
 //
 // NOTE: `Actor.toTestLayer` does NOT compose `Client.layer.test`; it builds the
 // deep Client by composing `clientServiceLayer` directly over its own injected
-// test mailbox + shared support stack (so peek/flush/control read the SAME
-// storage the consumer writes replies into). This block exercises that inline
-// composition: the public `.send` (now `Client`-channeled) routes back through
-// the per-entity rpcClient with `{ discard: true }`. The exported
-// `Client.layer.test` adapter is driven directly in the block below.
+// test mailbox + shared support stack, so peek/flush/control read the SAME
+// bundled storage rather than a second isolated one. For an ENTITY actor that
+// shared storage buys consistent control-op + Pending-peek observation, NOT a
+// reply round-trip: the injected `Entity.makeTestClient` path routes the handler
+// reply through an in-memory `RpcServer.makeNoSerialization` (bypassing the
+// `entityManager`, the only writer of replies to `MessageStorage`) and the
+// `{ discard: true }` consumer drops it — so the reply reaches no storage,
+// shared or not. (The `fromWorkflow` test path is the one whose engine persists
+// replies, so its `peek` can reach `Success`; see `workflow.test.ts`.) This
+// block exercises the inline composition: the public `.send` (now
+// `Client`-channeled) routes back through the per-entity rpcClient with
+// `{ discard: true }`. The exported `Client.layer.test` adapter is driven
+// directly in the block below.
 
 const TestShardingConfig = ShardingConfig.layer({ entityTerminationTimeout: 0 });
 const ClientActorTest = Layer.provide(
@@ -255,16 +263,24 @@ describe("Actor.toTestLayer (inline test-mailbox composition)", () => {
 // (it inlines `clientServiceLayer` over a SHARED storage so peek can observe the
 // handler reply). So we drive the exported adapter DIRECTLY here.
 //
-// Storage note: because the adapter bundles its OWN in-memory storage, the
-// `{ discard: true }` reply produced by a per-entity test rpcClient would land
-// in a DIFFERENT storage than the adapter's `peek` reads (that storage-sharing
-// is exactly what `toTestLayer`'s inline composition buys, and why the adapter
-// can't reuse it). The load-bearing behavior the adapter OWNS is: `send` routes
-// the prebuilt `OutgoingRequest` through the injected mailbox, and
-// `peek`/`flush`/`redeliver` operate over the adapter's bundled storage. We
-// assert both — `send` routing is proven by capturing the dispatched envelope
-// in the injected mailbox; `flush`/`redeliver`/`peek` are exercised against the
-// adapter's storage.
+// Contract note (NARROWED — see client.ts `test` adapter doc): this adapter is
+// send-routing + control/peek-over-its-own-storage. It does NOT support a
+// `send → peek → Success/Failure` reply round-trip, and that is NOT a
+// storage-sharing oversight — it is structural. The injected per-entity test
+// client is `Entity.makeTestClient`, a raw `RpcServer.makeNoSerialization` that
+// bypasses the `entityManager` (the ONLY component that persists handler replies
+// to `MessageStorage`). The handler's reply is an in-memory RPC response that
+// the `{ discard: true }` consumer throws away — it reaches NO storage, shared
+// or not. So `send` followed by `peek` is `Pending` here BY CONSTRUCTION (we
+// assert exactly that below). The actual `send → peek → Success/Failure`
+// round-trip is covered by `Client.layer.fromSharding` (real cluster runtime,
+// above) and the `fromWorkflow` test path (`workflow.test.ts`). The load-bearing
+// behavior THIS adapter OWNS end-to-end: `send` routes the prebuilt
+// `OutgoingRequest` through the INJECTED mailbox, and `peek`/`flush`/`redeliver`
+// operate over the adapter's bundled storage. We assert all of it — `send`
+// routing is proven by capturing the dispatched envelope in the injected
+// mailbox; the immediate-`peek` Pending pins the narrowed reply contract; and
+// `flush`/`redeliver`/`peek` are exercised against the adapter's storage.
 
 // A recording `ActorMailbox` impl: captures each dispatched envelope (proving
 // `Client.send`, channeled through the adapter, reaches the INJECTED mailbox),
@@ -314,7 +330,7 @@ describe("Client.layer.test (exported adapter, driven directly)", () => {
   const layerTest = it.scopedLive.layer(directTestClientLayer);
 
   layerTest(
-    "send routes through the INJECTED mailbox; peek/flush/redeliver run on its storage",
+    "send routes through the INJECTED mailbox; send→peek is Pending (reply discarded); flush/redeliver run on its storage",
     () =>
       Effect.gen(function* () {
         const client = yield* Client;
@@ -335,6 +351,20 @@ describe("Client.layer.test (exported adapter, driven directly)", () => {
         // (NOT a bundled producer mailbox like `memory`/`fromConfig`).
         const dispatched = yield* Ref.get(dispatchedRef);
         expect(dispatched).toEqual([{ tag: "Process", entityId: "adapter" }]);
+
+        // Narrowed reply contract, asserted DIRECTLY: `send` followed by `peek`
+        // is `Pending` on this transport — the injected per-entity test client
+        // (`Entity.makeTestClient`) routes the reply through an in-memory
+        // `RpcServer.makeNoSerialization` that bypasses the `entityManager`, so
+        // the handler reply reaches NO storage and the `{ discard: true }`
+        // consumer drops it. A `Success`/`Failure` round-trip is structurally
+        // impossible here (covered by `fromSharding` / `fromWorkflow` instead).
+        const afterSend = yield* client.peek(
+          processEntity,
+          "adapter\x00Process\x00adapter",
+          processDefs,
+        );
+        expect(afterSend._tag).toBe("Pending");
 
         // peek/flush/redeliver operate over the adapter's own in-memory storage.
         yield* client.flush(processEntity, "adapter");

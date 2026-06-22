@@ -23,6 +23,14 @@ Interrupted | Defect | Suspended`. What `peek(execId)` returns and `waitFor` pol
   `Client.layer.{fromConfig, fromSharding, memory, test}`. Supersedes the hand-assembled
   mailbox+resolver+Snowflake triad. Address resolution (`fromConfig`/`fromSharding`, carrying the
   shard-parity invariant) survives as an **internal strategy** the Client holds, not a public Tag.
+  Adapter-contract caveat: `fromConfig`/`fromSharding`/`memory` support the full
+  `send + peek + flush + redeliver` surface (and `fromSharding` the `send → peek → Success/Failure`
+  reply round-trip over a real cluster runtime). `Client.layer.test` is **send-routing +
+  control/peek-over-its-own-storage ONLY** — its injected per-entity test client
+  (`Entity.makeTestClient`) routes replies through an in-memory `RpcServer.makeNoSerialization`
+  that bypasses the `entityManager` (the only writer of handler replies to `MessageStorage`), so a
+  `{ discard: true }` reply reaches no storage and `peek` stays `Pending`. Reply round-trips on the
+  test transport go through the `fromWorkflow` test path (WorkflowEngine-persisted) instead.
 - **State\<A\>** _(landed — seam #2)_ — the per-entity mutable state handle:
   `get / set / update / changes`, with **per-State mutation serialization** (concurrent `update`s
   linearized). Grown from the read-only `ActorStateHandle` (`get`+`watch`). In-process

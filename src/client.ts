@@ -28,6 +28,17 @@
  * - `Client.layer.test` — over an injected test `ActorMailbox` (built by
  *   `Actor.toTestLayer` from the entity's per-entity test rpcClient). Routes a
  *   prebuilt `OutgoingRequest` back through that client with `{ discard: true }`.
+ *   SEND-ROUTING + CONTROL adapter ONLY: the injected per-entity test client is
+ *   `Entity.makeTestClient` (a raw `RpcServer.makeNoSerialization` — it bypasses
+ *   the `entityManager`, the ONLY component that persists handler replies to
+ *   `MessageStorage`). So the handler's reply is an in-memory RPC response that
+ *   `{ discard: true }` throws away — it NEVER reaches storage. `peek` therefore
+ *   stays `Pending` over this adapter's bundled storage; a reply round-trip
+ *   (`send → peek → Success/Failure`) is structurally impossible here and is
+ *   covered instead by `fromSharding` (real cluster runtime) and the
+ *   `fromWorkflow` test path (WorkflowEngine-persisted). What this adapter OWNS
+ *   end-to-end: `send` routes the prebuilt request through the INJECTED mailbox,
+ *   and `peek / flush / redeliver` operate over its bundled storage.
  */
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import type { DateTime } from "effect";
@@ -442,6 +453,17 @@ const memory: Layer.Layer<Client> = clientLayer.pipe(
  * resolver is pure-data `fromConfig` and the generator/storage are supplied
  * locally, so the only outstanding requirement is the injected `ActorMailbox`
  * plus `ShardingConfig`.
+ *
+ * CONTRACT (narrowed): send-routing + control/peek-over-its-own-storage. This
+ * adapter does NOT support a `send → peek → Success/Failure` reply round-trip,
+ * because the injected per-entity test client (`Entity.makeTestClient`) routes
+ * replies through an in-memory `RpcServer.makeNoSerialization` that bypasses the
+ * `entityManager` — the ONLY component that persists handler replies to
+ * `MessageStorage`. The `{ discard: true }` consumer then throws the reply away,
+ * so it reaches no storage and `peek` cannot observe it. Bundling the adapter's
+ * storage vs. sharing it with the mailbox is therefore irrelevant: nothing ever
+ * writes a reply to storage on this transport. Reply round-trips are covered by
+ * `fromSharding` (real cluster runtime) and the `fromWorkflow` test path.
  */
 const test: Layer.Layer<Client, never, ActorMailbox | ShardingConfig.ShardingConfig> =
   clientLayer.pipe(

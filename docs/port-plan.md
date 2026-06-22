@@ -493,9 +493,20 @@ is the entity's RPC client, a different thing from the`Client` transport Tag —
   equivalent coverage at the `Client.layer` granularity — correctness over surface
   tidiness.)
 
-- **Gate:** `bun run gate`. NEW `test/client-layer.test.ts`: each adapter
-  (`fromConfig` / `fromSharding` / `memory` / `test`) drives `send + peek + flush +
-redeliver` end-to-end; a **Snowflake-resolves-under-fromSharding** assertion
+- **Gate:** `bun run gate`. NEW `test/client-layer.test.ts`: each adapter drives the
+  transport surface it actually OWNS end-to-end. `fromConfig` / `fromSharding` /
+  `memory` drive `send + peek + flush + redeliver`, and `fromSharding` proves the full
+  `send → peek → Success/Failure` reply round-trip over a real cluster runtime. The
+  `test` adapter is **send-routing + control/peek-over-its-own-storage ONLY**: its
+  injected per-entity test client is `Entity.makeTestClient` (a raw
+  `RpcServer.makeNoSerialization` that bypasses the `entityManager`, the only component
+  that persists handler replies to `MessageStorage`), so the `{ discard: true }` reply
+  reaches no storage and `send → peek` is `Pending` BY CONSTRUCTION — a reply
+  round-trip is structurally impossible on this transport (and storage-sharing is moot:
+  nothing writes a reply). The `test` block asserts `send` routes through the injected
+  mailbox, `send → peek` is `Pending`, and `flush`/`redeliver`/`peek` run on its
+  storage; the reply round-trip is covered by `fromSharding` and the `fromWorkflow`
+  test path instead. Plus a **Snowflake-resolves-under-fromSharding** assertion
   (`.send` doesn't hit "Service not found: Snowflake.Generator"); and a **persisted-
   routing assertion** — dispatch a persisted op and assert it actually persisted after
   the wire-builder moved inside the seam (NOT just a smoke test — this guards the
