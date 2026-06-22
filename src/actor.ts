@@ -21,7 +21,7 @@ import type {
   PersistenceError,
 } from "effect/unstable/cluster/ClusterError";
 import * as Headers from "effect/unstable/http/Headers";
-import type { Rpc, RpcClient, RpcGroup, RpcMessage } from "effect/unstable/rpc";
+import type { Rpc, RpcClient, RpcGroup } from "effect/unstable/rpc";
 import { Rpc as RpcMod } from "effect/unstable/rpc";
 import { Workflow as UpstreamWorkflow } from "effect/unstable/workflow";
 import {
@@ -39,12 +39,10 @@ import type { Execution } from "effect/unstable/workflow/Workflow";
 import type { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
 import { layerMemory as workflowEngineLayerMemory } from "effect/unstable/workflow/WorkflowEngine";
 import {
-  Cause,
   Context,
   Data,
   Duration,
   Effect,
-  Exit,
   Layer,
   Option,
   Pipeable,
@@ -53,21 +51,21 @@ import {
   Schema,
   Stream,
 } from "effect";
-import type { DateTime, Scope } from "effect";
+import type { DateTime, Exit, Scope } from "effect";
 import { dual } from "effect/Function";
 import type { SignalDefs, WorkflowSignal, WorkflowStepContext } from "./step.js";
 import { makeSignal, makeStepContext } from "./step.js";
 import type { ExecId, PeekResult } from "./receipt.js";
 import {
-  Defect,
   ExecIdCodec,
-  Failure,
-  Interrupted,
+  Pending,
+  ReplySource,
+  ReplySourceLayer,
   Suspended,
+  defaultReplySource,
   isTerminal,
   makeExecId,
-  Pending,
-  Success,
+  mapExitToWorkflowPeekResult,
 } from "./receipt.js";
 import { EncoreMessageStorage } from "./storage.js";
 import {
@@ -967,6 +965,18 @@ const rerunImpl = (
     yield* storage.deleteEnvelope(maybeRequestId.value);
   });
 
+// The entity await-engine is lifted into `receipt.ts` as the `ReplySource`
+// seam (the Exit-classification mappers + the storage-backed peek loop).
+// `peekImpl` resolves the seam from context *optionally* and falls back to the
+// `defaultReplySource` value when no `ReplySource` is provided — so the seam
+// stays swappable (provide a `ReplySource` layer at the runtime root to swap
+// the reply source wholesale) WITHOUT leaking `ReplySource` into the R-channel.
+// This keeps `peekImpl`/`watchImpl` requiring only `MessageStorage |
+// ActorAddressResolver` (matching the public `peek`/`watch`/`waitFor`/
+// `sendAndAwait` interface), so the documented sender-only `ActorSenderLayer`
+// path — which bundles no `ReplySource` — still self-satisfies at runtime. The
+// `defaultReplySource` adapter is the exact storage-backed loop that lived
+// inline here, so the live path is behavior-preserving.
 const peekImpl = (
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased
   entity: ClusterEntity.Entity<string, any>,
@@ -976,82 +986,12 @@ const peekImpl = (
   PeekResult,
   PersistenceError | MalformedMessage,
   MessageStorage.MessageStorage | ActorAddressResolver
-> => {
-  const parsed = ExecIdCodec.decode(execId);
-
-  return Effect.gen(function* () {
-    const storage = yield* MessageStorage.MessageStorage;
-    const resolver = yield* ActorAddressResolver;
-    const address = resolveEntityAddress(resolver, entity, parsed.entityId);
-
-    const maybeRequestId = yield* storage.requestIdForPrimaryKey({
-      address,
-      tag: parsed.tag,
-      id: parsed.primaryKey,
-    });
-
-    if (Option.isNone(maybeRequestId)) {
-      return Pending as PeekResult;
-    }
-
-    const replies = yield* storage.repliesForUnfiltered([maybeRequestId.value]);
-    const last = replies[replies.length - 1];
-
-    if (!last || last._tag !== "WithExit") {
-      return Pending as PeekResult;
-    }
-
-    const def = definitions?.[parsed.tag];
-    return yield* mapExitToPeekResult(last.exit, def);
+> =>
+  Effect.gen(function* () {
+    const provided = yield* Effect.serviceOption(ReplySource);
+    const replySource = Option.getOrElse(provided, () => defaultReplySource);
+    return yield* replySource.peek(entity, execId, definitions);
   });
-};
-
-const decodeValue = (schema: Schema.Top | undefined, value: unknown): Effect.Effect<unknown> => {
-  if (!schema) return Effect.succeed(value);
-  const decode = Schema.decodeUnknownEffect(schema)(value) as Effect.Effect<unknown, unknown>;
-  return Effect.map(Effect.option(decode), (opt) => (Option.isSome(opt) ? opt.value : value));
-};
-
-const mapExitToPeekResult = (
-  exit: RpcMessage.ExitEncoded<unknown, unknown>,
-  def?: OperationDef,
-): Effect.Effect<PeekResult> => {
-  if (exit._tag === "Success") {
-    return Effect.map(decodeValue(def?.success, exit.value), Success);
-  }
-
-  const cause = exit.cause[0];
-  if (!cause) return Effect.succeed(Pending);
-
-  switch (cause._tag) {
-    case "Fail":
-      return Effect.map(decodeValue(def?.error, cause.error), Failure);
-    case "Die":
-      return Effect.succeed(Defect(cause.defect));
-    case "Interrupt":
-      return Effect.succeed(Interrupted);
-    default:
-      return Effect.succeed(Pending);
-  }
-};
-
-// Workflow poll returns a real Exit.Exit, not encoded — walk Cause tree
-const mapExitToWorkflowPeekResult = (exit: Exit.Exit<unknown, unknown>): PeekResult => {
-  if (Exit.isSuccess(exit)) {
-    return Success(exit.value);
-  }
-  const cause = exit.cause;
-  const errorOpt = Cause.findErrorOption(cause);
-  if (Option.isSome(errorOpt)) return Failure(errorOpt.value);
-
-  const defectResult = Cause.findDefect(cause);
-  if (defectResult._tag === "Success") return Defect(defectResult.success);
-
-  const interruptResult = Cause.findInterrupt(cause);
-  if (interruptResult._tag === "Success") return Interrupted;
-
-  return Pending;
-};
 
 // ── watch — internal implementation ──────────────────────────────────────
 
@@ -1497,6 +1437,7 @@ function toLayer<
   | ActorMailbox
   | ActorAddressResolver
   | ActorStateRegistry
+  | ReplySource
   | Snowflake.Generator,
   never,
   MessageStorage.MessageStorage | Sharding.Sharding | Rpc.MiddlewareClient<Rpcs>
@@ -1525,6 +1466,7 @@ function toLayer<
   | ActorMailbox
   | ActorAddressResolver
   | ActorStateRegistry
+  | ReplySource
   | Snowflake.Generator,
   never,
   | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress | ActorStateRegistry>
@@ -1604,6 +1546,7 @@ function toLayer(
     ActorMailboxLayer.fromSharding,
     ActorAddressResolverLayer.fromSharding,
     ActorStateRegistry.Live,
+    ReplySourceLayer.fromMessageStorage,
     Snowflake.layerGenerator,
   );
 
@@ -1663,6 +1606,7 @@ function toTestLayer<
   | ActorMailbox
   | ActorAddressResolver
   | ActorStateRegistry
+  | ReplySource
   | Snowflake.Generator,
   never,
   | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress | ActorStateRegistry>
@@ -1743,6 +1687,7 @@ function toTestLayer(
     ActorAddressResolverLayer.fromConfig,
     ActorStateRegistry.Live,
     MessageStorage.layerMemory,
+    ReplySourceLayer.fromMessageStorage,
     Snowflake.layerGenerator,
   );
 

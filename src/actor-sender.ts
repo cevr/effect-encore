@@ -55,7 +55,11 @@ const layer: Layer.Layer<
  * and single-process setups.
  */
 const layerMemory: Layer.Layer<
-  ActorMailbox | ActorAddressResolver | Snowflake.Generator | MessageStorage.MemoryDriver
+  | ActorMailbox
+  | ActorAddressResolver
+  | Snowflake.Generator
+  | MessageStorage.MessageStorage
+  | MessageStorage.MemoryDriver
 > = layer.pipe(
   Layer.provideMerge(MessageStorage.layerMemory),
   Layer.provideMerge(ShardingConfig.layer()),

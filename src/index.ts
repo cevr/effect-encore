@@ -48,10 +48,20 @@ export type {
   SignalDef,
   SignalDefs,
 } from "./step.js";
-export type { ExecId, ExecIdComponents, PeekResult } from "./receipt.js";
+export type {
+  ExecId,
+  ExecIdComponents,
+  PeekResult,
+  ReplyDef,
+  ReplyDefs,
+  ReplySourceShape,
+} from "./receipt.js";
 export {
+  decodeValue,
   ExecIdCodec,
   makeExecId,
+  mapExitToPeekResult,
+  mapExitToWorkflowPeekResult,
   PeekResultSchema,
   Pending,
   Success,
@@ -64,6 +74,8 @@ export {
   isFailure,
   isSuspended,
   isTerminal,
+  ReplySource,
+  ReplySourceLayer,
 } from "./receipt.js";
 export * as Observability from "./observability.js";
 export {

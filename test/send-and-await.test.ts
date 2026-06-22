@@ -9,7 +9,7 @@ import {
   ShardingConfig,
   TestRunner,
 } from "effect/unstable/cluster";
-import { Actor, SendAndAwaitTimeout } from "../src/index.js";
+import { ActorSenderLayer, Actor, SendAndAwaitTimeout } from "../src/index.js";
 
 class ProcessError extends Schema.TaggedErrorClass<ProcessError>()("ProcessError", {
   message: Schema.String,
@@ -118,5 +118,28 @@ describe("OperationHandle.sendAndAwait", () => {
       const invocations = yield* Ref.get(Counter);
       expect(invocations).toBe(1);
     }).pipe(Effect.provide(sendAwaitHandlers), Effect.provide(TestCluster)),
+  );
+
+  // Regression: a sender-only host that wires `ActorSenderLayer` (ActorMailbox +
+  // ActorAddressResolver + Snowflake.Generator + MessageStorage + ShardingConfig,
+  // NO `toLayer`, NO local Sharding, NO `ReplySource`) must be able to call
+  // `sendAndAwait` without the `peek`-loop dying with
+  // `Service not found: effect-encore/receipt/ReplySource`. With no consumer
+  // hosting the entity, the reply never becomes terminal, so the call resolves
+  // to a typed `SendAndAwaitTimeout` — a clean failure that proves the seam fell
+  // back to `defaultReplySource` instead of leaking `ReplySource` into R.
+  it.scopedLive(
+    "sender-only ActorSenderLayer host can sendAndAwait without a ReplySource service",
+    () =>
+      Effect.gen(function* () {
+        const error = yield* SendAwaitActor.Process.sendAndAwait(
+          { input: "sender-only" },
+          { timeout: "300 millis" },
+        ).pipe(Effect.flip);
+        // The seam resolved via the default fallback: we reach the poll timeout,
+        // NOT a `Service not found: ReplySource` defect.
+        expect(error).toBeInstanceOf(SendAndAwaitTimeout);
+        expect((error as SendAndAwaitTimeout).entityType).toBe("SendAwaitActor");
+      }).pipe(Effect.provide(ActorSenderLayer.layerMemory)),
   );
 });
