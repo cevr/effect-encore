@@ -260,8 +260,9 @@ describe("Actor.toTestLayer (inline test-mailbox composition)", () => {
 // INJECTED `ActorMailbox` (decision #1's 4th adapter); it bundles pure-data
 // resolver/storage/snowflake internally so its sole outstanding requirement is
 // `ActorMailbox` + `ShardingConfig`. `Actor.toTestLayer` does NOT consume it
-// (it inlines `clientServiceLayer` over a SHARED storage so peek can observe the
-// handler reply). So we drive the exported adapter DIRECTLY here.
+// (it inlines `clientServiceLayer` over its own bundled storage, which — per the
+// narrowed contract above — buys control-op + Pending-peek observation, NOT a
+// handler-reply round-trip). So we drive the exported adapter DIRECTLY here.
 //
 // Contract note (NARROWED — see client.ts `test` adapter doc): this adapter is
 // send-routing + control/peek-over-its-own-storage. It does NOT support a

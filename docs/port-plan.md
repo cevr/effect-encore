@@ -265,7 +265,7 @@ to`ExecIdCodec.decode`). Export `ExecIdCodec`from`index.ts`.
     `{ peek: (execId: ExecId) => Effect<PeekResult, ..., R> }` (or a callable
     `(ExecId) => Effect<PeekResult>` per CONTEXT.md:31 — pick the Service shape so the
     R-channel is explicit and swappable). Provide the default adapter
-    `ReplySource.fromMessageStorage` wrapping the existing `peekImpl` body
+    `ReplySourceLayer.fromMessageStorage` wrapping the existing `peekImpl` body
     (`actor.ts:984-1021`): `requestIdForPrimaryKey` → `repliesForUnfiltered` →
     `mapExitToPeekResult`. **The adapter's R-channel MUST stay
     `MessageStorage | ActorAddressResolver`** and keep the `OperationDefs` param
@@ -603,7 +603,7 @@ memory,test}` deep transport Tag (only `ActorSenderLayer` de-exported
    context (@882-893) and silently routing persisted requests as non-persisted. Keep
    the body byte-identical; add a **persisted-routing assertion** in
    `client-layer.test.ts`, not just `integration/cluster.test.ts` smoke.
-2. **E2 R-channel regression.** The `ReplySource.fromMessageStorage` default adapter
+2. **E2 R-channel regression.** The `ReplySourceLayer.fromMessageStorage` default adapter
    must keep `MessageStorage | ActorAddressResolver` in its requirements and the
    `OperationDefs`/schema-decode (`def.success`/`def.error`) threaded, or `peek` loses
    typed decoding and the actor layers fail to satisfy. Use the
