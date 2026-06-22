@@ -358,16 +358,14 @@ to`ExecIdCodec.decode`). Export `ExecIdCodec`from`index.ts`.
     `makeActorStateLayer` (`actor.ts:1803`) is untouched.
   - **Access pattern — DECIDED: `Actor.State.*`** (matches the existing
     `Actor.registerState(...)` test idiom; the tests reach state through the `Actor`
-    namespace). This requires TWO edits, not one:
-    1. `export * as State from "./state.js"` in `index.ts` (top-level `State` namespace
-       for direct importers).
-    2. **ADD `State` to the `Actor` const object at `actor.ts:2572`** (verified: it
-       currently has `CurrentAddress, registerState, entityIdCodec, fromEntity,
+    namespace). This requires TWO edits, not one: 1. `export * as State from "./state.js"` in `index.ts` (top-level `State` namespace
+    for direct importers). 2. **ADD `State` to the `Actor` const object at `actor.ts:2572`** (verified: it
+    currently has `CurrentAddress, registerState, entityIdCodec, fromEntity,
 fromWorkflow, fromRpcs, ...` but **no `State`**). Import the `state.js` module
-       namespace at the top of `actor.ts` (`import * as State from "./state.js"`) and
-       add `State,` to the const so `Actor.State.make(...)` / `Actor.State.updateAndGet(...)`
-       resolve. Without this edit, E4's own test migration (which writes
-       `Actor.State.make(...)`, see Gate below) would NOT compile.
+    namespace at the top of `actor.ts` (`import * as State from "./state.js"`) and
+    add `State,` to the const so `Actor.State.make(...)` / `Actor.State.updateAndGet(...)`
+    resolve. Without this edit, E4's own test migration (which writes
+    `Actor.State.make(...)`, see Gate below) would NOT compile.
   - **Update the `Actor.registerState` annotation @2575** (verified: the cast is
     `registerState as <State, Error, Requirements>(handle: ActorStateHandle<...>) =>
 ...`). Change its parameter type from `ActorStateHandle<...>` to
@@ -427,19 +425,16 @@ fromWorkflow, fromRpcs, ...` but **no `State`**). Import the `state.js` module
     `type SendR = ActorMailbox | ActorAddressResolver | Snowflake.Generator` and
     line 93 asserts `Order.Place.send({ item: "widget" })` has **exactly** that `R`.
     Per decision #1 (the triad is superseded by ONE Client Tag), `Place.send`'s `R`
-    **collapses to `Client`**. This plan adopts that collapse and accounts for it:
-    1. **Rewrite `test/types.test.ts:91`** `SendR` from the triad union to `Client`
-       (the line-93 `_check` assertion then pins the new public contract).
-    2. **Re-point the public `SenderContext` type (`actor.ts:155`, doc-comment
-       @146-150).** It is a public union users put in their `R` for producer-op
-       composition; it currently lists `MessageStorage | ActorAddressResolver |
+    **collapses to `Client`**. This plan adopts that collapse and accounts for it: 1. **Rewrite `test/types.test.ts:91`** `SendR` from the triad union to `Client`
+    (the line-93 `_check` assertion then pins the new public contract). 2. **Re-point the public `SenderContext` type (`actor.ts:155`, doc-comment
+    @146-150).** It is a public union users put in their `R` for producer-op
+    composition; it currently lists `MessageStorage | ActorAddressResolver |
 Sharding`. Re-point it to `Client` (the producer-op union is now the single
-       Client Tag) and update its doc-comment @146-150 to say so. Re-export stays at
-       `index.ts:39` (`SenderContext`, part of the `export type { ... } from
+    Client Tag) and update its doc-comment @146-150 to say so. Re-export stays at
+    `index.ts:39` (`SenderContext`, part of the `export type { ... } from
 "./actor.js"` block), so the symbol survives — only its definition changes. (Do NOT silently keep the three-Tag union: that would leave
-       `SenderContext` describing a transport that no longer exists post-seam.)
-    3. This is a **type-level public break** — recorded in the Risks table (new risk)
-       and the E7 changeset (new BREAKING bullet).
+    `SenderContext` describing a transport that no longer exists post-seam.) 3. This is a **type-level public break** — recorded in the Risks table (new risk)
+    and the E7 changeset (new BREAKING bullet).
   - **Adapters — all four (decision #1):**
     `Client.layer.fromConfig` (storage-only producer/ops, over
     `ActorSenderLayer.layer` = mailbox.fromConfig + resolver.fromConfig + Snowflake),
@@ -451,26 +446,24 @@ Sharding`. Re-point it to `Client` (the producer-op union is now the single
     dropped; routes a prebuilt `OutgoingRequest` back through the entity's per-entity
     test `rpcClient` with `{ discard: true }`).
   - **The two send paths are architecturally DISTINCT — repoint ONLY the triad
-    one (verified `actor.ts`):**
-    - **(a) `makeOperationHandle.sendFn` (`actor.ts:1393-1410`) IS the Client-seam
-      dispatch.** It hand-assembles the triad verbatim: `const mailbox = yield*
+    one (verified `actor.ts`):** - **(a) `makeOperationHandle.sendFn` (`actor.ts:1393-1410`) IS the Client-seam
+    dispatch.** It hand-assembles the triad verbatim: `const mailbox = yield*
 ActorMailbox; const resolver = yield* ActorAddressResolver; const snowflakeGen
 = yield* Snowflake.Generator;` then resolves the address and calls
-      `buildOutgoingRequestForSend(...)` then `mailbox.send(request)`. **Repoint this
-      to `const client = yield* Client; ... yield* client.send(request)`** and pull
-      `buildOutgoingRequestForSend` (`actor.ts:841-904`, byte-identical incl. the
-      @882-893 persisted-gate) INSIDE the `Client` Service. This — and only this — is
-      what "supersedes the hand-assembled triad" (CONTEXT.md:24) means concretely.
-    - **(b) `buildActorRef.send` (`actor.ts:1943-1958`) does NOT assemble the triad
-      and is NOT repointed through the Client's `send`.** Verified: it dispatches via
-      the closed-over per-entity `rpcClient` — `const fn = client[tag]; ... fn(arg,
+    `buildOutgoingRequestForSend(...)` then `mailbox.send(request)`. **Repoint this
+    to `const client = yield* Client; ... yield* client.send(request)`** and pull
+    `buildOutgoingRequestForSend` (`actor.ts:841-904`, byte-identical incl. the
+    @882-893 persisted-gate) INSIDE the `Client` Service. This — and only this — is
+    what "supersedes the hand-assembled triad" (CONTEXT.md:24) means concretely. - **(b) `buildActorRef.send` (`actor.ts:1943-1958`) does NOT assemble the triad
+    and is NOT repointed through the Client's `send`.** Verified: it dispatches via
+    the closed-over per-entity `rpcClient` — `const fn = client[tag]; ... fn(arg,
 { discard: true })` (`actor.ts:1945/1953`) — and touches neither mailbox,
-      resolver, nor `buildOutgoingRequestForSend`. Its only Client-relevant work is
-      MINTING the execId locally @1956 (`\`${_entityId}\x00${tag}\x00${primaryKey}\``),
+    resolver, nor `buildOutgoingRequestForSend`. Its only Client-relevant work is
+    MINTING the execId locally @1956 (`\`${_entityId}\x00${tag}\x00${primaryKey}\``),
 which **E1's `ExecIdCodec`already centralizes** (E1 rewires @1956 to`ExecIdCodec.encode`). **Leave `buildActorRef.send`'s dispatch on the per-entity
 `rpcClient`; do NOT route it through `Client.send`.** (The `client`local @1945
 is the entity's RPC client, a different thing from the`Client` transport Tag —
-      do not conflate them.)
+    do not conflate them.)
 - **Barrel de-export decision (resolving A-vs-B tension AND the shard-parity-test
   contradiction):** De-export **only `ActorSenderLayer`** (`index.ts:82`) — it is the
   high-level transport bundle the four `Client.layer.*` adapters fully supersede, and
