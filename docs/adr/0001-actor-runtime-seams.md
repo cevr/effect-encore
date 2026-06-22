@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-06-22
-- **Scope:** effect-encore `src/` (v4-only). The `v3/` tree is frozen and out of scope.
+- **Scope:** effect-encore `src/` (v4-only). The `v3/` compat leg was removed as part of this change — the package is now v4-only.
 
 ## Context
 
@@ -113,14 +113,13 @@ pin this.
 
 ## v4-only scope and import surface
 
-This reshape is **v4-only**. The `v3/` tree is the isolated legacy build: it is frozen,
-has its own barrel, and contains **no `../src` imports**. All ported code lives in
-`src/` and imports cluster/storage from **`effect/unstable/cluster`** — the v4-beta
-surface (`MessageStorage`, `ShardingConfig`, `Snowflake`, `Sharding`; verified
-`src/actor-sender.ts:21`, `src/actor.ts:14`) — **NOT `@effect/cluster`** (that import
-is the `v3/` leg only, verified `v3/src/actor-sender.ts:21`). Bite's vendored source is
-also on `effect/unstable/cluster`, so there is **no import-surface translation** needed
-when porting the reshape into `src/`.
+This reshape is **v4-only**. The former `v3/` (`effect@3` / `@effect/cluster`) compat
+leg was removed as part of this change — the package now ships a single v4 build. All
+code lives in `src/` and imports cluster/storage from **`effect/unstable/cluster`** — the
+v4-beta surface (`MessageStorage`, `ShardingConfig`, `Snowflake`, `Sharding`; verified
+`src/actor-sender.ts:21`, `src/actor.ts:14`) — **NOT `@effect/cluster`**. Bite's vendored
+source is also on `effect/unstable/cluster`, so there was **no import-surface translation**
+needed when porting the reshape into `src/`.
 
 Pinned facts: `package.json` version `0.12.8`; `peerDependencies.effect`
 `>=4.0.0-beta.66`; dev/resolved `effect@4.0.0-beta.75`.

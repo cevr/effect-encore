@@ -1,17 +1,16 @@
 # effect-encore
 
-Declarative actors and durable workflows for `@effect/cluster`.
+Declarative actors and durable workflows for effect v4 (`effect/unstable/cluster`).
 
 ```bash
 bun add effect-encore
 ```
 
-Peer dependency: `effect >= 4.0.0-beta.64`.
-For v3 `@effect/cluster` compat: `import { Actor } from "effect-encore/v3"`.
+Peer dependency: `effect >= 4.0.0-beta.66`. v4-only — for `effect@3` / `@effect/cluster` compat, pin the last `0.12.x` release.
 
 ## Why
 
-`@effect/cluster` requires custom `Schema.Class`, `Rpc.make`, `RpcGroup`, `Entity.make`, handler wiring, and a hand-rolled client service. Workflows add `Activity`, `DurableDeferred`, `DurableClock`, and `Workflow.make` on top. effect-encore compresses both into a declarative DSL — define entities and workflows as plain objects, get typed actors with execute/send/peek/watch/waitFor and a step DSL for durable orchestration.
+Effect's cluster API (`effect/unstable/cluster`) requires custom `Schema.Class`, `Rpc.make`, `RpcGroup`, `Entity.make`, handler wiring, and a hand-rolled client service. Workflows add `Activity`, `DurableDeferred`, `DurableClock`, and `Workflow.make` on top. effect-encore compresses both into a declarative DSL — define entities and workflows as plain objects, get typed actors with execute/send/peek/watch/waitFor and a step DSL for durable orchestration.
 
 ## Core API
 
