@@ -1158,11 +1158,17 @@ const makeOperationHandle = <
   const sendFn = (payload: unknown) =>
     Effect.gen(function* () {
       const client = yield* Client;
+      // Pass the ORIGINAL `payload` as `idPayload` so the minted ExecId is
+      // derived from the same value `executionId`/`peek` use (via `def.id`).
+      // `buildOpValue` reconstructs class payloads as a struct spread, which
+      // loses prototype/method/`instanceof` semantics — re-deriving the id from
+      // it inside `Client.send` would drift for `Schema.Class` payloads.
       return yield* client.send(
         entityAny,
         tag,
         def,
         buildOpValue(tag, payload) as { readonly _tag: string; readonly [key: string]: unknown },
+        payload,
       );
     });
 

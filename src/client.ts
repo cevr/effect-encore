@@ -258,12 +258,22 @@ export interface ClientShape {
   /**
    * Build the wire envelope (pulled INSIDE the seam) and dispatch it through
    * the wired mailbox. Returns the minted `ExecId` for the dispatched op.
+   *
+   * `idPayload` is the ORIGINAL id-input payload as the caller supplied it. When
+   * present, the minted ExecId is derived from it directly (via `def.id`) so
+   * `send` agrees with `OperationHandle.executionId`/`peek`, which derive from
+   * the same value. This matters for `Schema.Class` payloads: `opValue` carries
+   * a struct-spread reconstruction that loses class prototype/method/`instanceof`
+   * semantics, so re-running `def.id` on it can diverge. When `idPayload` is
+   * omitted (e.g. direct `Client.send` callers that only hold the op value), the
+   * id is recovered from `opValue` as before.
    */
   readonly send: (
     entity: ClusterEntity.Entity<string, any>,
     tag: string,
     def: OperationDef | undefined,
     opValue: { readonly _tag: string; readonly [key: string]: unknown },
+    idPayload?: unknown,
   ) => Effect.Effect<ExecId, ClientSendError>;
   /**
    * Peek the persisted reply for `execId`. Composes the `ReplySource` seam —
@@ -315,17 +325,26 @@ const makeClientService: Effect.Effect<
 
   return {
     resolve,
-    send: (entity, tag, def, opValue) =>
+    send: (entity, tag, def, opValue, idPayload) =>
       Effect.gen(function* () {
-        // Recover the raw id-input from the built op value: opaque/scalar
-        // payloads carry the value under `_payload`, struct payloads spread
-        // their fields alongside `_tag` (the id fn reads named fields off the
-        // object; the extra `_tag` key is harmless). Mirrors the `pkInput`
-        // derivation in `buildActorRef.send`.
+        // Prefer the original id-input payload when the caller supplied it: the
+        // ExecId must agree with `OperationHandle.executionId`/`peek`, which
+        // derive from this same value via `def.id`. For `Schema.Class` payloads
+        // the `opValue` reconstruction below loses prototype/method/`instanceof`
+        // semantics, so re-deriving from it can mint a divergent ExecId.
+        //
+        // When `idPayload` is omitted (direct `Client.send` callers that only
+        // hold the op value), recover the raw id-input from the built op value:
+        // opaque/scalar payloads carry the value under `_payload`, struct
+        // payloads spread their fields alongside `_tag` (the id fn reads named
+        // fields off the object; the extra `_tag` key is harmless). Mirrors the
+        // `pkInput` derivation in `buildActorRef.send`.
         const idInput =
-          def?.payload !== undefined && isOpaquePayload(def.payload)
-            ? opValue["_payload"]
-            : opValue;
+          idPayload !== undefined
+            ? idPayload
+            : def?.payload !== undefined && isOpaquePayload(def.payload)
+              ? opValue["_payload"]
+              : opValue;
         const { entityId, primaryKey } = resolveId(def, idInput, tag);
         const address = resolve(entity, entityId);
         const request = yield* buildOutgoingRequestForSend(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "effect-bun-test";
-import { Effect, Layer, Ref, Schema } from "effect";
+import { Effect, Layer, PrimaryKey, Ref, Schema } from "effect";
 import {
   MessageStorage,
   RunnerHealth,
@@ -71,6 +71,42 @@ const sendAwaitHandlers = Actor.toLayer(SendAwaitActor, {
 
 const TestCluster = TestRunner.layer;
 
+// Regression for the --deep finding: `OperationHandle.send` must derive its
+// ExecId from the ORIGINAL payload, not the reconstructed `opValue`. For a
+// `Schema.Class` payload whose `id` reads a PROTOTYPE METHOD, the struct-spread
+// reconstruction inside `buildOpValue` drops the method — so re-deriving the id
+// from `opValue` would throw or mint a divergent ExecId, and the `sendAndAwait`
+// send→peek round-trip would never reconcile. Exercises send + peek end-to-end
+// over a real cluster host (not the test-mailbox shortcut).
+class RoutedKey extends Schema.Class<RoutedKey>("send-await/RoutedKey")({
+  region: Schema.String,
+  seq: Schema.Number,
+}) {
+  routingKey(): string {
+    return `${this.region}-${this.seq}`;
+  }
+  [PrimaryKey.symbol](): string {
+    return this.routingKey();
+  }
+}
+
+const ClassPayloadActor = Actor.fromEntity("ClassPayloadActor", {
+  Process: {
+    payload: RoutedKey,
+    success: Schema.String,
+    persisted: true,
+    // id depends on the class instance (prototype method), NOT a bare field.
+    id: (p: RoutedKey) => p.routingKey(),
+  },
+});
+
+const classPayloadHandlers = Actor.toLayer(ClassPayloadActor, {
+  // Read plain fields: the decoded operation delivered to the handler is a
+  // schema-decoded value, so reconstruct the routing key from its fields rather
+  // than relying on the class prototype method surviving the wire round-trip.
+  Process: ({ operation }) => Effect.succeed(`routed: ${operation.region}-${operation.seq}`),
+});
+
 // The timeout case hosts a `Hang` handler that runs `Effect.never`. When the
 // test scope closes, the entity must terminate; the default
 // `entityTerminationTimeout` (15s) would block scope finalization past the
@@ -135,6 +171,26 @@ describe("OperationHandle.sendAndAwait", () => {
       const invocations = yield* Ref.get(Counter);
       expect(invocations).toBe(1);
     }).pipe(Effect.provide(sendAwaitHandlers), Effect.provide(TestCluster)),
+  );
+
+  it.scopedLive(
+    "Schema.Class payload: send→peek agree on the ExecId (class-instance id), sendAndAwait resolves",
+    () =>
+      Effect.gen(function* () {
+        const payload = new RoutedKey({ region: "us", seq: 7 });
+        // send and executionId (which peek shares) must agree on the ExecId.
+        const fromSend = yield* ClassPayloadActor.Process.send(payload);
+        const fromCompute = yield* ClassPayloadActor.Process.executionId(payload);
+        expect(String(fromSend)).toBe("us-7\x00Process\x00us-7");
+        expect(String(fromSend)).toBe(String(fromCompute));
+        // End-to-end send→peek: sendAndAwait dispatches then polls peek under the
+        // SAME ExecId. If send had derived a divergent id, this would time out
+        // instead of resolving the handler value.
+        const value = yield* ClassPayloadActor.Process.sendAndAwait(payload, {
+          timeout: "5 seconds",
+        });
+        expect(value).toBe("routed: us-7");
+      }).pipe(Effect.provide(classPayloadHandlers), Effect.provide(TestCluster)),
   );
 
   // Regression: a sender-only host that wires `Client.layer.memory` (the deep
