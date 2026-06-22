@@ -114,6 +114,7 @@
               "src/actor.ts",
               "src/actor-state.ts",
               "src/receipt.ts",
+              "src/state.ts",
               "src/step.ts",
               "v3/src/actor.ts",
               "v3/src/actor-state.ts",

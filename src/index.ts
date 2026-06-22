@@ -78,6 +78,7 @@ export {
   ReplySourceLayer,
 } from "./receipt.js";
 export * as Observability from "./observability.js";
+export * as State from "./state.js";
 export {
   EncoreMessageStorage,
   fromSqlClient,
