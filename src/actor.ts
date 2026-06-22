@@ -75,7 +75,8 @@ import {
   stateOf,
   watchStateOf,
 } from "./actor-state.js";
-import type { ActorStateHandle, ActorStateUnavailable } from "./actor-state.js";
+import type { ActorStateUnavailable } from "./actor-state.js";
+import * as State from "./state.js";
 import { entityIdCodec } from "./entity-id-codec.js";
 
 // ── Errors ─────────────────────────────────────────────────────────────────
@@ -2502,10 +2503,11 @@ const isWorkflow = (actor: AnyActor): actor is AnyWorkflowActor => actor._tag ==
 
 export const Actor = {
   CurrentAddress,
-  registerState: registerState as <State, Error = never, Requirements = never>(
-    handle: ActorStateHandle<State, Error, Requirements>,
+  registerState: registerState as <A, Error = never, Requirements = never>(
+    state: State.State<A, Error, Requirements>,
   ) => Effect.Effect<void, never, ActorStateRegistry | CurrentAddress | Scope.Scope>,
   entityIdCodec,
+  State,
   fromEntity,
   fromWorkflow,
   fromRpcs,

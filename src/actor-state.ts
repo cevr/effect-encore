@@ -2,6 +2,7 @@ import { CurrentAddress } from "effect/unstable/cluster/Entity";
 import type { EntityAddress } from "effect/unstable/cluster";
 import { Context, Data, Effect, Layer, Option, Ref, Stream } from "effect";
 import type { Scope } from "effect";
+import * as State from "./state.js";
 
 export class ActorStateUnavailable extends Data.TaggedError(
   "effect-encore/actor-state/ActorStateUnavailable",
@@ -10,9 +11,16 @@ export class ActorStateUnavailable extends Data.TaggedError(
   readonly entityId: string;
 }> {}
 
-export interface ActorStateHandle<State, Error = never, Requirements = never> {
-  readonly get: Effect.Effect<State, Error, Requirements>;
-  readonly watch: Stream.Stream<State, Error, Requirements>;
+/**
+ * Registry-internal read-only view of an entity's live state: a current-value
+ * read plus a change stream. Derived from a {@link State.State} by
+ * {@link registerState}; the public state vocabulary is `State<A>`. Not
+ * exported — the package barrel surfaces `State<A>` (see `index.ts`), not this
+ * handle.
+ */
+interface ActorStateHandle<StateValue, Error = never, Requirements = never> {
+  readonly get: Effect.Effect<StateValue, Error, Requirements>;
+  readonly watch: Stream.Stream<StateValue, Error, Requirements>;
 }
 
 type AnyActorStateHandle = ActorStateHandle<unknown, unknown, unknown>;
@@ -84,12 +92,16 @@ export class ActorStateRegistry extends Context.Service<
   );
 }
 
-export const registerState = <State, Error = never, Requirements = never>(
-  handle: ActorStateHandle<State, Error, Requirements>,
+export const registerState = <A, Error = never, Requirements = never>(
+  state: State.State<A, Error, Requirements>,
 ): Effect.Effect<void, never, ActorStateRegistry | CurrentAddress | Scope.Scope> =>
   Effect.gen(function* () {
     const registry = yield* ActorStateRegistry;
     const address = yield* CurrentAddress;
+    const handle: ActorStateHandle<A, Error, Requirements> = {
+      get: State.get(state),
+      watch: State.changes(state),
+    };
     const erased = handle as AnyActorStateHandle;
     yield* registry.register(address, erased);
     yield* Effect.addFinalizer(() => registry.deregister(address, erased));

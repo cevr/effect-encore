@@ -38,7 +38,7 @@ export type {
   StateErrorOf,
   SenderContext,
 } from "./actor.js";
-export type { ActorStateHandle, ActorStateRegistryShape } from "./actor-state.js";
+export type { ActorStateRegistryShape } from "./actor-state.js";
 export { makeStepContext, makeSignal } from "./step.js";
 export type {
   WorkflowStepContext,

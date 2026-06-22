@@ -1,5 +1,5 @@
 import { describe, expect, it } from "effect-bun-test";
-import { Effect, Fiber, Layer, Schedule, Schema, Stream, SubscriptionRef } from "effect";
+import { Effect, Fiber, Layer, Schema, Stream, SubscriptionRef } from "effect";
 import { ShardingConfig } from "effect/unstable/cluster";
 import { Actor } from "../src/index.js";
 
@@ -25,17 +25,15 @@ const StatefulLayer = Layer.provide(
   Actor.toTestLayer(
     Stateful,
     Effect.gen(function* () {
-      const state = yield* SubscriptionRef.make(0);
-      yield* Actor.registerState({
-        get: SubscriptionRef.get(state),
-        watch: Stream.fromEffectSchedule(
-          SubscriptionRef.get(state),
-          Schedule.spaced("10 millis"),
-        ).pipe(Stream.changesWith((a, b) => a === b)),
-      });
+      const ref = yield* SubscriptionRef.make(0);
+      const state = yield* Actor.State.make(
+        () => SubscriptionRef.get(ref),
+        (value) => SubscriptionRef.set(ref, value),
+      );
+      yield* Actor.registerState(state);
       return Stateful.of({
         Increment: ({ operation }) =>
-          SubscriptionRef.updateAndGet(state, (current) => current + operation.amount),
+          Actor.State.updateAndGet(state, (current) => current + operation.amount),
       });
     }),
   ),
@@ -59,10 +57,15 @@ const CoercedLayer = Layer.provide(
   Actor.toTestLayer(
     Coerced,
     Effect.gen(function* () {
-      yield* Actor.registerState({
-        get: Effect.succeed("42" as unknown as number),
-        watch: Stream.succeed("42" as unknown as number),
-      });
+      // The registered state's `get` returns the pre-decode wire value
+      // ("42"); the registry decodes it through `state.schema`
+      // (`Schema.NumberFromString`) on read.
+      const ref = yield* SubscriptionRef.make("42" as unknown as number);
+      const state = yield* Actor.State.make(
+        () => SubscriptionRef.get(ref),
+        (value) => SubscriptionRef.set(ref, value),
+      );
+      yield* Actor.registerState(state);
       return Coerced.of({ Touch: () => Effect.void });
     }),
   ),

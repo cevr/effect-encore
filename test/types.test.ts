@@ -234,6 +234,30 @@ describe("type-level tests", () => {
     const _direct = Actor.withProtocol(Order, (protocol) => protocol);
     void _direct;
   });
+
+  // E4: `registerState` consumes a `State<A>` (decision #2 consume-point), NOT
+  // a `{get, watch}` handle. `ActorStateHandle` is registry-internal and left
+  // the public barrel — only `State<A>` is the public state vocabulary.
+  test("registerState consumes a State<A> built via Actor.State.make", () => {
+    const _check = Effect.gen(function* () {
+      const state = yield* Actor.State.make(
+        (): Effect.Effect<number> => Effect.succeed(0),
+        (_value: number) => Effect.void,
+      );
+      yield* Actor.registerState(state);
+      yield* Actor.State.updateAndGet(state, (n) => n + 1);
+    });
+    void _check;
+  });
+
+  test("registerState rejects the legacy {get, watch} handle", () => {
+    const _check = Effect.gen(function* () {
+      yield* Effect.void;
+      // @ts-expect-error — registerState now takes a State<A>, not {get, watch}
+      yield* Actor.registerState({ get: Effect.succeed(0), watch: undefined });
+    });
+    void _check;
+  });
 });
 
 // ── Workflow Step DSL type tests ─────────────────────────────────────────

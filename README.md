@@ -141,24 +141,29 @@ const OrderLive = Actor.toLayer(
 ### Entity State
 
 Long-lived entity handlers can expose live, in-memory state without a
-side-channel registry in the host app. Register the state from the entity scope;
-clients read or watch it through the actor, keyed by the same `entityId` used
-for operations.
+side-channel registry in the host app. Build a `State<A>` value over the backing
+cell, register it from the entity scope, and mutate through it; clients read or
+watch it through the actor, keyed by the same `entityId` used for operations.
+
+`State<A>` is a typed view over the cell plus a subscribable change stream:
+`State.get` / `State.set` / `State.update` / `State.updateAndGet` / `State.modify`
+serialize their read/apply/write/publish through a per-`State` lock, and
+`State.changes` is a replay-1 stream of every committed write.
 
 ```ts
 const CounterLive = Actor.toLayer(
   Counter,
   Effect.gen(function* () {
-    const state = yield* SubscriptionRef.make(0);
+    const ref = yield* SubscriptionRef.make(0);
+    const state = yield* Actor.State.make(
+      () => SubscriptionRef.get(ref),
+      (value) => SubscriptionRef.set(ref, value),
+    );
 
-    yield* Actor.registerState({
-      get: SubscriptionRef.get(state),
-      watch: SubscriptionRef.changes(state),
-    });
+    yield* Actor.registerState(state);
 
     return Counter.of({
-      Increment: ({ operation }) =>
-        SubscriptionRef.updateAndGet(state, (n) => n + operation.amount),
+      Increment: ({ operation }) => Actor.State.updateAndGet(state, (n) => n + operation.amount),
     });
   }),
 );
