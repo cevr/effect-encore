@@ -246,11 +246,15 @@ export const makeStepContext = <
     // Arity 2 + second is plain object with `do` → full options
     if (second !== null && typeof second === "object" && "do" in second) {
       const opts = second as StepRunOptions<any, any, any, any>;
-      const retryPolicy = opts.retry
-        ? "times" in (opts.retry as object)
-          ? Schedule.recurs((opts.retry as { times: number }).times)
-          : opts.retry
-        : undefined;
+      // `retry` accepts either a Schedule or the `{ times }` shorthand.
+      const resolveRetryPolicy = (retry: typeof opts.retry): unknown => {
+        if (!retry) return undefined;
+        if ("times" in (retry as object)) {
+          return Schedule.recurs((retry as { times: number }).times);
+        }
+        return retry;
+      };
+      const retryPolicy = resolveRetryPolicy(opts.retry);
 
       const activity = UpstreamActivity.make({
         name: id,

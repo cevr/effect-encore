@@ -68,14 +68,15 @@ export class ActorStateRegistry extends Context.Service<
           Ref.get(entries).pipe(
             Effect.flatMap((current) => {
               const handle = current.get(addressKey(address));
-              return handle === undefined
-                ? Effect.fail(
-                    new ActorStateUnavailable({
-                      entityType: String(address.entityType),
-                      entityId: String(address.entityId),
-                    }),
-                  )
-                : Effect.succeed(handle);
+              if (handle === undefined) {
+                return Effect.fail(
+                  new ActorStateUnavailable({
+                    entityType: String(address.entityType),
+                    entityId: String(address.entityId),
+                  }),
+                );
+              }
+              return Effect.succeed(handle);
             }),
           ),
         list: (entityType) =>
@@ -83,7 +84,8 @@ export class ActorStateRegistry extends Context.Service<
             Effect.map((current) =>
               Array.from(current.keys()).flatMap((key) => {
                 const parsed = parseAddressKey(key);
-                return parsed.entityType === entityType ? [parsed.entityId] : [];
+                if (parsed.entityType !== entityType) return [];
+                return [parsed.entityId];
               }),
             ),
           ),
@@ -162,8 +164,8 @@ const parseAddressKey = (
   key: string,
 ): { readonly entityType: string; readonly entityId: string } => {
   const first = key.indexOf("\x00");
-  return {
-    entityType: first < 0 ? key : key.slice(0, first),
-    entityId: first < 0 ? "" : key.slice(first + 1),
-  };
+  if (first < 0) {
+    return { entityType: key, entityId: "" };
+  }
+  return { entityType: key.slice(0, first), entityId: key.slice(first + 1) };
 };

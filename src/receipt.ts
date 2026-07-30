@@ -40,17 +40,24 @@ export const ExecIdCodec = {
     makeExecId<S, E>(`${components.entityId}\x00${components.tag}\x00${components.primaryKey}`),
 
   decode: (execId: string): ExecIdComponents => {
+    // Degenerate forms are load-bearing: a bare id with no separators maps to
+    // entityId == tag == primaryKey == execId (see the module header).
     const firstSep = execId.indexOf("\x00");
-    const secondSep = firstSep >= 0 ? execId.indexOf("\x00", firstSep + 1) : -1;
+    if (firstSep < 0) {
+      return { entityId: execId, tag: execId, primaryKey: execId };
+    }
+    const secondSep = execId.indexOf("\x00", firstSep + 1);
+    if (secondSep < 0) {
+      return {
+        entityId: execId.slice(0, firstSep),
+        tag: execId.slice(firstSep + 1),
+        primaryKey: execId,
+      };
+    }
     return {
-      entityId: firstSep >= 0 ? execId.slice(0, firstSep) : execId,
-      tag:
-        secondSep >= 0
-          ? execId.slice(firstSep + 1, secondSep)
-          : firstSep >= 0
-            ? execId.slice(firstSep + 1)
-            : execId,
-      primaryKey: secondSep >= 0 ? execId.slice(secondSep + 1) : execId,
+      entityId: execId.slice(0, firstSep),
+      tag: execId.slice(firstSep + 1, secondSep),
+      primaryKey: execId.slice(secondSep + 1),
     };
   },
 };
@@ -145,7 +152,10 @@ export const decodeValue = (
 ): Effect.Effect<unknown> => {
   if (!schema) return Effect.succeed(value);
   const decode = Schema.decodeUnknownEffect(schema)(value) as Effect.Effect<unknown, unknown>;
-  return Effect.map(Effect.option(decode), (opt) => (Option.isSome(opt) ? opt.value : value));
+  return Effect.map(
+    Effect.option(decode),
+    Option.getOrElse(() => value),
+  );
 };
 
 /**

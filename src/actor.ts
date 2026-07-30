@@ -22,6 +22,7 @@ import type { Rpc, RpcClient, RpcGroup } from "effect/unstable/rpc";
 import { Rpc as RpcMod } from "effect/unstable/rpc";
 import { Workflow as UpstreamWorkflow } from "effect/unstable/workflow";
 import { ActorAddressResolver, ActorAddressResolverLayer } from "./actor-address-resolver.js";
+import { ActorDefect } from "./actor-defect.js";
 import type { MailboxError, ActorMailboxShape } from "./actor-mailbox.js";
 import { ActorMailbox, ActorMailboxLayer } from "./actor-mailbox.js";
 import type { Execution } from "effect/unstable/workflow/Workflow";
@@ -914,9 +915,9 @@ const fromEntity = <
 ): EntityActor<Name, Defs, StateOf<StateDef>, StateErrorOf<StateDef>> => {
   for (const tag of Object.keys(definitions)) {
     if (RESERVED_KEYS.has(tag)) {
-      throw new Error(
-        `effect-encore: operation "${tag}" collides with reserved property. Reserved: ${[...RESERVED_KEYS].join(", ")}`,
-      );
+      throw new ActorDefect({
+        message: `effect-encore: operation "${tag}" collides with reserved property. Reserved: ${[...RESERVED_KEYS].join(", ")}`,
+      });
     }
   }
 
@@ -934,9 +935,12 @@ const fromEntity = <
   const buildOpValue = (tag: string, payload: unknown) => {
     const def = internalDefinitions[tag] as OperationDef | undefined;
     const opaque = def?.payload !== undefined && isOpaquePayload(def.payload);
-    const op = opaque
-      ? { _tag: tag, _payload: payload }
-      : { _tag: tag, ...(payload != null && typeof payload === "object" ? payload : {}) };
+    const buildOp = (): Record<string, unknown> => {
+      if (opaque) return { _tag: tag, _payload: payload };
+      if (payload != null && typeof payload === "object") return { _tag: tag, ...payload };
+      return { _tag: tag };
+    };
+    const op = buildOp();
     // Preserve the live id-input so the value-dispatch ref derives the ExecId
     // from the same value `executionId`/`peek` use — class payloads keep their
     // prototype here even though the struct spread above dropped it.
@@ -1009,19 +1013,20 @@ const fromEntity = <
 
   const stateSchema = options?.state?.schema;
   const errorSchema = options?.state?.error;
-  const decodeState = stateSchema
-    ? (raw: unknown): Effect.Effect<unknown, unknown> =>
-        Schema.decodeUnknownEffect(stateSchema)(raw) as Effect.Effect<unknown, unknown>
-    : (raw: unknown): Effect.Effect<unknown, unknown> => Effect.succeed(raw);
-  const decodeError = errorSchema
-    ? (raw: unknown): Effect.Effect<unknown, unknown> =>
-        Schema.decodeUnknownEffect(errorSchema)(raw) as Effect.Effect<unknown, unknown>
-    : null;
+  const decodeState = (raw: unknown): Effect.Effect<unknown, unknown> => {
+    if (stateSchema === undefined) return Effect.succeed(raw);
+    return Schema.decodeUnknownEffect(stateSchema)(raw) as Effect.Effect<unknown, unknown>;
+  };
   const decodeFailure = (cause: unknown): Effect.Effect<never, unknown> => {
-    if (decodeError === null || cause === undefined || cause === null) {
+    // No error schema, or a nullish cause, passes straight through undecoded.
+    if (errorSchema === undefined || cause === undefined || cause === null) {
       return Effect.fail(cause);
     }
-    return Effect.flatMap(decodeError(cause), (decoded) => Effect.fail(decoded));
+    const decoded = Schema.decodeUnknownEffect(errorSchema)(cause) as Effect.Effect<
+      unknown,
+      unknown
+    >;
+    return Effect.flatMap(decoded, (value) => Effect.fail(value));
   };
 
   const getStateFn = (
@@ -1706,9 +1711,11 @@ const transformHandlers = (
       const opaque = def?.payload !== undefined && isOpaquePayload(def.payload);
       transformed[tag] = (request: Record<string, unknown>) => {
         const raw = request["payload"];
-        const operation = opaque
-          ? { _tag: tag, _payload: raw }
-          : { _tag: tag, ...((raw ?? {}) as object) };
+        const buildOperation = (): Record<string, unknown> => {
+          if (opaque) return { _tag: tag, _payload: raw };
+          return { _tag: tag, ...((raw ?? {}) as object) };
+        };
+        const operation = buildOperation();
         const body = handler({ operation, request }) as Effect.Effect<unknown, unknown, unknown>;
         if (withScope === undefined) return body;
         return Effect.gen(function* () {
@@ -1736,14 +1743,14 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
 ): ActorRef<Name, Defs> => {
   const client = rpcClient as unknown as Record<string, Function>;
 
-  const bind = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-    boundContext === undefined
-      ? effect
-      : (Effect.context<never>().pipe(
-          Effect.flatMap((currentContext) =>
-            Effect.provideContext(effect, Context.merge(boundContext, currentContext)),
-          ),
-        ) as Effect.Effect<A, E, R>);
+  const bind = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> => {
+    if (boundContext === undefined) return effect;
+    return Effect.context<never>().pipe(
+      Effect.flatMap((currentContext) =>
+        Effect.provideContext(effect, Context.merge(boundContext, currentContext)),
+      ),
+    ) as Effect.Effect<A, E, R>;
+  };
 
   const rpcArg = (
     op: { readonly _tag: string; readonly [key: string]: unknown },
@@ -1760,35 +1767,48 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
       const fn = client[tag];
       if (!fn)
         return Effect.die(
-          new Error(`effect-encore: unknown operation "${tag}" on actor "${_actorName}"`),
+          new ActorDefect({
+            message: `effect-encore: unknown operation "${tag}" on actor "${_actorName}"`,
+          }),
         );
       const def = definitions[tag] as OperationDef | undefined;
       const arg = rpcArg(op, def);
-      return bind(arg !== undefined ? fn(arg) : fn());
+      const call = (): unknown => {
+        if (arg !== undefined) return fn(arg);
+        return fn();
+      };
+      return bind(call() as Effect.Effect<unknown, unknown, unknown>);
     },
     send: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
       const tag = op["_tag"];
       const fn = client[tag];
       if (!fn)
         return Effect.die(
-          new Error(`effect-encore: unknown operation "${tag}" on actor "${_actorName}"`),
+          new ActorDefect({
+            message: `effect-encore: unknown operation "${tag}" on actor "${_actorName}"`,
+          }),
         );
       const def = definitions[tag] as OperationDef | undefined;
       const arg = rpcArg(op, def);
-      const discardCall =
-        arg !== undefined ? fn(arg, { discard: true }) : fn(undefined, { discard: true });
+      const dispatchDiscarded = (): unknown => {
+        if (arg !== undefined) return fn(arg, { discard: true });
+        return fn(undefined, { discard: true });
+      };
+      const discardCall = dispatchDiscarded() as
+        | Effect.Effect<unknown, unknown, unknown>
+        | undefined;
       // Prefer the ORIGINAL id-input carried by `make`/`buildOpValue` (a live
       // `Schema.Class` instance keeps its prototype here). Re-deriving the id
       // from the struct-spread `op` would drop prototype methods and throw or
       // mint a divergent ExecId — diverging from `executionId`/`peek`. Fall
       // back to the spread-derived input for hand-built ops with no carrier.
       const carried = readOriginalIdPayload(op);
-      const pkInput =
-        carried !== undefined
-          ? carried
-          : def?.payload && isOpaquePayload(def.payload)
-            ? op["_payload"]
-            : op;
+      const resolvePkInput = (): unknown => {
+        if (carried !== undefined) return carried;
+        if (def?.payload && isOpaquePayload(def.payload)) return op["_payload"];
+        return op;
+      };
+      const pkInput = resolvePkInput();
       const { primaryKey } = resolveId(def, pkInput, tag);
       const execId = ExecIdCodec.encode({ entityId: _entityId, tag, primaryKey });
       return bind(Effect.map(discardCall ?? Effect.void, () => execId));
@@ -2089,9 +2109,9 @@ const fromWorkflow = <
   /* eslint-enable typescript-eslint/no-explicit-any */
   for (const [sigName, sigDef] of Object.entries(def.signals ?? {})) {
     if (WORKFLOW_RESERVED_KEYS.has(sigName)) {
-      throw new Error(
-        `effect-encore: signal "${sigName}" collides with reserved property on workflow "${name}". Reserved: ${[...WORKFLOW_RESERVED_KEYS].join(", ")}`,
-      );
+      throw new ActorDefect({
+        message: `effect-encore: signal "${sigName}" collides with reserved property on workflow "${name}". Reserved: ${[...WORKFLOW_RESERVED_KEYS].join(", ")}`,
+      });
     }
     // eslint-disable-next-line typescript-eslint/no-explicit-any
     signals[sigName] = makeSignal(wf as any, sigName, {

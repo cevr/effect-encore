@@ -24,10 +24,12 @@ const Validator = Actor.fromEntity("Validator", {
 
 const ValidatorTest = Layer.provide(
   Actor.toTestLayer(Validator, {
-    Validate: ({ operation }) =>
-      operation.input === "bad"
-        ? Effect.fail(ValidationError.make({ message: "invalid input" }))
-        : Effect.succeed(`validated: ${operation.input}`),
+    Validate: ({ operation }) => {
+      if (operation.input === "bad") {
+        return Effect.fail(ValidationError.make({ message: "invalid input" }));
+      }
+      return Effect.succeed(`validated: ${operation.input}`);
+    },
   }),
   TestShardingConfig,
 );

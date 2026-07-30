@@ -85,10 +85,12 @@ const Failable = Actor.fromWorkflow("Failable", {
 const FailableTest = Actor.toTestLayer(Failable, (payload, step) =>
   Effect.gen(function* () {
     const result = yield* step.run("check", {
-      do:
-        payload.input === "bad"
-          ? Effect.fail(StepError.make({ reason: "invalid" }))
-          : Effect.succeed(`ok: ${payload.input}`),
+      do: Effect.suspend(() => {
+        if (payload.input === "bad") {
+          return Effect.fail(StepError.make({ reason: "invalid" }));
+        }
+        return Effect.succeed(`ok: ${payload.input}`);
+      }),
       success: Schema.String,
       error: StepError,
     });

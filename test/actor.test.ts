@@ -4,6 +4,9 @@ import { ClusterSchema, ShardingConfig } from "effect/unstable/cluster";
 import * as DeliverAt from "effect/unstable/cluster/DeliverAt";
 import { Actor } from "../src/index.js";
 
+// Fixed instant: these cases assert DeliverAt/PrimaryKey wiring, not the clock.
+const FIXED_EPOCH_MS = 1_700_000_000_000;
+
 const TestShardingConfig = ShardingConfig.layer({
   shardsPerGroup: 300,
   entityMailboxCapacity: 10,
@@ -270,7 +273,7 @@ describe("deliverAt", () => {
 
     const rpc = Delayed._meta.entity.protocol.requests.get("Process")!;
     const payloadSchema = rpc.payloadSchema;
-    const now = DateTime.makeUnsafe(Date.now());
+    const now = DateTime.makeUnsafe(FIXED_EPOCH_MS);
     const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
       id: "test-123",
       deliverAt: now,
@@ -310,7 +313,7 @@ describe("deliverAt", () => {
 
     const rpc = DelayedOnly._meta.entity.protocol.requests.get("Fire")!;
     const payloadSchema = rpc.payloadSchema;
-    const now = DateTime.makeUnsafe(Date.now());
+    const now = DateTime.makeUnsafe(FIXED_EPOCH_MS);
     const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
       when: now,
     });
@@ -365,7 +368,7 @@ describe("deliverAt", () => {
       },
     });
 
-    const now = DateTime.makeUnsafe(Date.now());
+    const now = DateTime.makeUnsafe(FIXED_EPOCH_MS);
     const instance = ScheduledPayload.make({ id: "s-1", when: now });
 
     expect(instance[PrimaryKey.symbol]()).toBe("s-1");
