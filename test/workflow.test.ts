@@ -109,7 +109,7 @@ const FailingWorkflow = Actor.fromWorkflow("FailingWorkflow", {
 });
 
 const FailingTest = Actor.toTestLayer(FailingWorkflow, () =>
-  Effect.fail(new OrderError({ message: "boom" })),
+  Effect.fail(OrderError.make({ message: "boom" })),
 );
 
 describe("Actor.fromWorkflow — errors", () => {

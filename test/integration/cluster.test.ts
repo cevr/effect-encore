@@ -1,5 +1,5 @@
 import { describe, expect, it } from "effect-bun-test";
-import { Effect, Exit, Schema } from "effect";
+import { Effect, Exit, Layer, Schema } from "effect";
 import { TestRunner } from "effect/unstable/cluster";
 import { Actor } from "../../src/index.js";
 
@@ -30,11 +30,12 @@ const OrderActor = Actor.fromEntity("Order", {
 
 const orderHandlers = Actor.toLayer(OrderActor, {
   Place: ({ operation }) => Effect.succeed(`order: ${operation.item} x${operation.qty}`),
-  Cancel: () => Effect.fail(new OrderError({ message: "cannot cancel" })),
+  Cancel: () => Effect.fail(OrderError.make({ message: "cannot cancel" })),
   QuickCheck: ({ operation }) => Effect.succeed(`ok: ${operation.id}`),
 });
 
 const TestCluster = TestRunner.layer;
+const orderHandlersLayer = orderHandlers.pipe(Layer.provideMerge(TestCluster));
 const test = it.scopedLive;
 
 describe("cluster integration", () => {
@@ -42,7 +43,7 @@ describe("cluster integration", () => {
     Effect.gen(function* () {
       const result = yield* OrderActor.Place.execute({ item: "widget", qty: 3 });
       expect(result).toBe("order: widget x3");
-    }).pipe(Effect.provide(orderHandlers), Effect.provide(TestCluster)));
+    }).pipe(Effect.provide(orderHandlersLayer)));
 
   test("send -> peek round-trip with persistence", () =>
     Effect.gen(function* () {
@@ -54,7 +55,7 @@ describe("cluster integration", () => {
       if (result._tag === "Success") {
         expect(result.value).toBe("order: gadget x1");
       }
-    }).pipe(Effect.provide(orderHandlers), Effect.provide(TestCluster)));
+    }).pipe(Effect.provide(orderHandlersLayer)));
 
   test("peek returns Pending then Success as handler completes", () =>
     Effect.gen(function* () {
@@ -66,7 +67,7 @@ describe("cluster integration", () => {
 
       const result = yield* OrderActor.Place.peek({ item: "slow", qty: 1 });
       expect(result._tag).toBe("Success");
-    }).pipe(Effect.provide(orderHandlers), Effect.provide(TestCluster)));
+    }).pipe(Effect.provide(orderHandlersLayer)));
 
   test("failure/defect decode correctly from WithExit", () =>
     Effect.gen(function* () {
@@ -75,7 +76,7 @@ describe("cluster integration", () => {
 
       const result = yield* OrderActor.Cancel.peek({ reason: "test-fail" });
       expect(result._tag).toBe("Failure");
-    }).pipe(Effect.provide(orderHandlers), Effect.provide(TestCluster)));
+    }).pipe(Effect.provide(orderHandlersLayer)));
 
   test("duplicate primaryKey is idempotent", () =>
     Effect.gen(function* () {
@@ -85,7 +86,7 @@ describe("cluster integration", () => {
 
       const result = yield* OrderActor.Place.peek({ item: "dup", qty: 1 });
       expect(result._tag).toBe("Success");
-    }).pipe(Effect.provide(orderHandlers), Effect.provide(TestCluster)));
+    }).pipe(Effect.provide(orderHandlersLayer)));
 
   test("concurrent duplicate sends are idempotent", () =>
     Effect.gen(function* () {
@@ -101,11 +102,11 @@ describe("cluster integration", () => {
 
       const result = yield* OrderActor.Place.peek({ item: "herd", qty: 1 });
       expect(result._tag).toBe("Success");
-    }).pipe(Effect.provide(orderHandlers), Effect.provide(TestCluster)));
+    }).pipe(Effect.provide(orderHandlersLayer)));
 
   test("non-persisted call works without MessageStorage", () =>
     Effect.gen(function* () {
       const result = yield* OrderActor.QuickCheck.execute({ id: "fast" });
       expect(result).toBe("ok: fast");
-    }).pipe(Effect.provide(orderHandlers), Effect.provide(TestCluster)));
+    }).pipe(Effect.provide(orderHandlersLayer)));
 });

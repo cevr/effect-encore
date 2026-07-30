@@ -67,7 +67,7 @@ const ErrActor = Actor.fromEntity("ErrActor", {
 
 const ErrActorTest = Layer.provide(
   Actor.toTestLayer(ErrActor, {
-    Fail: () => Effect.fail(new HandlerError({ reason: "bad" })),
+    Fail: () => Effect.fail(HandlerError.make({ reason: "bad" })),
   }),
   TestShardingConfig,
 );

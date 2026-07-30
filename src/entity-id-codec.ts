@@ -55,7 +55,7 @@ export const entityIdCodec = <A extends ReadonlyArray<unknown>, I extends Readon
           decoded.push(decodeURIComponent(part));
         } catch {
           return Effect.fail(
-            new EntityIdDecodeError({
+            EntityIdDecodeError.make({
               entityId,
               reason: `segment "${part}" is not valid URI-encoded text`,
             }),

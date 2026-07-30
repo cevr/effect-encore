@@ -1,5 +1,5 @@
 import { describe, expect, it } from "effect-bun-test";
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { TestRunner } from "effect/unstable/cluster";
 import { Actor } from "../src/index.js";
 
@@ -24,17 +24,18 @@ const PeekableActor = Actor.fromEntity("PeekableActor", {
 
 const peekableHandlers = Actor.toLayer(PeekableActor, {
   Process: ({ operation }) => Effect.succeed(`processed: ${operation.input}`),
-  Fail: () => Effect.fail(new ProcessError({ message: "bad input" })),
+  Fail: () => Effect.fail(ProcessError.make({ message: "bad input" })),
 });
 
 const TestCluster = TestRunner.layer;
+const peekableHandlersLayer = peekableHandlers.pipe(Layer.provideMerge(TestCluster));
 
 describe("OperationHandle.peek", () => {
   it.scopedLive("returns Pending when handler has not completed", () =>
     Effect.gen(function* () {
       const result = yield* PeekableActor.Process.peek({ input: "nonexistent" });
       expect(result._tag).toBe("Pending");
-    }).pipe(Effect.provide(peekableHandlers), Effect.provide(TestCluster)),
+    }).pipe(Effect.provide(peekableHandlersLayer)),
   );
 
   it.scopedLive("returns Success with decoded value when handler succeeds", () =>
@@ -49,7 +50,7 @@ describe("OperationHandle.peek", () => {
       if (result._tag === "Success") {
         expect(result.value).toBe("processed: hello");
       }
-    }).pipe(Effect.provide(peekableHandlers), Effect.provide(TestCluster)),
+    }).pipe(Effect.provide(peekableHandlersLayer)),
   );
 
   it.scopedLive("returns Failure with decoded error when handler fails", () =>
@@ -60,6 +61,6 @@ describe("OperationHandle.peek", () => {
 
       const result = yield* PeekableActor.Fail.peek({ input: "bad" });
       expect(result._tag).toBe("Failure");
-    }).pipe(Effect.provide(peekableHandlers), Effect.provide(TestCluster)),
+    }).pipe(Effect.provide(peekableHandlersLayer)),
   );
 });

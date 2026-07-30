@@ -274,7 +274,7 @@ describe("step DSL type-level tests", () => {
     const _check = Actor.toTestLayer(FailableWorkflow, (_payload, step) =>
       Effect.gen(function* () {
         // @ts-expect-error — shorthand requires E = never, failable effects must use full options
-        yield* step.run("bad", Effect.fail(new OrderError({ message: "boom" })));
+        yield* step.run("bad", Effect.fail(OrderError.make({ message: "boom" })));
         return "ok";
       }),
     );

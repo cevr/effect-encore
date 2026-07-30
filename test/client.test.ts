@@ -26,7 +26,7 @@ const ValidatorTest = Layer.provide(
   Actor.toTestLayer(Validator, {
     Validate: ({ operation }) =>
       operation.input === "bad"
-        ? Effect.fail(new ValidationError({ message: "invalid input" }))
+        ? Effect.fail(ValidationError.make({ message: "invalid input" }))
         : Effect.succeed(`validated: ${operation.input}`),
   }),
   TestShardingConfig,
@@ -140,6 +140,7 @@ describe("OperationHandle.watch", () => {
   const castHandlerLayer = Actor.toLayer(CastActor, {
     Process: ({ operation }) => Effect.succeed(`processed: ${operation.input}`),
   });
+  const castHandlerWithRunner = castHandlerLayer.pipe(Layer.provideMerge(TestRunner.layer));
 
   it.scopedLive("emits Pending then Success when handler completes, then completes stream", () =>
     Effect.gen(function* () {
@@ -163,6 +164,6 @@ describe("OperationHandle.watch", () => {
       if (last._tag === "Success") {
         expect(last.value).toBe("processed: watch-test");
       }
-    }).pipe(Effect.provide(castHandlerLayer), Effect.provide(TestRunner.layer)),
+    }).pipe(Effect.provide(castHandlerWithRunner)),
   );
 });

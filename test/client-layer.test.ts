@@ -146,8 +146,15 @@ describe("Client.layer.fromConfig", () => {
 
 const consumerHandlers = Actor.toLayer(ClientActor, {
   Process: ({ operation }) => Effect.succeed(`processed: ${operation.input}`),
-  Fail: () => Effect.fail(new ProcessError({ message: "bad" })),
+  Fail: () => Effect.fail(ProcessError.make({ message: "bad" })),
 });
+
+const FromShardingLayer = ClientLayer.fromSharding.pipe(Layer.provideMerge(TestRunner.layer));
+
+const FromShardingWithHandlers = ClientLayer.fromSharding.pipe(
+  Layer.provideMerge(consumerHandlers),
+  Layer.provideMerge(TestRunner.layer),
+);
 
 describe("Client.layer.fromSharding", () => {
   it.scopedLive(
@@ -164,7 +171,7 @@ describe("Client.layer.fromSharding", () => {
           processOpValue("snow"),
         );
         expect(String(execId)).toBe("snow\x00Process\x00snow");
-      }).pipe(Effect.provide(ClientLayer.fromSharding), Effect.provide(TestRunner.layer)),
+      }).pipe(Effect.provide(FromShardingLayer)),
   );
 
   it.scopedLive("send → handler processes → peek classifies Success → flush clears", () =>
@@ -187,11 +194,7 @@ describe("Client.layer.fromSharding", () => {
       yield* client.flush(processEntity, "e2e");
       const afterFlush = yield* client.peek(processEntity, "e2e\x00Process\x00e2e", processDefs);
       expect(afterFlush._tag).toBe("Pending");
-    }).pipe(
-      Effect.provide(ClientLayer.fromSharding),
-      Effect.provide(consumerHandlers),
-      Effect.provide(TestRunner.layer),
-    ),
+    }).pipe(Effect.provide(FromShardingWithHandlers)),
   );
 
   it.scopedLive("peek classifies a typed handler Failure through the ReplySource seam", () =>
@@ -208,11 +211,7 @@ describe("Client.layer.fromSharding", () => {
       if (terminal._tag === "Failure") {
         expect((terminal.error as ProcessError)._tag).toBe("ProcessError");
       }
-    }).pipe(
-      Effect.provide(ClientLayer.fromSharding),
-      Effect.provide(consumerHandlers),
-      Effect.provide(TestRunner.layer),
-    ),
+    }).pipe(Effect.provide(FromShardingWithHandlers)),
   );
 });
 
@@ -238,7 +237,7 @@ const TestShardingConfig = ShardingConfig.layer({ entityTerminationTimeout: 0 })
 const ClientActorTest = Layer.provide(
   Actor.toTestLayer(ClientActor, {
     Process: ({ operation }) => Effect.succeed(`processed: ${operation.input}`),
-    Fail: () => Effect.fail(new ProcessError({ message: "bad" })),
+    Fail: () => Effect.fail(ProcessError.make({ message: "bad" })),
   }),
   TestShardingConfig,
 );
@@ -290,7 +289,7 @@ describe("Actor.toTestLayer (inline test-mailbox composition)", () => {
 const directHandlerLayer = ClientActor._meta.entity.toLayer({
   Process: ({ operation }: { operation: { input: string } }) =>
     Effect.succeed(`processed: ${operation.input}`),
-  Fail: () => Effect.fail(new ProcessError({ message: "bad" })),
+  Fail: () => Effect.fail(ProcessError.make({ message: "bad" })),
 } as never);
 
 const dispatchedRef = Effect.runSync(

@@ -338,7 +338,7 @@ describe("deliverAt", () => {
     });
 
     const rpc = WithCustom._meta.entity.protocol.requests.get("Process")!;
-    const instance = new CustomPayload({ id: "xyz", value: 42 });
+    const instance = CustomPayload.make({ id: "xyz", value: 42 });
 
     expect(instance[PrimaryKey.symbol]()).toBe("xyz");
     expect(rpc.payloadSchema).toBe(CustomPayload);
@@ -366,7 +366,7 @@ describe("deliverAt", () => {
     });
 
     const now = DateTime.makeUnsafe(Date.now());
-    const instance = new ScheduledPayload({ id: "s-1", when: now });
+    const instance = ScheduledPayload.make({ id: "s-1", when: now });
 
     expect(instance[PrimaryKey.symbol]()).toBe("s-1");
     expect(DeliverAt.isDeliverAt(instance)).toBe(true);
@@ -423,7 +423,7 @@ describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () 
 
   routedTest("send(payload) ExecId === executionId(payload) for a class-instance id", () =>
     Effect.gen(function* () {
-      const payload = new RoutingKey({ region: "us", seq: 7 });
+      const payload = RoutingKey.make({ region: "us", seq: 7 });
       // Without the fix, `Client.send` re-derives the id from the struct-spread
       // `opValue`, whose `routingKey` method is gone — so this either throws or
       // mints a divergent ExecId. With the fix, send derives from `payload`.
@@ -447,7 +447,7 @@ describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () 
     "ref.send(make(payload)) ExecId === executionId(payload) for a class-instance id",
     () =>
       Effect.gen(function* () {
-        const payload = new RoutingKey({ region: "us", seq: 7 });
+        const payload = RoutingKey.make({ region: "us", seq: 7 });
         const makeRef = yield* Routed.Context;
         // entityId === routingKey() === "us-7", so the ref binds to that entity.
         const ref = yield* makeRef("us-7");

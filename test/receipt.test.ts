@@ -226,7 +226,7 @@ describe("mapExitToWorkflowPeekResult (workflow — real Exit.Exit)", () => {
   });
 
   test("Fail maps to Failure", () => {
-    const err = new OrderError({ message: "boom" });
+    const err = OrderError.make({ message: "boom" });
     const result = mapExitToWorkflowPeekResult(Exit.fail(err));
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") expect(result.error).toBe(err);

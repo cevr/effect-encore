@@ -87,7 +87,7 @@ const FailableTest = Actor.toTestLayer(Failable, (payload, step) =>
     const result = yield* step.run("check", {
       do:
         payload.input === "bad"
-          ? Effect.fail(new StepError({ reason: "invalid" }))
+          ? Effect.fail(StepError.make({ reason: "invalid" }))
           : Effect.succeed(`ok: ${payload.input}`),
       success: Schema.String,
       error: StepError,
