@@ -151,6 +151,9 @@ export const decodeValue = (
   value: unknown,
 ): Effect.Effect<unknown> => {
   if (!schema) return Effect.succeed(value);
+  // Decoding is best-effort: an undecodable value falls back to the raw input.
+  // The schema is type-erased here, so its decoding services are unknown; the
+  // assertion drops them because callers never supply them.
   const decode = Schema.decodeUnknownEffect(schema)(value) as Effect.Effect<unknown, unknown>;
   return Effect.map(
     Effect.option(decode),

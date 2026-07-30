@@ -342,9 +342,7 @@ export const makeStepContext = <
         return `${instance.executionId}/${name}`;
       }),
 
-    attempt: Effect.gen(function* () {
-      return yield* UpstreamActivity.CurrentAttempt;
-    }),
+    attempt: UpstreamActivity.CurrentAttempt,
 
     suspend: Effect.gen(function* () {
       const instance = yield* WorkflowInstance;

@@ -11,9 +11,8 @@ import { State } from "../src/index.js";
 const makeCounter = (initial: number) =>
   Effect.gen(function* () {
     const ref = yield* SubscriptionRef.make(initial);
-    const state = yield* State.make(
-      () => SubscriptionRef.get(ref),
-      (value: number) => SubscriptionRef.set(ref, value),
+    const state = yield* State.make(SubscriptionRef.get(ref), (value: number) =>
+      SubscriptionRef.set(ref, value),
     );
     return { state, ref } as const;
   });

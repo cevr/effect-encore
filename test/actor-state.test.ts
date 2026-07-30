@@ -26,9 +26,8 @@ const StatefulLayer = Layer.provide(
     Stateful,
     Effect.gen(function* () {
       const ref = yield* SubscriptionRef.make(0);
-      const state = yield* Actor.State.make(
-        () => SubscriptionRef.get(ref),
-        (value) => SubscriptionRef.set(ref, value),
+      const state = yield* Actor.State.make(SubscriptionRef.get(ref), (value) =>
+        SubscriptionRef.set(ref, value),
       );
       yield* Actor.registerState(state);
       return Stateful.of({
@@ -61,9 +60,8 @@ const CoercedLayer = Layer.provide(
       // ("42"); the registry decodes it through `state.schema`
       // (`Schema.NumberFromString`) on read.
       const ref = yield* SubscriptionRef.make("42" as unknown as number);
-      const state = yield* Actor.State.make(
-        () => SubscriptionRef.get(ref),
-        (value) => SubscriptionRef.set(ref, value),
+      const state = yield* Actor.State.make(SubscriptionRef.get(ref), (value) =>
+        SubscriptionRef.set(ref, value),
       );
       yield* Actor.registerState(state);
       return Coerced.of({ Touch: () => Effect.void });
@@ -120,7 +118,7 @@ describe("Actor state protocol", () => {
 
       expect(yield* state.get("state-service")).toBe(3);
       expect(yield* state.waitFor("state-service", (value) => value >= 3)).toBe(3);
-      expect(yield* state.listEntityIds()).toContain("state-service");
+      expect(yield* state.listEntityIds).toContain("state-service");
     }));
 
   test("Control service exposes bound mailbox operations", () =>

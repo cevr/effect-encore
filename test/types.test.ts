@@ -241,7 +241,7 @@ describe("type-level tests", () => {
   test("registerState consumes a State<A> built via Actor.State.make", () => {
     const _check = Effect.gen(function* () {
       const state = yield* Actor.State.make(
-        (): Effect.Effect<number> => Effect.succeed(0),
+        Effect.succeed<number>(0),
         (_value: number) => Effect.void,
       );
       yield* Actor.registerState(state);

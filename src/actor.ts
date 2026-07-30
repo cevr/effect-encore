@@ -426,7 +426,7 @@ export interface ActorStateClient<State, Error = never> {
     Error | MaterializeError | ActorStateUnavailable,
     MaterializeRequirements
   >;
-  readonly listEntityIds: () => Effect.Effect<ReadonlyArray<string>>;
+  readonly listEntityIds: Effect.Effect<ReadonlyArray<string>>;
 }
 
 declare const ActorControlClientServiceId: unique symbol;
@@ -1684,7 +1684,7 @@ const makeActorStateLayer = <Name extends string, Defs extends OperationDefs, St
         watch: (entityId, options) => provideStreamSupport(actor.watchState(entityId, options)),
         waitFor: (entityId, predicate, options) =>
           provideEffectSupport(actor.waitForState(entityId, predicate, options)),
-        listEntityIds: () => provideEffectSupport(actor.listStateEntityIds()),
+        listEntityIds: provideEffectSupport(actor.listStateEntityIds()),
       } satisfies ActorStateClient<State, StateError>;
     }),
   );

@@ -231,12 +231,10 @@ describe("WorkflowActor.rerun", () => {
 
           // Poll for the clock entry to land in storage. step.sleep schedules
           // the clock asynchronously, so a tight check would race.
-          yield* Effect.gen(function* () {
-            for (let i = 0; i < 20; i++) {
-              if (countClockEntries() > 0) return;
-              yield* Effect.sleep("50 millis");
-            }
-          });
+          for (let i = 0; i < 20; i++) {
+            if (countClockEntries() > 0) break;
+            yield* Effect.sleep("50 millis");
+          }
           expect(countClockEntries()).toBeGreaterThan(0);
 
           // Rerun should wipe the clock entry alongside the workflow's own state.
