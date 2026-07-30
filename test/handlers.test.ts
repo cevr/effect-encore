@@ -11,8 +11,8 @@ const TestShardingConfig = ShardingConfig.layer({
 
 const Counter = Actor.fromEntity("Counter", {
   Increment: {
-    payload: { amount: Schema.Number },
-    success: Schema.Number,
+    payload: { amount: Schema.Finite },
+    success: Schema.Finite,
     id: (p: { amount: number }) => String(p.amount),
   },
   GetCount: {
@@ -35,8 +35,8 @@ const test = it.scopedLive.layer(CounterTest);
 
 const GenActor = Actor.fromEntity("GenActor", {
   Compute: {
-    payload: { x: Schema.Number },
-    success: Schema.Number,
+    payload: { x: Schema.Finite },
+    success: Schema.Finite,
     id: (p: { x: number }) => String(p.x),
   },
 });

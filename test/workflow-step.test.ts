@@ -20,8 +20,8 @@ const GreeterTest = Actor.toTestLayer(Greeter, (payload, step) =>
 // ── Workflow with step.run full options ─────────────────────────────────
 
 const Calculator = Actor.fromWorkflow("Calculator", {
-  payload: { x: Schema.Number, y: Schema.Number },
-  success: Schema.Number,
+  payload: { x: Schema.Finite, y: Schema.Finite },
+  success: Schema.Finite,
   id: (p: { x: number; y: number }) => `${p.x}+${p.y}`,
 });
 
@@ -29,7 +29,7 @@ const CalculatorTest = Actor.toTestLayer(Calculator, (payload, step) =>
   Effect.gen(function* () {
     const result = yield* step.run("add", {
       do: Effect.succeed(payload.x + payload.y),
-      success: Schema.Number,
+      success: Schema.Finite,
     });
     return result;
   }),
@@ -57,7 +57,7 @@ const WithUndoTest = Actor.toTestLayer(WithUndo, (payload, step) =>
 // ── Workflow with step.sleep ───────────────────────────────────────────
 
 const Sleeper = Actor.fromWorkflow("Sleeper", {
-  payload: { ms: Schema.Number },
+  payload: { ms: Schema.Finite },
   success: Schema.String,
   id: (p: { ms: number }) => String(p.ms),
 });

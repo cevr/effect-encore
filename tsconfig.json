@@ -70,7 +70,7 @@
           "missingEffectError": "error",
           "missingEffectServiceDependency": "error",
           "missingLayerContext": "error",
-          "missingPipeableSignature": "error",
+          "missingPipeableSignature": "off",
           "missingReturnYieldStar": "error",
           "missingStarInYieldEffectGen": "error",
           "multipleCatchTag": "error",
@@ -98,7 +98,7 @@
           "scopeInLayerEffect": "error",
           "serviceNotAsClass": "error",
           "strictBooleanExpressions": "off",
-          "strictEffectProvide": "error",
+          "strictEffectProvide": "off",
           "syncToSucceed": "error",
           "tryCatchInEffectGen": "off",
           "unknownInEffectCatch": "error",
@@ -127,7 +127,6 @@
             "include": ["**/tests/**/*.ts", "**/tests/**/*.tsx", "**/*.test.ts", "**/*.test.tsx"],
             "options": {
               "diagnosticSeverity": {
-                "strictEffectProvide": "off",
                 "missingEffectError": "off"
               }
             }

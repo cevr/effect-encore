@@ -58,7 +58,7 @@ describe("WorkflowActor.rerun", () => {
 
       const Replay = Actor.fromWorkflow("ReplayWorkflow", {
         payload: { id: Schema.String },
-        success: Schema.Number,
+        success: Schema.Finite,
         id: (p: { id: string }) => p.id,
       });
 
@@ -148,7 +148,7 @@ describe("WorkflowActor.rerun", () => {
 
       const WithActivity = Actor.fromWorkflow("ActivityWorkflow", {
         payload: { id: Schema.String },
-        success: Schema.Number,
+        success: Schema.Finite,
         id: (p: { id: string }) => p.id,
       });
 

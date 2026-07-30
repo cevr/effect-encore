@@ -15,12 +15,12 @@ const TestShardingConfig = ShardingConfig.layer({
 
 const Counter = Actor.fromEntity("Counter", {
   Increment: {
-    payload: { amount: Schema.Number },
-    success: Schema.Number,
+    payload: { amount: Schema.Finite },
+    success: Schema.Finite,
     id: (p: { amount: number }) => String(p.amount),
   },
   GetCount: {
-    success: Schema.Number,
+    success: Schema.Finite,
     id: () => "singleton",
   },
 });
@@ -190,8 +190,8 @@ describe("OperationHandle dispatch via toTestLayer", () => {
     Effect.gen(function* () {
       const NsCounter = Actor.fromEntity("NsCounter", {
         Bump: {
-          payload: { ns: Schema.String, amount: Schema.Number },
-          success: Schema.Number,
+          payload: { ns: Schema.String, amount: Schema.Finite },
+          success: Schema.Finite,
           id: (p: { ns: string; amount: number }) => ({
             entityId: `ns:${p.ns}`,
             primaryKey: String(p.amount),
@@ -324,7 +324,7 @@ describe("deliverAt", () => {
   test("accepts pre-built Schema.Class as input — uses it directly", () => {
     class CustomPayload extends Schema.Class<CustomPayload>("test/CustomPayload")({
       id: Schema.String,
-      value: Schema.Number,
+      value: Schema.Finite,
     }) {
       [PrimaryKey.symbol](): string {
         return this.id;
@@ -392,7 +392,7 @@ describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () 
   // the instance fields does NOT carry it — exercising the divergence directly.
   class RoutingKey extends Schema.Class<RoutingKey>("test/RoutingKey")({
     region: Schema.String,
-    seq: Schema.Number,
+    seq: Schema.Finite,
   }) {
     // Derives the id from instance fields via a prototype method. A struct-spread
     // reconstruction of this instance drops `routingKey`, so calling it on the

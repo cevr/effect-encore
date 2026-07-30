@@ -9,7 +9,7 @@ class OrderError extends Schema.TaggedErrorClass<OrderError>()("OrderError", {
 
 const OrderActor = Actor.fromEntity("Order", {
   Place: {
-    payload: { item: Schema.String, qty: Schema.Number },
+    payload: { item: Schema.String, qty: Schema.Finite },
     success: Schema.String,
     persisted: true,
     // entityId === primaryKey === "${item}-${qty}"

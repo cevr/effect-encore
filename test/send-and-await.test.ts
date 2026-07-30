@@ -50,7 +50,7 @@ const SendAwaitActor = Actor.fromEntity("SendAwaitActor", {
   },
   Count: {
     payload: { input: Schema.String },
-    success: Schema.Number,
+    success: Schema.Finite,
     persisted: true,
     id: (p: { input: string }) => p.input,
   },
@@ -80,7 +80,7 @@ const TestCluster = TestRunner.layer;
 // over a real cluster host (not the test-mailbox shortcut).
 class RoutedKey extends Schema.Class<RoutedKey>("send-await/RoutedKey")({
   region: Schema.String,
-  seq: Schema.Number,
+  seq: Schema.Finite,
 }) {
   routingKey(): string {
     return `${this.region}-${this.seq}`;

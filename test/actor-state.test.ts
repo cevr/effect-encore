@@ -13,12 +13,12 @@ const Stateful = Actor.fromEntity(
   "Stateful",
   {
     Increment: {
-      payload: { id: Schema.String, amount: Schema.Number },
-      success: Schema.Number,
+      payload: { id: Schema.String, amount: Schema.Finite },
+      success: Schema.Finite,
       id: (p: { id: string }) => p.id,
     },
   },
-  { state: { schema: Schema.Number } },
+  { state: { schema: Schema.Finite } },
 );
 
 const StatefulLayer = Layer.provide(
@@ -49,7 +49,7 @@ const Coerced = Actor.fromEntity(
       id: (p: { id: string }) => p.id,
     },
   },
-  { state: { schema: Schema.NumberFromString } },
+  { state: { schema: Schema.FiniteFromString } },
 );
 
 const CoercedLayer = Layer.provide(

@@ -34,7 +34,7 @@ const Order = Actor.fromEntity("Order", {
     id: (p: { item: string }) => p.item,
   },
   Count: {
-    success: Schema.Number,
+    success: Schema.Finite,
     id: () => "singleton",
   },
 });
@@ -43,12 +43,12 @@ const StatefulCounter = Actor.fromEntity(
   "StatefulCounter",
   {
     Add: {
-      payload: { id: Schema.String, amount: Schema.Number },
-      success: Schema.Number,
+      payload: { id: Schema.String, amount: Schema.Finite },
+      success: Schema.Finite,
       id: (p: { id: string }) => p.id,
     },
   },
-  { state: { schema: Schema.Number } },
+  { state: { schema: Schema.Finite } },
 );
 
 const Greeter = Actor.fromWorkflow("Greeter", {
