@@ -8,7 +8,7 @@
  * Named after rivet's `Client` (see `docs/adr/0001-actor-runtime-seams.md` —
  * Rivet's API is a DX target, not its runtime). Unlike Bite's `cad5fc7` thin
  * `Client.layer` namespace (which only re-bundled the three sender Tags), this
- * is a DEEP `Context.Service` Tag (decision #1, `CONTEXT.md:21-25`): it OWNS
+ * is a deep `Context.Service` Tag (ADR-0002): it owns
  * `send / peek / flush / redeliver / resolve` and pulls the wire-envelope
  * builder INSIDE the seam. Address resolution stays an INTERNAL strategy the
  * Client holds (`ActorAddressResolver`), not a public Tag.
@@ -207,7 +207,7 @@ export type ClientSendError =
 export interface ClientShape {
   /**
    * Resolve the destination address for `entityId` via the Client's internal
-   * `ActorAddressResolver` strategy (decision #1: resolution is internal, not a
+   * `ActorAddressResolver` strategy (ADR-0002: resolution is internal, not a
    * public Tag).
    */
   readonly resolve: (

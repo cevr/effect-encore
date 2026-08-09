@@ -1,11 +1,11 @@
 ---
 name: effect-encore
-description: Declarative actors and durable workflows for @effect/cluster. Use when building actor/entity definitions with effect-encore, wiring handlers, writing execute/send/peek/watch patterns, testing actors, defining workflows with the step DSL, or migrating from raw @effect/cluster Entity/Rpc/RpcGroup code.
+description: Declarative actors and durable workflows for Effect v4 Cluster. Use when building actor/entity definitions with effect-encore, wiring handlers, writing execute/send/peek/watch patterns, testing actors, defining workflows with the step DSL, or migrating from raw Effect Cluster Entity/Rpc/RpcGroup code.
 ---
 
 # effect-encore
 
-Declarative actors and durable workflows for `@effect/cluster`. Unified call site for entities and workflows with a step DSL for durable orchestration.
+Declarative actors and durable workflows for Effect v4 Cluster. Unified call site for entities and workflows with a step DSL for durable orchestration.
 
 ## Navigation
 
@@ -22,7 +22,6 @@ What are you working on?
 ├─ Lifecycle (interrupt/resume/flush/redeliver) → §Lifecycle
 ├─ Delayed delivery (deliverAt)    → §DeliverAt
 ├─ Observability                   → §Observability
-├─ v3 compatibility                → §v3
 └─ Migrating from raw cluster      → §Migration
 ```
 
@@ -33,7 +32,7 @@ What are you working on?
 - **Value dispatch.** Construct an operation value, pass it to `ref.execute(op)` or `ref.send(op)`.
 - **One layer, two roles.** `Actor.toLayer(actor, handlers)` = consumer + producer. `Actor.toLayer(actor)` = producer only.
 - **Step DSL.** Workflow handlers receive `(payload, step)` — no raw `Activity`/`DurableDeferred`/`DurableClock` imports needed.
-- **Compiles to @effect/cluster.** Not a new runtime. `Actor.fromEntity` produces an `Entity`, `Actor.fromWorkflow` wraps `Workflow.make`.
+- **Compiles to Effect Cluster.** Not a new runtime. `Actor.fromEntity` produces an `Entity`, `Actor.fromWorkflow` wraps `Workflow.make`.
 
 ## Entity
 
@@ -248,13 +247,11 @@ yield * step.sleep("delay", "5 seconds", { inMemoryThreshold: "2 seconds" });
 ### step.race — first activity to complete
 
 ```ts
-import { Activity } from "effect/unstable/workflow"; // only needed for race step types
-
 const winner =
   yield *
   step.race("fastest", [
-    Activity.make({ name: "a", success: Schema.String, execute: taskA }),
-    Activity.make({ name: "b", success: Schema.String, execute: taskB }),
+    { name: "a", success: Schema.String, execute: taskA },
+    { name: "b", success: Schema.String, execute: taskB },
   ]);
 ```
 
@@ -620,18 +617,6 @@ const Scheduled = Actor.fromEntity("Scheduled", {
 ## Observability
 
 Cluster creates spans `EntityType(entityId).RpcTag` automatically. No custom middleware needed. Pass extra attributes via `HandlerOptions.spanAttributes`.
-
-## v3
-
-Import from `effect-encore/v3`. Same API, different import paths:
-
-| v4                         | v3                   |
-| -------------------------- | -------------------- |
-| `effect/unstable/cluster`  | `@effect/cluster`    |
-| `effect/unstable/rpc`      | `@effect/rpc`        |
-| `effect/unstable/workflow` | `@effect/workflow`   |
-| `Schema.Top`               | `Schema.Schema.Any`  |
-| `Context.Service`          | `Context.GenericTag` |
 
 ## Migration
 

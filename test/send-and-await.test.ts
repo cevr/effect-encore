@@ -212,7 +212,7 @@ describe("OperationHandle.sendAndAwait", () => {
           { timeout: "300 millis" },
         ).pipe(Effect.flip);
         // The seam resolved via the default fallback: we reach the poll timeout,
-        // NOT a `Service not found: ReplySource` defect.
+        // NOT a missing internal reply reader.
         expect(error).toBeInstanceOf(SendAndAwaitTimeout);
         expect((error as SendAndAwaitTimeout).entityType).toBe("SendAwaitActor");
       }).pipe(Effect.provide(senderOnlyHost)),

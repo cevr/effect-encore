@@ -2,7 +2,7 @@
  * Deep `Client` transport seam coverage (E5).
  *
  * The `Client` Tag OWNS `send / peek / flush / redeliver / resolve` and pulls
- * the wire-envelope builder INSIDE the seam (decision #1, CONTEXT.md:21-25).
+ * the wire-envelope builder inside the seam (ADR-0002).
  * This file drives each of the four adapters
  * (`fromConfig` / `fromSharding` / `memory` / `test`) end-to-end and pins three
  * load-bearing invariants the move risks:
@@ -251,7 +251,7 @@ describe("Actor.toTestLayer (inline test-mailbox composition)", () => {
 // ── Client.layer.test — the exported adapter, driven DIRECTLY ───────────────
 //
 // `Client.layer.test` is the ONLY adapter that builds the deep Client over an
-// INJECTED `ActorMailbox` (decision #1's 4th adapter); it bundles pure-data
+// INJECTED `ActorMailbox` (ADR-0002's test adapter); it bundles pure-data
 // resolver/storage/snowflake internally so its sole outstanding requirement is
 // `ActorMailbox` + `ShardingConfig`. `Actor.toTestLayer` does NOT consume it
 // (it inlines `clientServiceLayer` over its own bundled storage, which — per the

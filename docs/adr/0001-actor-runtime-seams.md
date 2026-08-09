@@ -1,6 +1,6 @@
 # ADR-0001 — Actor-runtime seams: Client, State&lt;A&gt;, ReplySource
 
-- **Status:** accepted
+- **Status:** superseded by ADR-0002
 - **Date:** 2026-06-22
 - **Scope:** effect-encore `src/` (v4-only). The `v3/` compat leg was removed as part of this change — the package is now v4-only.
 

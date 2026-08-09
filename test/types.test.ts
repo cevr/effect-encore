@@ -89,7 +89,7 @@ type _PeekResultHasSuspended = Assert<
 describe("type-level tests", () => {
   // E5: the `.send` requirement collapses from the former
   // `ActorMailbox | ActorAddressResolver | Snowflake.Generator` triad to the
-  // single deep `Client` transport Tag (decision #1, CONTEXT.md:21-25). The
+  // single deep `Client` transport Tag (ADR-0002). The
   // wire-builder + mailbox/resolver/snowflake strategy are pulled INSIDE the
   // seam, so a producer composes the one `Client` Tag into its `R`. We pin the
   // exact E/R contract once (here); the remaining `.send` tests stay loose with
@@ -247,7 +247,7 @@ describe("type-level tests", () => {
     void _direct;
   });
 
-  // E4: `registerState` consumes a `State<A>` (decision #2 consume-point), NOT
+  // `registerState` consumes a `State<A>` (ADR-0002), not
   // a `{get, watch}` handle. `ActorStateHandle` is registry-internal and left
   // the public barrel — only `State<A>` is the public state vocabulary.
   test("registerState consumes a State<A> built via Actor.State.make", () => {

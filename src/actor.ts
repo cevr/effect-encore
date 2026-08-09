@@ -131,7 +131,7 @@ export type { EntityIdReturn, OperationDef, OperationDefs };
  * Requirement bundle for hosts that send messages to actors.
  *
  * Producer-side `.send` composes into a single transport Tag — the deep
- * `Client` seam (decision #1, `CONTEXT.md:21-25`) — which owns the
+ * `Client` seam (ADR-0002) — which owns the
  * wire-envelope builder and the mailbox/resolver/snowflake strategy internally.
  * Use `Actor.SenderContext` in `R` instead of re-listing the former
  * `MessageStorage | ActorAddressResolver | Sharding` triad at every producer-op
@@ -778,7 +778,7 @@ const compileRpc = (actorName: string, tag: string, def: OperationDef): Rpc.Any 
 // The OutgoingRequest builder (`buildOutgoingRequestForSend`), the test-mailbox
 // router (`makeTestMailboxImpl`), the address helper (`resolveEntityAddress`),
 // and the `flush`/`redeliver` storage ops all moved INSIDE the `Client` seam
-// (`client.ts`, decision #1). `actor.ts` imports the ones it still needs
+// (`client.ts`, ADR-0002). `actor.ts` imports the ones it still needs
 // directly (`resolveEntityAddress` for the state/rerun ops) and routes
 // dispatch + control through the `Client` Tag.
 
@@ -1126,7 +1126,7 @@ const makeOperationHandle = <
 
   const invocationOf = (payload: unknown) => compileInvocation(entityAny, tag, def, payload);
 
-  // .send dispatches through the deep `Client` seam (decision #1). The Client
+  // .send dispatches through the deep `Client` seam (ADR-0002). The Client
   // owns the wire-envelope builder + the mailbox/resolver/snowflake strategy
   // internally, so the producer-side requirement collapses from the former
   // `ActorMailbox | ActorAddressResolver | Snowflake.Generator` triad to a
@@ -1535,7 +1535,7 @@ const makeActorControlLayer = <Name extends string, Defs extends OperationDefs>(
   Layer.effect(
     actor.Control,
     Effect.gen(function* () {
-      // The control ops route through the deep `Client` seam (decision #1), so
+      // The control ops route through the deep `Client` seam (ADR-0002), so
       // the layer captures the single `Client` Tag at build time and closes it
       // over each op — collapsing the requirement to `never` per method, in
       // lockstep with the rewired `actor.interrupt/flush/redeliver` (which now

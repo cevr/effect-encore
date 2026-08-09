@@ -1,4 +1,6 @@
-# effect-encore actor-runtime reshape — port plan
+# effect-encore actor-runtime reshape — historical port plan
+
+> ADR-0002 supersedes the final seam decisions in this plan.
 
 > Synthesized authoritative plan. Merges the PORT-FIDELITY-FIRST plan (A) and the
 > DEEPENING-FIRST plan (B) and resolves both adversarial cross-reviews. Every claim

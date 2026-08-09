@@ -6,7 +6,7 @@ Declarative actors and durable workflows for effect v4 (`effect/unstable/cluster
 bun add effect-encore
 ```
 
-Peer dependency: `effect >= 4.0.0-beta.66`. v4-only — for `effect@3` / `@effect/cluster` compat, pin the last `0.12.x` release.
+Peer dependency: `effect >= 4.0.0-beta.106`. This package supports Effect v4 only.
 
 ## Why
 
@@ -147,16 +147,16 @@ watch it through the actor, keyed by the same `entityId` used for operations.
 `State<A>` is a typed view over the cell plus a subscribable change stream:
 `State.get` / `State.set` / `State.update` / `State.updateAndGet` / `State.modify`
 serialize their read/apply/write/publish through a per-`State` lock, and
-`State.changes` is a replay-1 stream of every committed write.
+`State.changes` is a replay-1 stream of every committed write. The state value is
+opaque. Use these functions instead of its internal closures or synchronization.
 
 ```ts
 const CounterLive = Actor.toLayer(
   Counter,
   Effect.gen(function* () {
     const ref = yield* SubscriptionRef.make(0);
-    const state = yield* Actor.State.make(
-      () => SubscriptionRef.get(ref),
-      (value) => SubscriptionRef.set(ref, value),
+    const state = yield* Actor.State.make(SubscriptionRef.get(ref), (value) =>
+      SubscriptionRef.set(ref, value),
     );
 
     yield* Actor.registerState(state);
@@ -195,8 +195,8 @@ const MessageStorageLive = fromSqlClient().pipe(
 );
 ```
 
-`fromSqlClient()` provides both upstream `MessageStorage.MessageStorage` and
-Encore's `EncoreMessageStorage`. It uses Effect Cluster's default
+`fromSqlClient()` provides upstream `MessageStorage.MessageStorage` and Encore's
+internal rerun deletion operations. It uses Effect Cluster's default
 `cluster_messages` / `cluster_replies` tables and default sharding config. Use
 `fromSqlClientWithShardingConfig()` when the host provides a custom
 `ShardingConfig`.
@@ -301,7 +301,8 @@ const placed =
   yield * Order.Place.sendAndAwait({ item: "widget", qty: 3 }, { timeout: "30 seconds" });
 ```
 
-`ActorMailboxLayer.fromConfig` rejects non-persisted requests with `MailboxError` (only persisted requests can cross the storage boundary), mirroring upstream's persisted gate. Use `ActorMailboxLayer.fromSharding` when the host already has `Sharding.Sharding` and prefers the `notifyLocal`-accelerated path. The underlying `ActorMailboxLayer` / `ActorAddressResolverLayer` Tags remain exposed for advanced wiring (e.g. ops-only hosts that need address resolution but not `.send`).
+Storage-only dispatch rejects non-persisted requests. Only persisted requests can
+cross this boundary. Mailbox and address resolution are internal Client strategies.
 
 ### Test
 
