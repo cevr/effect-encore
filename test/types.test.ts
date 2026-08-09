@@ -11,6 +11,7 @@ import type { Execution } from "effect/unstable/workflow/Workflow";
 import type { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
 import { Actor } from "../src/index.js";
 import type { MailboxError } from "../src/actor-mailbox.js";
+import type { State as StateValue } from "../src/state.js";
 import type {
   ActorControlClientService,
   ActorStateClientService,
@@ -63,6 +64,11 @@ const Greeter = Actor.fromWorkflow("Greeter", {
 // Helper: assert type equality at compile time
 type IsExact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
+
+type _StateHidesRead = Assert<"read" extends keyof StateValue<number> ? false : true>;
+type _StateHidesWrite = Assert<"write" extends keyof StateValue<number> ? false : true>;
+type _StateHidesPubSub = Assert<"pubsub" extends keyof StateValue<number> ? false : true>;
+type _StateHidesSemaphore = Assert<"semaphore" extends keyof StateValue<number> ? false : true>;
 
 // ExecId is a string at runtime
 type _ExecIdIsString = Assert<ExecId extends string ? true : false>;

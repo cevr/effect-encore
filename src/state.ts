@@ -20,13 +20,8 @@
  * The PubSub uses replay = 1, matching `SubscriptionRef`: a new
  * subscriber immediately sees the most recent value.
  *
- * Modeled on rivet's `rivetkit-typescript/packages/effect/src/State.ts`
- * (see docs/adr/0001 — Rivet's API is a DX target, not its runtime). The
- * 0d.3 reshape ships this as a standalone value type backed by an
- * in-process observable cell (a `SubscriptionRef`-closure); a durable
- * per-entity backing is deferred to Phase 3, where the storage
- * subsystem that does not exist in the vendored runtime today gets
- * built (see docs/adr/0001 §RESOLUTION).
+ * Modeled on rivet's `rivetkit-typescript/packages/effect/src/State.ts`.
+ * Rivet's API is a DX target. Its runtime is not part of this module.
  */
 import {
   Effect,
@@ -53,16 +48,17 @@ const TypeId = "effect-encore/state/State";
  * - `R` — the read/write closures' service requirements
  */
 export interface State<A, E = never, R = never>
-  extends Variance<A, E, R>, Pipeable.Pipeable, InspectableInterface {
+  extends Variance<A, E, R>, Pipeable.Pipeable, InspectableInterface {}
+
+/** Internal mechanics. Public code must use the module functions. */
+interface StateImpl<A, E, R> extends State<A, E, R> {
   readonly read: Effect.Effect<A, E, R>;
   readonly write: (value: A) => Effect.Effect<void, E, R>;
   readonly pubsub: PubSub.PubSub<A>;
-  /**
-   * Serializes writes (`set`, `update`, `modify`) so the read/apply/
-   * write triple is atomic.
-   */
   readonly semaphore: Semaphore.Semaphore;
 }
+
+const impl = <A, E, R>(self: State<A, E, R>): StateImpl<A, E, R> => self as StateImpl<A, E, R>;
 
 export const isState = (value: unknown): value is State<unknown, unknown> =>
   Predicate.hasProperty(value, TypeId);
@@ -102,7 +98,7 @@ export const make = Effect.fnUntraced(function* <A, E, R>(
   const pubsub = yield* PubSub.unbounded<A>({ replay: 1 });
   const initial = yield* read;
   PubSub.publishUnsafe(pubsub, initial);
-  const self: State<A, E, R> = Object.create(Proto);
+  const self: StateImpl<A, E, R> = Object.create(Proto);
   Object.assign(self, { read, write, pubsub, semaphore: Semaphore.makeUnsafe(1) });
   return self;
 });
@@ -110,7 +106,7 @@ export const make = Effect.fnUntraced(function* <A, E, R>(
 /**
  * Reads the current value.
  */
-export const get = <A, E, R>(self: State<A, E, R>): Effect.Effect<A, E, R> => self.read;
+export const get = <A, E, R>(self: State<A, E, R>): Effect.Effect<A, E, R> => impl(self).read;
 
 /**
  * Replaces the value, then publishes it to {@link changes}. Serialized
@@ -122,7 +118,7 @@ export const set: {
 } = dual(
   2,
   <A, E, R>(self: State<A, E, R>, value: A): Effect.Effect<void, E, R> =>
-    Semaphore.withPermit(self.semaphore, commit(self, value)),
+    Semaphore.withPermit(impl(self).semaphore, commit(self, value)),
 );
 
 /**
@@ -137,8 +133,8 @@ export const update: {
   2,
   <A, E, R>(self: State<A, E, R>, fn: (a: A) => A): Effect.Effect<void, E, R> =>
     Semaphore.withPermit(
-      self.semaphore,
-      Effect.flatMap(self.read, (a) => commit(self, fn(a))),
+      impl(self).semaphore,
+      Effect.flatMap(impl(self).read, (a) => commit(self, fn(a))),
     ),
 );
 
@@ -153,8 +149,8 @@ export const updateAndGet: {
   2,
   <A, E, R>(self: State<A, E, R>, fn: (a: A) => A): Effect.Effect<A, E, R> =>
     Semaphore.withPermit(
-      self.semaphore,
-      Effect.flatMap(self.read, (a) => {
+      impl(self).semaphore,
+      Effect.flatMap(impl(self).read, (a) => {
         const next = fn(a);
         return Effect.as(commit(self, next), next);
       }),
@@ -181,8 +177,8 @@ export const modify: {
     fn: (a: A) => readonly [Output, A],
   ): Effect.Effect<Output, E, R> =>
     Semaphore.withPermit(
-      self.semaphore,
-      Effect.flatMap(self.read, (a) => {
+      impl(self).semaphore,
+      Effect.flatMap(impl(self).read, (a) => {
         const [output, next] = fn(a);
         return Effect.as(commit(self, next), output);
       }),
@@ -195,7 +191,7 @@ export const modify: {
  * subsequent publish.
  */
 export const changes = <A, E, R>(self: State<A, E, R>): Stream.Stream<A> =>
-  Stream.fromPubSub(self.pubsub);
+  Stream.fromPubSub(impl(self).pubsub);
 
 /**
  * Publish a value to the change stream as an `Effect`. Does not write
@@ -214,7 +210,7 @@ export const publish: {
 } = dual(
   2,
   <A, E, R>(self: State<A, E, R>, value: A): Effect.Effect<boolean> =>
-    Semaphore.withPermit(self.semaphore, publishDirect(self, value)),
+    Semaphore.withPermit(impl(self).semaphore, publishDirect(self, value)),
 );
 
 /**
@@ -223,7 +219,7 @@ export const publish: {
  * not acquire the semaphore — callers are responsible for ordering.
  */
 export const publishUnsafe = <A, E, R>(self: State<A, E, R>, value: A): boolean =>
-  PubSub.publishUnsafe(self.pubsub, value);
+  PubSub.publishUnsafe(impl(self).pubsub, value);
 
 /**
  * Publishes to the change stream WITHOUT acquiring the semaphore.
@@ -233,7 +229,7 @@ export const publishUnsafe = <A, E, R>(self: State<A, E, R>, value: A): boolean 
  * with the write order.
  */
 const publishDirect = <A, E, R>(self: State<A, E, R>, value: A): Effect.Effect<boolean> =>
-  PubSub.publish(self.pubsub, value);
+  PubSub.publish(impl(self).pubsub, value);
 
 /**
  * Writes the value to the backing store and, on success, publishes it
@@ -248,12 +244,6 @@ const publishDirect = <A, E, R>(self: State<A, E, R>, value: A): Effect.Effect<b
  * no such store callback for the in-process `SubscriptionRef`-backed
  * cell this module ships, so `State` self-feeds its stream here.
  *
- * Phase 3 NOTE: when a durable backing with its OWN change callback is
- * wired (see docs/adr/0001 §RESOLUTION + Phase 3 task), this
- * self-publish must be reconciled to avoid double-emitting — either
- * route durable writes through a `write` that does not publish, or
- * dedupe the store callback against this publish. The external callback
- * should publish via {@link publish} (serialized), not `publishUnsafe`.
  */
 const commit = <A, E, R>(self: State<A, E, R>, value: A): Effect.Effect<void, E, R> =>
-  Effect.flatMap(self.write(value), () => Effect.asVoid(publishDirect(self, value)));
+  Effect.flatMap(impl(self).write(value), () => Effect.asVoid(publishDirect(self, value)));
