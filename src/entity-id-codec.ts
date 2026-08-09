@@ -23,7 +23,7 @@ import { Effect, Schema } from "effect";
 
 const SEPARATOR = ":";
 
-export class EntityIdDecodeError extends Schema.ErrorClass<EntityIdDecodeError>(
+export class EntityIdDecodeError extends Schema.Error<EntityIdDecodeError>(
   "effect-encore/entity-id-codec/EntityIdDecodeError",
 )({
   entityId: Schema.String,

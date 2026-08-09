@@ -14,6 +14,7 @@ import * as DeliverAt from "effect/unstable/cluster/DeliverAt";
 import { CurrentAddress, type CurrentRunnerAddress } from "effect/unstable/cluster/Entity";
 import type {
   AlreadyProcessingMessage,
+  EntityNotAssignedToRunner,
   MailboxFull,
   MalformedMessage,
   PersistenceError,
@@ -553,7 +554,11 @@ export interface OperationHandle<
     payload: PayloadInput<C>,
   ) => Effect.Effect<
     ExecId<Schema.Schema.Type<SuccessOf<C>>, Schema.Schema.Type<ErrorOf<C>>>,
-    MailboxError | PersistenceError | MailboxFull | AlreadyProcessingMessage,
+    | MailboxError
+    | PersistenceError
+    | MailboxFull
+    | AlreadyProcessingMessage
+    | EntityNotAssignedToRunner,
     Client
   >;
   /**
@@ -592,6 +597,7 @@ export interface OperationHandle<
     | PersistenceError
     | MailboxFull
     | AlreadyProcessingMessage
+    | EntityNotAssignedToRunner
     | MalformedMessage
     | SendAndAwaitTimeout,
     Client | MessageStorage.MessageStorage | ActorAddressResolver
@@ -1456,9 +1462,10 @@ function toLayer(
     concurrency: options?.concurrency,
     mailboxCapacity: options?.mailboxCapacity,
   });
+  const supportedHandlerLayer = Layer.provide(handlerLayer, transportSupportLayers);
 
   const baseLayer = layerPassthrough(
-    Layer.merge(Layer.merge(handlerLayer, clientLayer), consumerSupportLayers),
+    Layer.merge(Layer.merge(supportedHandlerLayer, clientLayer), consumerSupportLayers),
   );
 
   return Layer.mergeAll(
@@ -1543,6 +1550,13 @@ function toTestLayer(
     mailboxCapacity: options?.mailboxCapacity,
   });
 
+  const supportLayers = Layer.mergeAll(
+    ActorAddressResolverLayer.fromConfig,
+    ActorStateRegistry.Live,
+    MessageStorage.layerMemory,
+    ReplySourceLayer.fromMessageStorage,
+    Snowflake.layerGenerator,
+  );
   // Build the test rpcClient factory once and use it for BOTH the
   // ActorClientService (.execute path) AND the test ActorMailbox (.send path).
   // `Entity.makeTestClient` is a scoped resource — `Layer.scopedContext` hosts
@@ -1552,9 +1566,14 @@ function toTestLayer(
   // OperationHandle.send can build OutgoingRequests.
   const factoryAndMailboxLayer = Layer.effectContext(
     Effect.gen(function* () {
+      const registry = yield* ActorStateRegistry;
+      const handlerLayerWithRegistry = Layer.provide(
+        handlerLayer,
+        Layer.succeed(ActorStateRegistry, registry),
+      );
       const makeClient = (yield* Entity.makeTestClient(
         actor._meta.entity,
-        handlerLayer as never,
+        handlerLayerWithRegistry as never,
       )) as (entityId: string) => Effect.Effect<RpcClient.RpcClient<Rpc.Any, never>>;
 
       const factory = (entityId: string): Effect.Effect<ActorRef<string, OperationDefs>> =>
@@ -1571,20 +1590,15 @@ function toTestLayer(
     }),
   );
 
-  const supportLayers = Layer.mergeAll(
-    ActorAddressResolverLayer.fromConfig,
-    ActorStateRegistry.Live,
-    MessageStorage.layerMemory,
-    ReplySourceLayer.fromMessageStorage,
-    Snowflake.layerGenerator,
-  );
-
   // The injected test `ActorMailbox` (`factoryAndMailboxLayer`) plus the
   // pure-data resolver/storage/snowflake in `supportLayers` satisfy the deep
   // `Client`'s requirements — so `.send` (now `Client`-channeled) resolves
   // through the test mailbox, routing the prebuilt request back through the
   // per-entity test rpcClient with `{ discard: true }`.
-  const transportSupportLayers = Layer.merge(factoryAndMailboxLayer, supportLayers);
+  const transportSupportLayers = Layer.merge(
+    Layer.provide(factoryAndMailboxLayer, supportLayers),
+    supportLayers,
+  );
   // `Layer.fresh`: `clientServiceLayer` is a shared module-level Layer, so
   // without `fresh` Effect's identity-based memoization would build the deep
   // `Client` ONCE and reuse that build (capturing the FIRST actor's test

@@ -37,6 +37,7 @@ import { ClusterSchema, type Message, MessageStorage, Sharding } from "effect/un
 import type {
   MailboxFull,
   AlreadyProcessingMessage,
+  EntityNotAssignedToRunner,
   PersistenceError,
 } from "effect/unstable/cluster/ClusterError";
 import { Context, Data, Effect, Layer } from "effect";
@@ -60,7 +61,11 @@ export interface ActorMailboxShape {
     request: Message.OutgoingRequest<Rpc.Any>,
   ) => Effect.Effect<
     void,
-    MailboxError | PersistenceError | MailboxFull | AlreadyProcessingMessage
+    | MailboxError
+    | PersistenceError
+    | MailboxFull
+    | AlreadyProcessingMessage
+    | EntityNotAssignedToRunner
   >;
 }
 /* eslint-enable typescript-eslint/no-explicit-any */

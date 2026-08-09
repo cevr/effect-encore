@@ -3,7 +3,7 @@ import { Effect, Exit, Layer, Schema } from "effect";
 import { TestRunner } from "effect/unstable/cluster";
 import { Actor } from "../../src/index.js";
 
-class OrderError extends Schema.TaggedErrorClass<OrderError>()("OrderError", {
+class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   message: Schema.String,
 }) {}
 

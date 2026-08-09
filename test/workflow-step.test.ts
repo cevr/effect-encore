@@ -71,7 +71,7 @@ const SleeperTest = Actor.toTestLayer(Sleeper, (payload, step) =>
 
 // ── Workflow with errors ──────────────────────────────────────────────
 
-class StepError extends Schema.TaggedErrorClass<StepError>()("StepError", {
+class StepError extends Schema.TaggedError<StepError>()("StepError", {
   reason: Schema.String,
 }) {}
 

@@ -25,7 +25,7 @@ import type { ActorMailboxShape } from "../src/index.js";
 import { Actor, ActorMailbox, Client, ClientLayer, MailboxError } from "../src/index.js";
 import { makeTestMailboxImpl } from "../src/client.js";
 
-class ProcessError extends Schema.TaggedErrorClass<ProcessError>()("ProcessError", {
+class ProcessError extends Schema.TaggedError<ProcessError>()("ProcessError", {
   message: Schema.String,
 }) {}
 

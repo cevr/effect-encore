@@ -28,7 +28,7 @@ const senderOnlyHost = Layer.mergeAll(
   ActorAddressResolverLayer.fromConfig,
 ).pipe(Layer.provideMerge(senderOnlyStorage));
 
-class ProcessError extends Schema.TaggedErrorClass<ProcessError>()("ProcessError", {
+class ProcessError extends Schema.TaggedError<ProcessError>()("ProcessError", {
   message: Schema.String,
 }) {}
 

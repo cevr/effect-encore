@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect";
 import type { Cause, Duration, Layer, Scope, Stream } from "effect";
 import type {
   AlreadyProcessingMessage,
+  EntityNotAssignedToRunner,
   MailboxFull,
   PersistenceError,
 } from "effect/unstable/cluster/ClusterError";
@@ -22,7 +23,7 @@ import type {
 
 // ── Type-level tests for ExecId phantom brand inference ───────────────────
 
-class OrderError extends Schema.TaggedErrorClass<OrderError>()("OrderError", {
+class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   message: Schema.String,
 }) {}
 
@@ -87,7 +88,12 @@ describe("type-level tests", () => {
   // seam, so a producer composes the one `Client` Tag into its `R`. We pin the
   // exact E/R contract once (here); the remaining `.send` tests stay loose with
   // `unknown` to avoid noise on signature-level changes elsewhere.
-  type SendError = MailboxError | PersistenceError | MailboxFull | AlreadyProcessingMessage;
+  type SendError =
+    | MailboxError
+    | PersistenceError
+    | MailboxFull
+    | AlreadyProcessingMessage
+    | EntityNotAssignedToRunner;
   type SendR = Client;
   test("Place.send pins the exact error union and required services", () => {
     const _check = (): Effect.Effect<ExecId<string, OrderError>, SendError, SendR> =>

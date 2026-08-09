@@ -3,7 +3,7 @@ import { Effect, Layer, Schema } from "effect";
 import { TestRunner } from "effect/unstable/cluster";
 import { Actor } from "../src/index.js";
 
-class ProcessError extends Schema.TaggedErrorClass<ProcessError>()("ProcessError", {
+class ProcessError extends Schema.TaggedError<ProcessError>()("ProcessError", {
   message: Schema.String,
 }) {}
 

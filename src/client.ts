@@ -55,6 +55,7 @@ import {
 } from "effect/unstable/cluster";
 import type {
   AlreadyProcessingMessage,
+  EntityNotAssignedToRunner,
   MailboxFull,
   MalformedMessage,
   PersistenceError,
@@ -258,7 +259,8 @@ export type ClientSendError =
   | MailboxError
   | PersistenceError
   | MailboxFull
-  | AlreadyProcessingMessage;
+  | AlreadyProcessingMessage
+  | EntityNotAssignedToRunner;
 
 /* eslint-disable typescript-eslint/no-explicit-any -- entity Rpcs are type-erased at the transport surface */
 export interface ClientShape {

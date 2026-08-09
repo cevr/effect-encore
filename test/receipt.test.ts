@@ -28,7 +28,7 @@ import {
 } from "../src/receipt.js";
 import type { ActorAddressResolver } from "../src/actor-address-resolver.js";
 
-class OrderError extends Schema.TaggedErrorClass<OrderError>()("OrderError", {
+class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   message: Schema.String,
 }) {}
 

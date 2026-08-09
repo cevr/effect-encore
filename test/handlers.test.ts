@@ -53,7 +53,7 @@ const GenActorTest = Layer.provide(
 
 // ── ErrActor for error test ─────────────────────────────────────────────
 
-class HandlerError extends Schema.TaggedErrorClass<HandlerError>()("HandlerError", {
+class HandlerError extends Schema.TaggedError<HandlerError>()("HandlerError", {
   reason: Schema.String,
 }) {}
 
