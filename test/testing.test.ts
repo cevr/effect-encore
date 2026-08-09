@@ -16,8 +16,8 @@ const Echo = Actor.fromEntity("Echo", {
     id: (p: { msg: string }) => p.msg,
   },
   Fire: {
-    payload: { x: Schema.Number },
-    success: Schema.Number,
+    payload: { x: Schema.Finite },
+    success: Schema.Finite,
     persisted: true,
     id: (p: { x: number }) => String(p.x),
   },

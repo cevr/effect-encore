@@ -37,9 +37,11 @@ import { ClusterSchema, type Message, MessageStorage, Sharding } from "effect/un
 import type {
   MailboxFull,
   AlreadyProcessingMessage,
+  EntityNotAssignedToRunner,
   PersistenceError,
 } from "effect/unstable/cluster/ClusterError";
 import { Context, Data, Effect, Layer } from "effect";
+import { ActorDefect } from "./actor-defect.js";
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
 
@@ -59,7 +61,11 @@ export interface ActorMailboxShape {
     request: Message.OutgoingRequest<Rpc.Any>,
   ) => Effect.Effect<
     void,
-    MailboxError | PersistenceError | MailboxFull | AlreadyProcessingMessage
+    | MailboxError
+    | PersistenceError
+    | MailboxFull
+    | AlreadyProcessingMessage
+    | EntityNotAssignedToRunner
   >;
 }
 /* eslint-enable typescript-eslint/no-explicit-any */
@@ -102,9 +108,9 @@ const fromConfig: Layer.Layer<ActorMailbox, never, MessageStorage.MessageStorage
           /* eslint-enable typescript-eslint/no-explicit-any */
           if (!isPersisted) {
             return yield* new MailboxError({
-              cause: new Error(
-                `effect-encore: ActorMailboxLayer.fromConfig refuses to dispatch non-persisted rpc "${String(request.envelope.tag)}". Storage-only mailboxes can only enqueue persisted requests; live-only rpcs require ActorMailboxLayer.fromSharding.`,
-              ),
+              cause: new ActorDefect({
+                message: `effect-encore: ActorMailboxLayer.fromConfig refuses to dispatch non-persisted rpc "${String(request.envelope.tag)}". Storage-only mailboxes can only enqueue persisted requests; live-only rpcs require ActorMailboxLayer.fromSharding.`,
+              }),
             });
           }
           const result = yield* storage

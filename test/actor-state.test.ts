@@ -13,12 +13,12 @@ const Stateful = Actor.fromEntity(
   "Stateful",
   {
     Increment: {
-      payload: { id: Schema.String, amount: Schema.Number },
-      success: Schema.Number,
+      payload: { id: Schema.String, amount: Schema.Finite },
+      success: Schema.Finite,
       id: (p: { id: string }) => p.id,
     },
   },
-  { state: { schema: Schema.Number } },
+  { state: { schema: Schema.Finite } },
 );
 
 const StatefulLayer = Layer.provide(
@@ -26,9 +26,8 @@ const StatefulLayer = Layer.provide(
     Stateful,
     Effect.gen(function* () {
       const ref = yield* SubscriptionRef.make(0);
-      const state = yield* Actor.State.make(
-        () => SubscriptionRef.get(ref),
-        (value) => SubscriptionRef.set(ref, value),
+      const state = yield* Actor.State.make(SubscriptionRef.get(ref), (value) =>
+        SubscriptionRef.set(ref, value),
       );
       yield* Actor.registerState(state);
       return Stateful.of({
@@ -50,7 +49,7 @@ const Coerced = Actor.fromEntity(
       id: (p: { id: string }) => p.id,
     },
   },
-  { state: { schema: Schema.NumberFromString } },
+  { state: { schema: Schema.FiniteFromString } },
 );
 
 const CoercedLayer = Layer.provide(
@@ -61,9 +60,8 @@ const CoercedLayer = Layer.provide(
       // ("42"); the registry decodes it through `state.schema`
       // (`Schema.NumberFromString`) on read.
       const ref = yield* SubscriptionRef.make("42" as unknown as number);
-      const state = yield* Actor.State.make(
-        () => SubscriptionRef.get(ref),
-        (value) => SubscriptionRef.set(ref, value),
+      const state = yield* Actor.State.make(SubscriptionRef.get(ref), (value) =>
+        SubscriptionRef.set(ref, value),
       );
       yield* Actor.registerState(state);
       return Coerced.of({ Touch: () => Effect.void });
@@ -120,7 +118,7 @@ describe("Actor state protocol", () => {
 
       expect(yield* state.get("state-service")).toBe(3);
       expect(yield* state.waitFor("state-service", (value) => value >= 3)).toBe(3);
-      expect(yield* state.listEntityIds()).toContain("state-service");
+      expect(yield* state.listEntityIds).toContain("state-service");
     }));
 
   test("Control service exposes bound mailbox operations", () =>

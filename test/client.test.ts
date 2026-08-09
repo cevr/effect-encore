@@ -9,7 +9,7 @@ const TestShardingConfig = ShardingConfig.layer({
   entityTerminationTimeout: 0,
 });
 
-class ValidationError extends Schema.TaggedErrorClass<ValidationError>()("ValidationError", {
+class ValidationError extends Schema.TaggedError<ValidationError>()("ValidationError", {
   message: Schema.String,
 }) {}
 
@@ -24,10 +24,12 @@ const Validator = Actor.fromEntity("Validator", {
 
 const ValidatorTest = Layer.provide(
   Actor.toTestLayer(Validator, {
-    Validate: ({ operation }) =>
-      operation.input === "bad"
-        ? Effect.fail(new ValidationError({ message: "invalid input" }))
-        : Effect.succeed(`validated: ${operation.input}`),
+    Validate: ({ operation }) => {
+      if (operation.input === "bad") {
+        return Effect.fail(ValidationError.make({ message: "invalid input" }));
+      }
+      return Effect.succeed(`validated: ${operation.input}`);
+    },
   }),
   TestShardingConfig,
 );
@@ -140,6 +142,7 @@ describe("OperationHandle.watch", () => {
   const castHandlerLayer = Actor.toLayer(CastActor, {
     Process: ({ operation }) => Effect.succeed(`processed: ${operation.input}`),
   });
+  const castHandlerWithRunner = castHandlerLayer.pipe(Layer.provideMerge(TestRunner.layer));
 
   it.scopedLive("emits Pending then Success when handler completes, then completes stream", () =>
     Effect.gen(function* () {
@@ -163,6 +166,6 @@ describe("OperationHandle.watch", () => {
       if (last._tag === "Success") {
         expect(last.value).toBe("processed: watch-test");
       }
-    }).pipe(Effect.provide(castHandlerLayer), Effect.provide(TestRunner.layer)),
+    }).pipe(Effect.provide(castHandlerWithRunner)),
   );
 });

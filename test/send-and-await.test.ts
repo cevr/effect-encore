@@ -28,7 +28,7 @@ const senderOnlyHost = Layer.mergeAll(
   ActorAddressResolverLayer.fromConfig,
 ).pipe(Layer.provideMerge(senderOnlyStorage));
 
-class ProcessError extends Schema.TaggedErrorClass<ProcessError>()("ProcessError", {
+class ProcessError extends Schema.TaggedError<ProcessError>()("ProcessError", {
   message: Schema.String,
 }) {}
 
@@ -50,7 +50,7 @@ const SendAwaitActor = Actor.fromEntity("SendAwaitActor", {
   },
   Count: {
     payload: { input: Schema.String },
-    success: Schema.Number,
+    success: Schema.Finite,
     persisted: true,
     id: (p: { input: string }) => p.input,
   },
@@ -64,7 +64,7 @@ const SendAwaitActor = Actor.fromEntity("SendAwaitActor", {
 
 const sendAwaitHandlers = Actor.toLayer(SendAwaitActor, {
   Process: ({ operation }) => Effect.succeed(`processed: ${operation.input}`),
-  Fail: () => Effect.fail(new ProcessError({ message: "bad input" })),
+  Fail: () => Effect.fail(ProcessError.make({ message: "bad input" })),
   Count: () => Ref.updateAndGet(Counter, (n) => n + 1),
   Hang: () => Effect.never,
 });
@@ -80,7 +80,7 @@ const TestCluster = TestRunner.layer;
 // over a real cluster host (not the test-mailbox shortcut).
 class RoutedKey extends Schema.Class<RoutedKey>("send-await/RoutedKey")({
   region: Schema.String,
-  seq: Schema.Number,
+  seq: Schema.Finite,
 }) {
   routingKey(): string {
     return `${this.region}-${this.seq}`;
@@ -120,6 +120,10 @@ const FastTerminationCluster = Sharding.layer.pipe(
   Layer.provide(ShardingConfig.layer({ entityTerminationTimeout: "100 millis" })),
 );
 
+const sendAwaitHandlersLayer = sendAwaitHandlers.pipe(Layer.provideMerge(TestCluster));
+const sendAwaitFastLayer = sendAwaitHandlers.pipe(Layer.provideMerge(FastTerminationCluster));
+const classPayloadHandlersLayer = classPayloadHandlers.pipe(Layer.provideMerge(TestCluster));
+
 describe("OperationHandle.sendAndAwait", () => {
   it.scopedLive("returns the handler's decoded success value", () =>
     Effect.gen(function* () {
@@ -128,7 +132,7 @@ describe("OperationHandle.sendAndAwait", () => {
         { timeout: "5 seconds" },
       );
       expect(value).toBe("processed: hello");
-    }).pipe(Effect.provide(sendAwaitHandlers), Effect.provide(TestCluster)),
+    }).pipe(Effect.provide(sendAwaitHandlersLayer)),
   );
 
   it.scopedLive("surfaces a typed handler failure in the error channel", () =>
@@ -139,7 +143,7 @@ describe("OperationHandle.sendAndAwait", () => {
       ).pipe(Effect.flip);
       expect(error._tag).toBe("ProcessError");
       expect((error as ProcessError).message).toBe("bad input");
-    }).pipe(Effect.provide(sendAwaitHandlers), Effect.provide(TestCluster)),
+    }).pipe(Effect.provide(sendAwaitHandlersLayer)),
   );
 
   it.scopedLive("fails with SendAndAwaitTimeout when the reply never becomes terminal", () =>
@@ -152,7 +156,7 @@ describe("OperationHandle.sendAndAwait", () => {
       const timeout = error as SendAndAwaitTimeout;
       expect(timeout.entityType).toBe("SendAwaitActor");
       expect(timeout.execId).toBe("stuck\x00Hang\x00stuck");
-    }).pipe(Effect.provide(sendAwaitHandlers), Effect.provide(FastTerminationCluster)),
+    }).pipe(Effect.provide(sendAwaitFastLayer)),
   );
 
   it.scopedLive("dedups: a second call with the same payload returns the persisted result", () =>
@@ -170,14 +174,14 @@ describe("OperationHandle.sendAndAwait", () => {
       expect(second).toBe(1);
       const invocations = yield* Ref.get(Counter);
       expect(invocations).toBe(1);
-    }).pipe(Effect.provide(sendAwaitHandlers), Effect.provide(TestCluster)),
+    }).pipe(Effect.provide(sendAwaitHandlersLayer)),
   );
 
   it.scopedLive(
     "Schema.Class payload: send→peek agree on the ExecId (class-instance id), sendAndAwait resolves",
     () =>
       Effect.gen(function* () {
-        const payload = new RoutedKey({ region: "us", seq: 7 });
+        const payload = RoutedKey.make({ region: "us", seq: 7 });
         // send and executionId (which peek shares) must agree on the ExecId.
         const fromSend = yield* ClassPayloadActor.Process.send(payload);
         const fromCompute = yield* ClassPayloadActor.Process.executionId(payload);
@@ -190,7 +194,7 @@ describe("OperationHandle.sendAndAwait", () => {
           timeout: "5 seconds",
         });
         expect(value).toBe("routed: us-7");
-      }).pipe(Effect.provide(classPayloadHandlers), Effect.provide(TestCluster)),
+      }).pipe(Effect.provide(classPayloadHandlersLayer)),
   );
 
   // Regression: a sender-only host that wires `Client.layer.memory` (the deep

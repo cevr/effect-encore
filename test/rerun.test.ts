@@ -108,7 +108,7 @@ describe("OperationHandle.rerun", () => {
       const RerunActor = Actor.fromEntity("RerunReplay", {
         Process: {
           payload: { input: Schema.String },
-          success: Schema.Number,
+          success: Schema.Finite,
           persisted: true,
           id: (p: { input: string }) => p.input,
         },

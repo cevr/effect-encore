@@ -74,7 +74,11 @@ const buildRequest = (
     // eslint-disable-next-line typescript-eslint/no-explicit-any -- erased
     const rpc = entity.protocol.requests.get(tag);
     const idValue = payload["item"] ?? payload["input"];
-    const entityId = EntityId.make(typeof idValue === "string" ? idValue : "x");
+    const toEntityIdString = (value: unknown): string => {
+      if (typeof value === "string") return value;
+      return "x";
+    };
+    const entityId = EntityId.make(toEntityIdString(idValue));
     const address = EntityAddress.make({
       entityType: entity.type,
       entityId,

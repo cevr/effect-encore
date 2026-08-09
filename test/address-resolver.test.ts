@@ -51,7 +51,7 @@ const testEntity = TestActor._meta.entity as ClusterEntity.Entity<string, any>;
 
 describe("ActorAddressResolver parity (fromConfig vs fromSharding)", () => {
   for (const entityId of entityIds) {
-    it.scopedLive(`produces identical EntityAddress for ${JSON.stringify(entityId)}`, () =>
+    it.scopedLive(`produces identical EntityAddress for "${entityId}"`, () =>
       Effect.gen(function* () {
         const fromConfigAddress = yield* Effect.gen(function* () {
           const resolver = yield* ActorAddressResolver;

@@ -55,6 +55,7 @@ import {
 } from "effect/unstable/cluster";
 import type {
   AlreadyProcessingMessage,
+  EntityNotAssignedToRunner,
   MailboxFull,
   MalformedMessage,
   PersistenceError,
@@ -73,6 +74,7 @@ import {
   type ActorMailboxShape,
 } from "./actor-mailbox.js";
 import { ActorSenderLayer } from "./actor-sender.js";
+import { ActorDefect } from "./actor-defect.js";
 import {
   ExecIdCodec,
   type ExecId,
@@ -162,7 +164,11 @@ export const buildOutgoingRequestForSend = (
   Effect.gen(function* () {
     const rpc = entity.protocol.requests.get(tag);
     if (!rpc) {
-      throw new Error(`effect-encore: rpc "${tag}" not found on entity "${entity.type}"`);
+      return yield* Effect.die(
+        new ActorDefect({
+          message: `effect-encore: rpc "${tag}" not found on entity "${entity.type}"`,
+        }),
+      );
     }
     // eslint-disable-next-line typescript-eslint/no-explicit-any -- payloadSchema type-erased
     const payloadSchema = rpc.payloadSchema as Schema.Top;
@@ -233,9 +239,9 @@ export const makeTestMailboxImpl = (
       const fn = (rpcClient as unknown as Record<string, Function>)[tag];
       if (!fn) {
         return yield* new MailboxError({
-          cause: new Error(
-            `effect-encore test mailbox: unknown rpc "${String(tag)}" on entity "${String(envelope.address.entityType)}"`,
-          ),
+          cause: new ActorDefect({
+            message: `effect-encore test mailbox: unknown rpc "${String(tag)}" on entity "${String(envelope.address.entityType)}"`,
+          }),
         });
       }
       yield* fn(payload, { discard: true }) as Effect.Effect<void>;
@@ -253,7 +259,8 @@ export type ClientSendError =
   | MailboxError
   | PersistenceError
   | MailboxFull
-  | AlreadyProcessingMessage;
+  | AlreadyProcessingMessage
+  | EntityNotAssignedToRunner;
 
 /* eslint-disable typescript-eslint/no-explicit-any -- entity Rpcs are type-erased at the transport surface */
 export interface ClientShape {
@@ -350,12 +357,14 @@ const makeClientService: Effect.Effect<
         // payloads spread their fields alongside `_tag` (the id fn reads named
         // fields off the object; the extra `_tag` key is harmless). Mirrors the
         // `pkInput` derivation in `buildActorRef.send`.
-        const idInput =
-          idPayload !== undefined
-            ? idPayload
-            : def?.payload !== undefined && isOpaquePayload(def.payload)
-              ? opValue["_payload"]
-              : opValue;
+        const resolveIdInput = (): unknown => {
+          if (idPayload !== undefined) return idPayload;
+          if (def?.payload !== undefined && isOpaquePayload(def.payload)) {
+            return opValue["_payload"];
+          }
+          return opValue;
+        };
+        const idInput = resolveIdInput();
         const { entityId, primaryKey } = resolveId(def, idInput, tag);
         const address = resolve(entity, entityId);
         const request = yield* buildOutgoingRequestForSend(

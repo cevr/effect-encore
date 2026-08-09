@@ -1,4 +1,5 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun";
+import { BunCrypto } from "@effect/platform-bun";
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -7,6 +8,7 @@ import { EncoreMessageStorage, fromSqlClient } from "../src/index.js";
 
 const layer = fromSqlClient().pipe(
   Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })),
+  Layer.provide(BunCrypto.layer),
 );
 const test = it.live.layer(layer);
 

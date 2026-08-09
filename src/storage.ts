@@ -26,6 +26,7 @@ import { SqlClient } from "effect/unstable/sql";
 import type { PersistenceError } from "effect/unstable/cluster/ClusterError";
 import type * as Snowflake from "effect/unstable/cluster/Snowflake";
 import { Context, Effect, Layer } from "effect";
+import type * as Crypto from "effect/Crypto";
 
 // ─── Shape ──────────────────────────────────────────────────────────────────
 
@@ -110,13 +111,13 @@ export const fromSqlClientWithShardingConfig = (
 ): Layer.Layer<
   MessageStorage.MessageStorage | EncoreMessageStorage,
   never,
-  SqlClient.SqlClient | ShardingConfig.ShardingConfig
+  SqlClient.SqlClient | ShardingConfig.ShardingConfig | Crypto.Crypto
 > => {
   const tables = sqlTables(options);
   const upstream: Layer.Layer<
     MessageStorage.MessageStorage,
     never,
-    SqlClient.SqlClient | ShardingConfig.ShardingConfig
+    SqlClient.SqlClient | ShardingConfig.ShardingConfig | Crypto.Crypto
   > = SqlMessageStorage.layer;
   const encore = Layer.effect(
     EncoreMessageStorage,
@@ -141,5 +142,8 @@ export const fromSqlClientWithShardingConfig = (
 
 export const fromSqlClient = (
   options?: SqlMessageStorageOptions,
-): Layer.Layer<MessageStorage.MessageStorage | EncoreMessageStorage, never, SqlClient.SqlClient> =>
-  fromSqlClientWithShardingConfig(options).pipe(Layer.provide(ShardingConfig.layerDefaults));
+): Layer.Layer<
+  MessageStorage.MessageStorage | EncoreMessageStorage,
+  never,
+  SqlClient.SqlClient | Crypto.Crypto
+> => fromSqlClientWithShardingConfig(options).pipe(Layer.provide(ShardingConfig.layerDefaults));

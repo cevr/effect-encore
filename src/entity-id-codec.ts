@@ -23,7 +23,7 @@ import { Effect, Schema } from "effect";
 
 const SEPARATOR = ":";
 
-export class EntityIdDecodeError extends Schema.ErrorClass<EntityIdDecodeError>(
+export class EntityIdDecodeError extends Schema.Error<EntityIdDecodeError>(
   "effect-encore/entity-id-codec/EntityIdDecodeError",
 )({
   entityId: Schema.String,
@@ -47,22 +47,20 @@ export const entityIdCodec = <A extends ReadonlyArray<unknown>, I extends Readon
         .map((part) => encodeURIComponent(String(part)))
         .join(SEPARATOR);
     },
-    decode: (entityId) => {
-      const parts = entityId.split(SEPARATOR);
-      const decoded: Array<string> = [];
-      for (const part of parts) {
-        try {
-          decoded.push(decodeURIComponent(part));
-        } catch {
-          return Effect.fail(
-            new EntityIdDecodeError({
-              entityId,
-              reason: `segment "${part}" is not valid URI-encoded text`,
-            }),
-          );
-        }
-      }
-      return decodeTuple(decoded);
-    },
+    decode: (entityId) =>
+      Effect.flatMap(
+        Effect.forEach(entityId.split(SEPARATOR), (part) =>
+          // decodeURIComponent throws URIError on malformed percent-escapes.
+          Effect.try({
+            try: () => decodeURIComponent(part),
+            catch: () =>
+              EntityIdDecodeError.make({
+                entityId,
+                reason: `segment "${part}" is not valid URI-encoded text`,
+              }),
+          }),
+        ),
+        decodeTuple,
+      ),
   };
 };

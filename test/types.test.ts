@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect";
 import type { Cause, Duration, Layer, Scope, Stream } from "effect";
 import type {
   AlreadyProcessingMessage,
+  EntityNotAssignedToRunner,
   MailboxFull,
   PersistenceError,
 } from "effect/unstable/cluster/ClusterError";
@@ -22,7 +23,7 @@ import type {
 
 // ── Type-level tests for ExecId phantom brand inference ───────────────────
 
-class OrderError extends Schema.TaggedErrorClass<OrderError>()("OrderError", {
+class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   message: Schema.String,
 }) {}
 
@@ -34,7 +35,7 @@ const Order = Actor.fromEntity("Order", {
     id: (p: { item: string }) => p.item,
   },
   Count: {
-    success: Schema.Number,
+    success: Schema.Finite,
     id: () => "singleton",
   },
 });
@@ -43,12 +44,12 @@ const StatefulCounter = Actor.fromEntity(
   "StatefulCounter",
   {
     Add: {
-      payload: { id: Schema.String, amount: Schema.Number },
-      success: Schema.Number,
+      payload: { id: Schema.String, amount: Schema.Finite },
+      success: Schema.Finite,
       id: (p: { id: string }) => p.id,
     },
   },
-  { state: { schema: Schema.Number } },
+  { state: { schema: Schema.Finite } },
 );
 
 const Greeter = Actor.fromWorkflow("Greeter", {
@@ -87,7 +88,12 @@ describe("type-level tests", () => {
   // seam, so a producer composes the one `Client` Tag into its `R`. We pin the
   // exact E/R contract once (here); the remaining `.send` tests stay loose with
   // `unknown` to avoid noise on signature-level changes elsewhere.
-  type SendError = MailboxError | PersistenceError | MailboxFull | AlreadyProcessingMessage;
+  type SendError =
+    | MailboxError
+    | PersistenceError
+    | MailboxFull
+    | AlreadyProcessingMessage
+    | EntityNotAssignedToRunner;
   type SendR = Client;
   test("Place.send pins the exact error union and required services", () => {
     const _check = (): Effect.Effect<ExecId<string, OrderError>, SendError, SendR> =>
@@ -241,7 +247,7 @@ describe("type-level tests", () => {
   test("registerState consumes a State<A> built via Actor.State.make", () => {
     const _check = Effect.gen(function* () {
       const state = yield* Actor.State.make(
-        (): Effect.Effect<number> => Effect.succeed(0),
+        Effect.succeed<number>(0),
         (_value: number) => Effect.void,
       );
       yield* Actor.registerState(state);
@@ -274,7 +280,7 @@ describe("step DSL type-level tests", () => {
     const _check = Actor.toTestLayer(FailableWorkflow, (_payload, step) =>
       Effect.gen(function* () {
         // @ts-expect-error — shorthand requires E = never, failable effects must use full options
-        yield* step.run("bad", Effect.fail(new OrderError({ message: "boom" })));
+        yield* step.run("bad", Effect.fail(OrderError.make({ message: "boom" })));
         return "ok";
       }),
     );

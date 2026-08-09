@@ -4,6 +4,9 @@ import { ClusterSchema, ShardingConfig } from "effect/unstable/cluster";
 import * as DeliverAt from "effect/unstable/cluster/DeliverAt";
 import { Actor } from "../src/index.js";
 
+// Fixed instant: these cases assert DeliverAt/PrimaryKey wiring, not the clock.
+const FIXED_EPOCH_MS = 1_700_000_000_000;
+
 const TestShardingConfig = ShardingConfig.layer({
   shardsPerGroup: 300,
   entityMailboxCapacity: 10,
@@ -12,12 +15,12 @@ const TestShardingConfig = ShardingConfig.layer({
 
 const Counter = Actor.fromEntity("Counter", {
   Increment: {
-    payload: { amount: Schema.Number },
-    success: Schema.Number,
+    payload: { amount: Schema.Finite },
+    success: Schema.Finite,
     id: (p: { amount: number }) => String(p.amount),
   },
   GetCount: {
-    success: Schema.Number,
+    success: Schema.Finite,
     id: () => "singleton",
   },
 });
@@ -187,8 +190,8 @@ describe("OperationHandle dispatch via toTestLayer", () => {
     Effect.gen(function* () {
       const NsCounter = Actor.fromEntity("NsCounter", {
         Bump: {
-          payload: { ns: Schema.String, amount: Schema.Number },
-          success: Schema.Number,
+          payload: { ns: Schema.String, amount: Schema.Finite },
+          success: Schema.Finite,
           id: (p: { ns: string; amount: number }) => ({
             entityId: `ns:${p.ns}`,
             primaryKey: String(p.amount),
@@ -270,7 +273,7 @@ describe("deliverAt", () => {
 
     const rpc = Delayed._meta.entity.protocol.requests.get("Process")!;
     const payloadSchema = rpc.payloadSchema;
-    const now = DateTime.makeUnsafe(Date.now());
+    const now = DateTime.makeUnsafe(FIXED_EPOCH_MS);
     const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
       id: "test-123",
       deliverAt: now,
@@ -310,7 +313,7 @@ describe("deliverAt", () => {
 
     const rpc = DelayedOnly._meta.entity.protocol.requests.get("Fire")!;
     const payloadSchema = rpc.payloadSchema;
-    const now = DateTime.makeUnsafe(Date.now());
+    const now = DateTime.makeUnsafe(FIXED_EPOCH_MS);
     const instance = new (payloadSchema as unknown as new (args: unknown) => unknown)({
       when: now,
     });
@@ -321,7 +324,7 @@ describe("deliverAt", () => {
   test("accepts pre-built Schema.Class as input — uses it directly", () => {
     class CustomPayload extends Schema.Class<CustomPayload>("test/CustomPayload")({
       id: Schema.String,
-      value: Schema.Number,
+      value: Schema.Finite,
     }) {
       [PrimaryKey.symbol](): string {
         return this.id;
@@ -338,7 +341,7 @@ describe("deliverAt", () => {
     });
 
     const rpc = WithCustom._meta.entity.protocol.requests.get("Process")!;
-    const instance = new CustomPayload({ id: "xyz", value: 42 });
+    const instance = CustomPayload.make({ id: "xyz", value: 42 });
 
     expect(instance[PrimaryKey.symbol]()).toBe("xyz");
     expect(rpc.payloadSchema).toBe(CustomPayload);
@@ -365,8 +368,8 @@ describe("deliverAt", () => {
       },
     });
 
-    const now = DateTime.makeUnsafe(Date.now());
-    const instance = new ScheduledPayload({ id: "s-1", when: now });
+    const now = DateTime.makeUnsafe(FIXED_EPOCH_MS);
+    const instance = ScheduledPayload.make({ id: "s-1", when: now });
 
     expect(instance[PrimaryKey.symbol]()).toBe("s-1");
     expect(DeliverAt.isDeliverAt(instance)).toBe(true);
@@ -389,7 +392,7 @@ describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () 
   // the instance fields does NOT carry it — exercising the divergence directly.
   class RoutingKey extends Schema.Class<RoutingKey>("test/RoutingKey")({
     region: Schema.String,
-    seq: Schema.Number,
+    seq: Schema.Finite,
   }) {
     // Derives the id from instance fields via a prototype method. A struct-spread
     // reconstruction of this instance drops `routingKey`, so calling it on the
@@ -423,7 +426,7 @@ describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () 
 
   routedTest("send(payload) ExecId === executionId(payload) for a class-instance id", () =>
     Effect.gen(function* () {
-      const payload = new RoutingKey({ region: "us", seq: 7 });
+      const payload = RoutingKey.make({ region: "us", seq: 7 });
       // Without the fix, `Client.send` re-derives the id from the struct-spread
       // `opValue`, whose `routingKey` method is gone — so this either throws or
       // mints a divergent ExecId. With the fix, send derives from `payload`.
@@ -447,7 +450,7 @@ describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () 
     "ref.send(make(payload)) ExecId === executionId(payload) for a class-instance id",
     () =>
       Effect.gen(function* () {
-        const payload = new RoutingKey({ region: "us", seq: 7 });
+        const payload = RoutingKey.make({ region: "us", seq: 7 });
         const makeRef = yield* Routed.Context;
         // entityId === routingKey() === "us-7", so the ref binds to that entity.
         const ref = yield* makeRef("us-7");

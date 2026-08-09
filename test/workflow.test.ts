@@ -3,7 +3,7 @@ import { Effect, Exit, Layer, Schema } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { Actor, makeExecId } from "../src/index.js";
 
-class OrderError extends Schema.TaggedErrorClass<OrderError>()("OrderError", {
+class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   message: Schema.String,
 }) {}
 
@@ -109,7 +109,7 @@ const FailingWorkflow = Actor.fromWorkflow("FailingWorkflow", {
 });
 
 const FailingTest = Actor.toTestLayer(FailingWorkflow, () =>
-  Effect.fail(new OrderError({ message: "boom" })),
+  Effect.fail(OrderError.make({ message: "boom" })),
 );
 
 describe("Actor.fromWorkflow — errors", () => {

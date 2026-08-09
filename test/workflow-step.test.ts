@@ -20,8 +20,8 @@ const GreeterTest = Actor.toTestLayer(Greeter, (payload, step) =>
 // ── Workflow with step.run full options ─────────────────────────────────
 
 const Calculator = Actor.fromWorkflow("Calculator", {
-  payload: { x: Schema.Number, y: Schema.Number },
-  success: Schema.Number,
+  payload: { x: Schema.Finite, y: Schema.Finite },
+  success: Schema.Finite,
   id: (p: { x: number; y: number }) => `${p.x}+${p.y}`,
 });
 
@@ -29,7 +29,7 @@ const CalculatorTest = Actor.toTestLayer(Calculator, (payload, step) =>
   Effect.gen(function* () {
     const result = yield* step.run("add", {
       do: Effect.succeed(payload.x + payload.y),
-      success: Schema.Number,
+      success: Schema.Finite,
     });
     return result;
   }),
@@ -57,7 +57,7 @@ const WithUndoTest = Actor.toTestLayer(WithUndo, (payload, step) =>
 // ── Workflow with step.sleep ───────────────────────────────────────────
 
 const Sleeper = Actor.fromWorkflow("Sleeper", {
-  payload: { ms: Schema.Number },
+  payload: { ms: Schema.Finite },
   success: Schema.String,
   id: (p: { ms: number }) => String(p.ms),
 });
@@ -71,7 +71,7 @@ const SleeperTest = Actor.toTestLayer(Sleeper, (payload, step) =>
 
 // ── Workflow with errors ──────────────────────────────────────────────
 
-class StepError extends Schema.TaggedErrorClass<StepError>()("StepError", {
+class StepError extends Schema.TaggedError<StepError>()("StepError", {
   reason: Schema.String,
 }) {}
 
@@ -85,10 +85,12 @@ const Failable = Actor.fromWorkflow("Failable", {
 const FailableTest = Actor.toTestLayer(Failable, (payload, step) =>
   Effect.gen(function* () {
     const result = yield* step.run("check", {
-      do:
-        payload.input === "bad"
-          ? Effect.fail(new StepError({ reason: "invalid" }))
-          : Effect.succeed(`ok: ${payload.input}`),
+      do: Effect.suspend(() => {
+        if (payload.input === "bad") {
+          return Effect.fail(StepError.make({ reason: "invalid" }));
+        }
+        return Effect.succeed(`ok: ${payload.input}`);
+      }),
       success: Schema.String,
       error: StepError,
     });

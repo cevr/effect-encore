@@ -1,5 +1,5 @@
 import { describe, expect, it } from "effect-bun-test";
-import { Effect, Schema } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { TestRunner } from "effect/unstable/cluster";
 import type { Client } from "../src/index.js";
 import { Actor, ClientLayer } from "../src/index.js";
@@ -19,6 +19,7 @@ const flushHandlers = Actor.toLayer(FlushActor, {
 });
 
 const TestCluster = TestRunner.layer;
+const flushHandlersLayer = flushHandlers.pipe(Layer.provideMerge(TestCluster));
 
 describe("Actor.flush", () => {
   it.scopedLive("clears all messages for the entity", () =>
@@ -34,7 +35,7 @@ describe("Actor.flush", () => {
 
       const after = yield* FlushActor.Process.peek({ input: "hello" });
       expect(after._tag).toBe("Pending");
-    }).pipe(Effect.provide(flushHandlers), Effect.provide(TestCluster)),
+    }).pipe(Effect.provide(flushHandlersLayer)),
   );
 
   it.scopedLive("preserves other entities' messages", () =>
@@ -53,7 +54,7 @@ describe("Actor.flush", () => {
 
       const kept = yield* FlushActor.Process.peek({ input: "b" });
       expect(kept._tag).toBe("Success");
-    }).pipe(Effect.provide(flushHandlers), Effect.provide(TestCluster)),
+    }).pipe(Effect.provide(flushHandlersLayer)),
   );
 });
 
@@ -69,6 +70,7 @@ const RedeliverActor = Actor.fromEntity("RedeliverActor", {
 const redeliverHandlers = Actor.toLayer(RedeliverActor, {
   Process: ({ operation }) => Effect.succeed(`done: ${operation.input}`),
 });
+const redeliverHandlersLayer = redeliverHandlers.pipe(Layer.provideMerge(TestCluster));
 
 describe("Actor.redeliver", () => {
   it.scopedLive("completes without error on processed messages", () =>
@@ -86,7 +88,7 @@ describe("Actor.redeliver", () => {
       // Already-processed message should still show Success
       const after = yield* RedeliverActor.Process.peek({ input: "test" });
       expect(after._tag).toBe("Success");
-    }).pipe(Effect.provide(redeliverHandlers), Effect.provide(TestCluster)),
+    }).pipe(Effect.provide(redeliverHandlersLayer)),
   );
 });
 

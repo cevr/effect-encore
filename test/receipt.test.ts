@@ -28,7 +28,7 @@ import {
 } from "../src/receipt.js";
 import type { ActorAddressResolver } from "../src/actor-address-resolver.js";
 
-class OrderError extends Schema.TaggedErrorClass<OrderError>()("OrderError", {
+class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   message: Schema.String,
 }) {}
 
@@ -115,7 +115,7 @@ describe("PeekResult", () => {
 });
 
 describe("PeekResultSchema", () => {
-  const schema = PeekResultSchema(Schema.String, Schema.Number);
+  const schema = PeekResultSchema(Schema.String, Schema.Finite);
   const encode = Schema.encodeSync(schema);
   const decode = Schema.decodeUnknownSync(schema);
 
@@ -168,7 +168,7 @@ describe("decodeValue", () => {
   test("falls back to the raw value when the schema rejects it", () => {
     // best-effort typed view: a decode failure surfaces the raw wire value,
     // it does NOT throw (the reply was already validated on the wire).
-    expect(Effect.runSync(decodeValue(Schema.Number, "not-a-number"))).toBe("not-a-number");
+    expect(Effect.runSync(decodeValue(Schema.Finite, "not-a-number"))).toBe("not-a-number");
   });
 });
 
@@ -226,7 +226,7 @@ describe("mapExitToWorkflowPeekResult (workflow — real Exit.Exit)", () => {
   });
 
   test("Fail maps to Failure", () => {
-    const err = new OrderError({ message: "boom" });
+    const err = OrderError.make({ message: "boom" });
     const result = mapExitToWorkflowPeekResult(Exit.fail(err));
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") expect(result.error).toBe(err);

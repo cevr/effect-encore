@@ -54,7 +54,7 @@ const TypeId = "effect-encore/state/State";
  */
 export interface State<A, E = never, R = never>
   extends Variance<A, E, R>, Pipeable.Pipeable, InspectableInterface {
-  readonly read: () => Effect.Effect<A, E, R>;
+  readonly read: Effect.Effect<A, E, R>;
   readonly write: (value: A) => Effect.Effect<void, E, R>;
   readonly pubsub: PubSub.PubSub<A>;
   /**
@@ -96,11 +96,11 @@ const Proto = {
  * the `State` and any subscribers become unreachable.
  */
 export const make = Effect.fnUntraced(function* <A, E, R>(
-  read: () => Effect.Effect<A, E, R>,
+  read: Effect.Effect<A, E, R>,
   write: (value: A) => Effect.Effect<void, E, R>,
 ): Effect.fn.Return<State<A, E, R>, E, R> {
   const pubsub = yield* PubSub.unbounded<A>({ replay: 1 });
-  const initial = yield* read();
+  const initial = yield* read;
   PubSub.publishUnsafe(pubsub, initial);
   const self: State<A, E, R> = Object.create(Proto);
   Object.assign(self, { read, write, pubsub, semaphore: Semaphore.makeUnsafe(1) });
@@ -110,7 +110,7 @@ export const make = Effect.fnUntraced(function* <A, E, R>(
 /**
  * Reads the current value.
  */
-export const get = <A, E, R>(self: State<A, E, R>): Effect.Effect<A, E, R> => self.read();
+export const get = <A, E, R>(self: State<A, E, R>): Effect.Effect<A, E, R> => self.read;
 
 /**
  * Replaces the value, then publishes it to {@link changes}. Serialized
@@ -138,7 +138,7 @@ export const update: {
   <A, E, R>(self: State<A, E, R>, fn: (a: A) => A): Effect.Effect<void, E, R> =>
     Semaphore.withPermit(
       self.semaphore,
-      Effect.flatMap(self.read(), (a) => commit(self, fn(a))),
+      Effect.flatMap(self.read, (a) => commit(self, fn(a))),
     ),
 );
 
@@ -154,7 +154,7 @@ export const updateAndGet: {
   <A, E, R>(self: State<A, E, R>, fn: (a: A) => A): Effect.Effect<A, E, R> =>
     Semaphore.withPermit(
       self.semaphore,
-      Effect.flatMap(self.read(), (a) => {
+      Effect.flatMap(self.read, (a) => {
         const next = fn(a);
         return Effect.as(commit(self, next), next);
       }),
@@ -182,7 +182,7 @@ export const modify: {
   ): Effect.Effect<Output, E, R> =>
     Semaphore.withPermit(
       self.semaphore,
-      Effect.flatMap(self.read(), (a) => {
+      Effect.flatMap(self.read, (a) => {
         const [output, next] = fn(a);
         return Effect.as(commit(self, next), output);
       }),
