@@ -2,15 +2,16 @@ import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer as L, Ref, Schema } from "effect";
 import { MessageStorage, TestRunner } from "effect/unstable/cluster";
 import { ActorAddressResolverLayer } from "../src/actor-address-resolver.js";
-import { Actor, EncoreMessageStorage, fromMessageStorage } from "../src/index.js";
+import { Actor, fromMessageStorage } from "../src/index.js";
+import { MessageDeletion } from "../src/storage.js";
 
-// ── Test layer providing EncoreMessageStorage on top of TestRunner ─────────
+// ── Test deletion layer on top of TestRunner ───────────────────────────────
 
-// Wire EncoreMessageStorage by reading the MemoryDriver to get access to the
+// Wire deletion by reading the MemoryDriver to get access to the
 // underlying requests map, then building a deleteEnvelope that surgically
 // removes one envelope by requestId.
-const EncoreMessageStorageTest = L.effect(
-  EncoreMessageStorage,
+const MessageDeletionTest = L.effect(
+  MessageDeletion,
   Effect.gen(function* () {
     const driver = yield* MessageStorage.MemoryDriver;
     return fromMessageStorage(driver.storage, {
@@ -39,12 +40,12 @@ const EncoreMessageStorageTest = L.effect(
 
 // ── Actor under test ────────────────────────────────────────────────────────
 
-// EncoreMessageStorageTest needs MemoryDriver, which TestRunner.layer provides.
+// MessageDeletionTest needs MemoryDriver, which TestRunner.layer provides.
 // `provideMerge` keeps the upstream tags in the result alongside the new one.
 // ActorAddressResolverLayer.fromSharding is wired so .rerun has the resolver
 // alongside the storage shape.
 const TestCluster = ActorAddressResolverLayer.fromSharding.pipe(
-  L.provideMerge(EncoreMessageStorageTest),
+  L.provideMerge(MessageDeletionTest),
   L.provideMerge(TestRunner.layer),
 );
 

@@ -3,8 +3,9 @@ import { BunCrypto } from "@effect/platform-bun";
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { Snowflake } from "effect/unstable/cluster";
-import { EncoreMessageStorage, fromSqlClient } from "../src/index.js";
+import { EntityAddress, EntityId, EntityType, Envelope, ShardId } from "effect/unstable/cluster";
+import { fromSqlClient } from "../src/index.js";
+import { MessageDeletion } from "../src/storage.js";
 
 const layer = fromSqlClient().pipe(
   Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })),
@@ -12,17 +13,27 @@ const layer = fromSqlClient().pipe(
 );
 const test = it.live.layer(layer);
 
-describe("SQL EncoreMessageStorage", () => {
-  test("deleteEnvelope removes one request and its replies", () =>
+describe("SQL message deletion", () => {
+  test("deleteInvocation removes one request and its replies", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      const storage = yield* EncoreMessageStorage;
+      const deletion = yield* MessageDeletion;
+      const address = EntityAddress.make({
+        entityType: EntityType.make("Actor"),
+        entityId: EntityId.make("a"),
+        shardId: ShardId.make("default", 1),
+      });
+      const messageId = Envelope.primaryKeyByAddress({
+        address,
+        tag: "Run",
+        id: "operation-100",
+      });
 
       yield* sql`
         INSERT INTO cluster_messages
           (id, message_id, shard_id, entity_type, entity_id, kind, tag, payload, request_id, processed)
           VALUES
-          (${"100"}, ${"req-100"}, ${"shard-1"}, ${"Actor"}, ${"a"}, ${0}, ${"Run"}, ${"{}"}, ${"100"}, ${false})
+          (${"100"}, ${messageId}, ${"shard-1"}, ${"Actor"}, ${"a"}, ${0}, ${"Run"}, ${"{}"}, ${"100"}, ${false})
       `;
       yield* sql`
         INSERT INTO cluster_messages
@@ -49,7 +60,11 @@ describe("SQL EncoreMessageStorage", () => {
           (${"600"}, ${0}, ${"200"}, ${"{}"}, ${0}, ${false})
       `;
 
-      yield* storage.deleteEnvelope(Snowflake.Snowflake("100"));
+      yield* deletion.deleteInvocation({
+        address,
+        tag: "Run",
+        primaryKey: "operation-100",
+      });
 
       const remainingMessages = yield* sql<{ readonly id: string }>`
         SELECT id FROM cluster_messages ORDER BY id

@@ -57,7 +57,7 @@ import {
   mapExitToWorkflowPeekResult,
   peekStoredReply,
 } from "./receipt.js";
-import { EncoreMessageStorage } from "./storage.js";
+import { MessageDeletion } from "./storage.js";
 import {
   Client,
   clientServiceLayer,
@@ -614,7 +614,7 @@ export interface OperationHandle<
   >;
   readonly rerun: (
     payload: PayloadInput<C>,
-  ) => Effect.Effect<void, PersistenceError, EncoreMessageStorage | ActorAddressResolver>;
+  ) => Effect.Effect<void, PersistenceError, MessageDeletion | ActorAddressResolver>;
   readonly make: (payload: PayloadInput<C>) => OperationValue<Name, Tag, C>;
 }
 
@@ -782,7 +782,7 @@ const compileRpc = (actorName: string, tag: string, def: OperationDef): Rpc.Any 
 // directly (`resolveEntityAddress` for the state/rerun ops) and routes
 // dispatch + control through the `Client` Tag.
 
-// ── rerun — surgical per-execId clear via deleteEnvelope ─────────────────
+// ── rerun — surgical per-invocation deletion ──────────────────────────────
 
 const rerunImpl = (
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased
@@ -790,19 +790,17 @@ const rerunImpl = (
   def: OperationDef | undefined,
   tag: string,
   payload: unknown,
-): Effect.Effect<void, PersistenceError, EncoreMessageStorage | ActorAddressResolver> =>
+): Effect.Effect<void, PersistenceError, MessageDeletion | ActorAddressResolver> =>
   Effect.gen(function* () {
     const { entityId, primaryKey } = resolveId(def, payload, tag);
-    const storage = yield* EncoreMessageStorage;
+    const deletion = yield* MessageDeletion;
     const resolver = yield* ActorAddressResolver;
     const address = resolveEntityAddress(resolver, entity, entityId);
-    const maybeRequestId = yield* storage.requestIdForPrimaryKey({
+    yield* deletion.deleteInvocation({
       address,
       tag,
-      id: primaryKey,
+      primaryKey,
     });
-    if (Option.isNone(maybeRequestId)) return;
-    yield* storage.deleteEnvelope(maybeRequestId.value);
   });
 
 const peekImpl = (
@@ -1895,7 +1893,7 @@ export type WorkflowActor<
    * the next `.execute(samePayload)` runs from scratch.
    *
    * Composes `WorkflowEngine.interrupt` (signals the running fiber, no-op if
-   * completed) with `EncoreMessageStorage.clearAddress` (wipes run reply +
+   * completed) with message deletion (wipes run reply +
    * cached activity replies stored at the workflow's `EntityAddress`).
    *
    * Caveat: rerun-while-running interrupts the fiber and clears state, but
@@ -1905,11 +1903,7 @@ export type WorkflowActor<
    */
   readonly rerun: (
     payload: WorkflowPayloadType<Payload>,
-  ) => Effect.Effect<
-    void,
-    PersistenceError,
-    EncoreMessageStorage | Sharding.Sharding | WorkflowEngine
-  >;
+  ) => Effect.Effect<void, PersistenceError, MessageDeletion | Sharding.Sharding | WorkflowEngine>;
   readonly interrupt: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   readonly resume: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   /**
@@ -2120,19 +2114,15 @@ const fromWorkflow = <
   // queue behind the next execute; cleanup is best-effort eventual.
   const rerunFn = (
     payload: WorkflowPayloadType<Payload>,
-  ): Effect.Effect<
-    void,
-    PersistenceError,
-    EncoreMessageStorage | Sharding.Sharding | WorkflowEngine
-  > =>
+  ): Effect.Effect<void, PersistenceError, MessageDeletion | Sharding.Sharding | WorkflowEngine> =>
     Effect.gen(function* () {
       const executionId = yield* execIdFor(payload);
       yield* wf.interrupt(executionId);
-      const storage = yield* EncoreMessageStorage;
+      const deletion = yield* MessageDeletion;
       const address = yield* resolveWorkflowAddress(wf, executionId);
-      yield* storage.clearAddress(address);
+      yield* deletion.deleteAddress(address);
       const clockAddress = yield* resolveWorkflowClockAddress(wf, executionId);
-      yield* storage.clearAddress(clockAddress);
+      yield* deletion.deleteAddress(clockAddress);
     });
 
   const executeFn = (payload: WorkflowPayloadType<Payload>) =>

@@ -71,13 +71,12 @@ export {
 export * as Observability from "./observability.js";
 export * as State from "./state.js";
 export {
-  EncoreMessageStorage,
   fromSqlClient,
   fromSqlClientWithShardingConfig,
   fromMessageStorage,
   layer as encoreMessageStorageLayer,
 } from "./storage.js";
-export type { EncoreMessageStorageShape, SqlMessageStorageOptions } from "./storage.js";
+export type { SqlMessageStorageOptions } from "./storage.js";
 export { entityIdCodec, EntityIdDecodeError } from "./entity-id-codec.js";
 export type { EntityIdCodec } from "./entity-id-codec.js";
 export { Client, layer as ClientLayer } from "./client.js";

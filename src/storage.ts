@@ -1,20 +1,16 @@
 /**
- * EncoreMessageStorage — encore-internal extension of upstream MessageStorage.
+ * MessageDeletion owns the deletion operations that Effect does not provide.
  *
- * Adds `deleteEnvelope(requestId)`: surgical removal of a single message
- * envelope (and its replies) by Snowflake id. Required by `<Op>.rerun(payload)`
- * to clear exactly one execId's persisted state without nuking the entire
- * entity address.
+ * Effect owns normal message storage. Encore only resolves and deletes one
+ * invocation or one address for rerun operations.
  *
  * Adapters provide BOTH tags:
  * - upstream `MessageStorage.MessageStorage` is still required by the runner
  *   (effect-cluster owns it for normal entity routing).
- * - `EncoreMessageStorage` is required by encore actor methods that need
- *   surgical delete (`.rerun`).
+ * - internal `MessageDeletion` is required by Encore rerun methods.
  *
- * Use `fromMessageStorage(storage, ext)` to build an `EncoreMessageStorage`
- * value from an upstream storage plus the extension method, or `layer(ext)`
- * to compose an effect Layer providing both tags.
+ * Use `fromMessageStorage(storage, ext)` to build the deletion service.
+ * Use `layer(upstream, ext)` to provide both services.
  */
 import {
   ClusterError,
@@ -24,17 +20,23 @@ import {
 } from "effect/unstable/cluster";
 import { SqlClient } from "effect/unstable/sql";
 import type { PersistenceError } from "effect/unstable/cluster/ClusterError";
+import type { EntityAddress } from "effect/unstable/cluster";
 import type * as Snowflake from "effect/unstable/cluster/Snowflake";
 import { Context, Effect, Layer } from "effect";
 import type * as Crypto from "effect/Crypto";
 
 // ─── Shape ──────────────────────────────────────────────────────────────────
 
-export type EncoreMessageStorageShape = MessageStorage.MessageStorage["Service"] & {
-  readonly deleteEnvelope: (
-    requestId: Snowflake.Snowflake,
+export interface MessageDeletionShape {
+  readonly deleteInvocation: (input: {
+    readonly address: EntityAddress.EntityAddress;
+    readonly tag: string;
+    readonly primaryKey: string;
+  }) => Effect.Effect<void, PersistenceError>;
+  readonly deleteAddress: (
+    address: EntityAddress.EntityAddress,
   ) => Effect.Effect<void, PersistenceError>;
-};
+}
 
 export interface SqlMessageStorageOptions {
   readonly prefix?: string;
@@ -52,18 +54,14 @@ const sqlTables = (options?: SqlMessageStorageOptions) => {
 
 // ─── Tag ────────────────────────────────────────────────────────────────────
 
-export class EncoreMessageStorage extends Context.Service<
-  EncoreMessageStorage,
-  EncoreMessageStorageShape
->()("effect-encore/storage/EncoreMessageStorage") {}
+export class MessageDeletion extends Context.Service<MessageDeletion, MessageDeletionShape>()(
+  "effect-encore/storage/MessageDeletion",
+) {}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Build an `EncoreMessageStorage` value from an upstream `MessageStorage`
- * shape plus the encore-specific extension. Adapters use this when their
- * underlying client (Mongo, Redis, in-memory) implements both the upstream
- * methods and `deleteEnvelope`.
+ * Build deletion operations from Effect storage and one adapter method.
  */
 export const fromMessageStorage = (
   storage: MessageStorage.MessageStorage["Service"],
@@ -72,15 +70,20 @@ export const fromMessageStorage = (
       requestId: Snowflake.Snowflake,
     ) => Effect.Effect<void, PersistenceError>;
   },
-): EncoreMessageStorageShape => ({
-  ...storage,
-  deleteEnvelope: ext.deleteEnvelope,
+): MessageDeletionShape => ({
+  deleteInvocation: ({ address, tag, primaryKey }) =>
+    Effect.gen(function* () {
+      const requestId = yield* storage.requestIdForPrimaryKey({ address, tag, id: primaryKey });
+      if (requestId._tag === "None") return;
+      yield* ext.deleteEnvelope(requestId.value);
+    }),
+  deleteAddress: storage.clearAddress,
 });
 
 /**
  * Layer composer: takes a Layer providing upstream `MessageStorage` and the
  * encore-specific extension, and produces a Layer providing BOTH the upstream
- * tag and `EncoreMessageStorage`.
+ * tag and the internal deletion service.
  *
  * Adapters that haven't implemented `deleteEnvelope` should pass an `ext`
  * that fails loud (e.g. `Effect.die("not implemented")`) rather than silently
@@ -94,11 +97,11 @@ export const layer = <RIn, E>(
       requestId: Snowflake.Snowflake,
     ) => Effect.Effect<void, PersistenceError>;
   },
-): Layer.Layer<MessageStorage.MessageStorage | EncoreMessageStorage, E, RIn> =>
+): Layer.Layer<MessageStorage.MessageStorage | MessageDeletion, E, RIn> =>
   Layer.merge(
     upstream,
     Layer.effect(
-      EncoreMessageStorage,
+      MessageDeletion,
       Effect.gen(function* () {
         const storage = yield* MessageStorage.MessageStorage;
         return fromMessageStorage(storage, ext);
@@ -109,7 +112,7 @@ export const layer = <RIn, E>(
 export const fromSqlClientWithShardingConfig = (
   options?: SqlMessageStorageOptions,
 ): Layer.Layer<
-  MessageStorage.MessageStorage | EncoreMessageStorage,
+  MessageStorage.MessageStorage | MessageDeletion,
   never,
   SqlClient.SqlClient | ShardingConfig.ShardingConfig | Crypto.Crypto
 > => {
@@ -120,7 +123,7 @@ export const fromSqlClientWithShardingConfig = (
     SqlClient.SqlClient | ShardingConfig.ShardingConfig | Crypto.Crypto
   > = SqlMessageStorage.layer;
   const encore = Layer.effect(
-    EncoreMessageStorage,
+    MessageDeletion,
     Effect.gen(function* () {
       const storage = yield* MessageStorage.MessageStorage;
       const sql = yield* SqlClient.SqlClient;
@@ -143,7 +146,7 @@ export const fromSqlClientWithShardingConfig = (
 export const fromSqlClient = (
   options?: SqlMessageStorageOptions,
 ): Layer.Layer<
-  MessageStorage.MessageStorage | EncoreMessageStorage,
+  MessageStorage.MessageStorage | MessageDeletion,
   never,
   SqlClient.SqlClient | Crypto.Crypto
 > => fromSqlClientWithShardingConfig(options).pipe(Layer.provide(ShardingConfig.layerDefaults));

@@ -1,17 +1,18 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Fiber, Layer as L, Ref, Schema } from "effect";
 import { ClusterWorkflowEngine, MessageStorage, TestRunner } from "effect/unstable/cluster";
-import { Actor, EncoreMessageStorage, fromMessageStorage } from "../src/index.js";
+import { Actor, fromMessageStorage } from "../src/index.js";
+import { MessageDeletion } from "../src/storage.js";
 
-// ── Test layer providing EncoreMessageStorage on top of TestRunner ─────────
+// ── Test deletion layer on top of TestRunner ───────────────────────────────
 
 // MemoryDriver's upstream `clearAddress` clears journal/requests/unprocessed
 // but does NOT touch `requestsByPrimaryKey` (the dedup index). Without
 // clearing that index, a re-execute after rerun returns the cached completion
 // reply instead of running the handler again. We wrap clearAddress here to
 // surgically wipe primaryKey entries that point at the cleared address.
-const EncoreMessageStorageTest = L.effect(
-  EncoreMessageStorage,
+const MessageDeletionTest = L.effect(
+  MessageDeletion,
   Effect.gen(function* () {
     const driver = yield* MessageStorage.MemoryDriver;
     const baseClearAddress = driver.storage.clearAddress;
@@ -47,7 +48,7 @@ const EncoreMessageStorageTest = L.effect(
 // Wire WorkflowEngine over the TestRunner's MessageStorage + Sharding (the
 // real cluster engine, not layerMemory) so clearAddress actually wipes state.
 const TestCluster = L.provideMerge(
-  L.merge(EncoreMessageStorageTest, ClusterWorkflowEngine.layer),
+  L.merge(MessageDeletionTest, ClusterWorkflowEngine.layer),
   TestRunner.layer,
 );
 
