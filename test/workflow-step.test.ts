@@ -383,15 +383,18 @@ const IdKeyWorkflow = Actor.fromWorkflow("IdKeyWorkflow", {
 const IdKeyTest = Actor.toTestLayer(IdKeyWorkflow, (_payload, step) =>
   Effect.gen(function* () {
     const key = yield* step.idempotencyKey("my-step");
-    return `key=${key}`;
+    const attemptKey = yield* step.idempotencyKey("my-step", { includeAttempt: true });
+    return `${step.executionId}|${key}|${attemptKey}`;
   }),
 );
 
 describe("step.idempotencyKey", () => {
-  it.scopedLive.layer(IdKeyTest)("generates key from executionId + name", () =>
+  it.scopedLive.layer(IdKeyTest)("keeps the persisted key format", () =>
     Effect.gen(function* () {
       const result = yield* IdKeyWorkflow.execute({ id: "idem-1" });
-      expect(result).toContain("/my-step");
+      const [executionId, key, attemptKey] = result.split("|");
+      expect(key).toBe(`${executionId}/my-step`);
+      expect(attemptKey).toBe(`${executionId}/my-step/1`);
     }),
   );
 });

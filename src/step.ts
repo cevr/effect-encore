@@ -7,8 +7,8 @@ import {
 } from "effect/unstable/workflow";
 import type { WorkflowEngine } from "effect/unstable/workflow/WorkflowEngine";
 import { WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
-import type { Array as Arr, Cause, Duration, Exit, Scope } from "effect";
-import { Effect, Schedule, Schema } from "effect";
+import type { Cause, Duration, Exit, Scope } from "effect";
+import { Array as Arr, Effect, Schedule, Schema } from "effect";
 
 // ── WorkflowSignalToken ─────────────────────────────────────────────────
 
@@ -187,9 +187,7 @@ export interface WorkflowStepContext<WorkflowError extends Schema.Top> {
   ) => Effect.Effect<string, never, WorkflowInstance>;
 
   readonly attempt: Effect.Effect<number>;
-
   readonly suspend: Effect.Effect<never, never, WorkflowInstance>;
-
   readonly scope: Effect.Effect<Scope.Scope, never, WorkflowInstance>;
   readonly provideScope: <A, E, R>(
     effect: Effect.Effect<A, E, R>,
@@ -311,24 +309,17 @@ export const makeStepContext = <
         inMemoryThreshold: options?.inMemoryThreshold,
       }),
 
-    race: (id, steps) => {
-      const activities = steps.map((s) =>
+    race: ((id, steps) => {
+      const activities = Arr.map(steps, (step) =>
         UpstreamActivity.make({
-          name: `${id}/${s.name}`,
-          success: s.success ?? Schema.Unknown,
-          error: s.error,
-          execute: s.execute,
+          name: `${id}/${step.name}`,
+          success: step.success ?? Schema.Unknown,
+          error: step.error,
+          execute: step.execute,
         }),
       );
-      return UpstreamDeferred.raceAll({
-        name: `Activity/${id}`,
-        success: Schema.Union(activities.map((activity) => activity.successSchema)) as Schema.Top,
-        error: Schema.Union(activities.map((activity) => activity.errorSchema)) as Schema.Top,
-        effects: activities as unknown as Arr.NonEmptyReadonlyArray<
-          Effect.Effect<unknown, unknown, unknown>
-        >,
-      }) as never;
-    },
+      return UpstreamActivity.raceAll(id, activities);
+    }) as WorkflowStepContext<WorkflowError>["race"],
 
     raceSignals: (name, options) => UpstreamDeferred.raceAll({ name, ...options }),
 
@@ -343,12 +334,10 @@ export const makeStepContext = <
       }),
 
     attempt: UpstreamActivity.CurrentAttempt,
-
     suspend: Effect.gen(function* () {
       const instance = yield* WorkflowInstance;
       return yield* UpstreamWorkflow.suspend(instance);
     }),
-
     scope: UpstreamWorkflow.scope,
     provideScope: UpstreamWorkflow.provideScope,
     addFinalizer: UpstreamWorkflow.addFinalizer,

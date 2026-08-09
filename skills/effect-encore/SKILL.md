@@ -208,7 +208,8 @@ Signal names must not collide with reserved workflow properties (`Run`, `ref`, `
 
 ## Step DSL
 
-Workflow handlers receive `(payload, step)` — a `WorkflowStepContext` that wraps upstream `Activity`, `DurableDeferred`, and `DurableClock`. No direct upstream imports needed.
+Workflow handlers receive `(payload, step)`. `WorkflowStepContext` gives one convenient
+surface over Effect workflow primitives. Encore owns the assembly and stable naming.
 
 ### step.run — execute a durable activity
 
@@ -266,13 +267,13 @@ const id = step.executionId; // string
 ### step.attempt — current attempt number
 
 ```ts
-const attempt = yield * step.attempt; // Effect<number>
+const attempt = yield * step.attempt;
 ```
 
 ### step.suspend — suspend the workflow
 
 ```ts
-yield * step.suspend; // Effect<never>
+yield * step.suspend;
 ```
 
 ### step.idempotencyKey — derived key

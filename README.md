@@ -203,7 +203,8 @@ Encore's `EncoreMessageStorage`. It uses Effect Cluster's default
 
 ### Handle — Workflow (Step DSL)
 
-Workflow handlers receive `(payload, step)` — a context object that wraps upstream workflow primitives.
+Workflow handlers receive `(payload, step)`. The Step interface gives one convenient
+surface over Effect workflow primitives. Encore owns the assembly and stable naming.
 
 **Always provide `success` and `error` schemas.** Activities serialize results through JSON — explicit schemas ensure durable round-tripping and typed decode. The shorthand (`step.run(id, effect)`) uses `Schema.Unknown` internally, which accepts any JSON-safe value but loses type safety on decode. Use it for prototyping; prefer full options for production workflows.
 
