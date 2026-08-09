@@ -24,6 +24,7 @@ import { Entity, MessageStorage, ShardingConfig, TestRunner } from "effect/unsta
 import type { ActorMailboxShape } from "../src/index.js";
 import { Actor, ActorMailbox, Client, ClientLayer, MailboxError } from "../src/index.js";
 import { makeTestMailboxImpl } from "../src/client.js";
+import { compileInvocation } from "../src/operation.js";
 
 class ProcessError extends Schema.TaggedError<ProcessError>()("ProcessError", {
   message: Schema.String,
@@ -63,9 +64,12 @@ const liveOnlyEntity = LiveOnlyActor._meta.entity as ClusterEntity.Entity<string
 const processDefs = ClientActor._meta.internalDefinitions ?? ClientActor._meta.definitions;
 const liveOnlyDefs = LiveOnlyActor._meta.internalDefinitions ?? LiveOnlyActor._meta.definitions;
 
-const processOpValue = (input: string) => ({ _tag: "Process", input });
-const failOpValue = (input: string) => ({ _tag: "Fail", input });
-const pingOpValue = (input: string) => ({ _tag: "Ping", input });
+const processInvocation = (input: string) =>
+  compileInvocation(processEntity, "Process", processDefs["Process"], { input });
+const failInvocation = (input: string) =>
+  compileInvocation(processEntity, "Fail", processDefs["Fail"], { input });
+const pingInvocation = (input: string) =>
+  compileInvocation(liveOnlyEntity, "Ping", liveOnlyDefs["Ping"], { input });
 
 // ── Client.layer.memory — self-contained producer (no consumer) ────────────
 
@@ -73,12 +77,7 @@ describe("Client.layer.memory", () => {
   it.scopedLive("send mints the frozen 3-tuple ExecId via the wire-builder inside the seam", () =>
     Effect.gen(function* () {
       const client = yield* Client;
-      const execId = yield* client.send(
-        processEntity,
-        "Process",
-        processDefs["Process"],
-        processOpValue("widget"),
-      );
+      const execId = yield* client.send(processInvocation("widget"));
       // ExecId is the frozen 3-tuple wire format, minted inside Client.send.
       expect(String(execId)).toBe("widget\x00Process\x00widget");
     }).pipe(Effect.provide(ClientLayer.memory)),
@@ -87,7 +86,7 @@ describe("Client.layer.memory", () => {
   it.scopedLive("peek is Pending while no consumer has driven a reply terminal", () =>
     Effect.gen(function* () {
       const client = yield* Client;
-      yield* client.send(processEntity, "Process", processDefs["Process"], processOpValue("p1"));
+      yield* client.send(processInvocation("p1"));
       const result = yield* client.peek(processEntity, "p1\x00Process\x00p1", processDefs);
       expect(result._tag).toBe("Pending");
     }).pipe(Effect.provide(ClientLayer.memory)),
@@ -96,9 +95,7 @@ describe("Client.layer.memory", () => {
   it.scopedLive("send rejects a non-persisted op loudly (persisted gate)", () =>
     Effect.gen(function* () {
       const client = yield* Client;
-      const exit = yield* client
-        .send(liveOnlyEntity, "Ping", liveOnlyDefs["Ping"], pingOpValue("hi"))
-        .pipe(Effect.exit);
+      const exit = yield* client.send(pingInvocation("hi")).pipe(Effect.exit);
       expect(Exit.isFailure(exit)).toBe(true);
       if (Exit.isFailure(exit)) {
         const failure = Cause.findErrorOption(exit.cause);
@@ -113,7 +110,7 @@ describe("Client.layer.memory", () => {
   it.scopedLive("flush + redeliver run without a consumer (control ops moved inside)", () =>
     Effect.gen(function* () {
       const client = yield* Client;
-      yield* client.send(processEntity, "Process", processDefs["Process"], processOpValue("ctl"));
+      yield* client.send(processInvocation("ctl"));
       // Both control ops resolve through the captured storage; neither throws.
       yield* client.flush(processEntity, "ctl");
       yield* client.redeliver(processEntity, "ctl");
@@ -134,7 +131,7 @@ describe("Client.layer.fromConfig", () => {
     Effect.gen(function* () {
       const client = yield* Client;
       const storage = yield* MessageStorage.MessageStorage;
-      yield* client.send(processEntity, "Process", processDefs["Process"], processOpValue("cfg"));
+      yield* client.send(processInvocation("cfg"));
       const address = client.resolve(processEntity, "cfg");
       const unprocessed = yield* storage.unprocessedMessages([address.shardId]);
       expect(unprocessed.length).toBeGreaterThan(0);
@@ -164,12 +161,7 @@ describe("Client.layer.fromSharding", () => {
         const client = yield* Client;
         // Would die with a Snowflake.Generator service-not-found if the adapter
         // failed to bundle its own generator (Sharding.layer hides its own).
-        const execId = yield* client.send(
-          processEntity,
-          "Process",
-          processDefs["Process"],
-          processOpValue("snow"),
-        );
+        const execId = yield* client.send(processInvocation("snow"));
         expect(String(execId)).toBe("snow\x00Process\x00snow");
       }).pipe(Effect.provide(FromShardingLayer)),
   );
@@ -177,7 +169,7 @@ describe("Client.layer.fromSharding", () => {
   it.scopedLive("send → handler processes → peek classifies Success → flush clears", () =>
     Effect.gen(function* () {
       const client = yield* Client;
-      yield* client.send(processEntity, "Process", processDefs["Process"], processOpValue("e2e"));
+      yield* client.send(processInvocation("e2e"));
 
       // Poll until the consumer has driven the reply terminal.
       const terminal = yield* Effect.retry(
@@ -201,7 +193,7 @@ describe("Client.layer.fromSharding", () => {
   it.scopedLive("peek classifies a typed handler Failure through the ReplySource seam", () =>
     Effect.gen(function* () {
       const client = yield* Client;
-      yield* client.send(processEntity, "Fail", processDefs["Fail"], failOpValue("nope"));
+      yield* client.send(failInvocation("nope"));
       const terminal = yield* Effect.retry(
         Effect.flatMap(client.peek(processEntity, "nope\x00Fail\x00nope", processDefs), (r) => {
           if (r._tag === "Failure") return Effect.succeed(r);
@@ -340,12 +332,7 @@ describe("Client.layer.test (exported adapter, driven directly)", () => {
 
         // send: the wire-builder runs inside the seam, mints the frozen 3-tuple
         // ExecId, and dispatches the prebuilt request through the INJECTED mailbox.
-        const execId = yield* client.send(
-          processEntity,
-          "Process",
-          processDefs["Process"],
-          processOpValue("adapter"),
-        );
+        const execId = yield* client.send(processInvocation("adapter"));
         expect(String(execId)).toBe("adapter\x00Process\x00adapter");
 
         // The injected mailbox saw the dispatch — proving `Client.layer.test`

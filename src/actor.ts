@@ -62,13 +62,18 @@ import { EncoreMessageStorage } from "./storage.js";
 import {
   Client,
   clientServiceLayer,
-  isOpaquePayload,
   makeTestMailboxImpl,
   resolveEntityAddress,
-  resolveId,
   layer as ClientLayer,
 } from "./client.js";
-import type { EntityIdReturn, OperationDef, OperationDefs } from "./client.js";
+import type { EntityIdReturn, OperationDef, OperationDefs } from "./operation.js";
+import {
+  compileInvocation,
+  isOpaquePayload,
+  makeOperationValue,
+  payloadFromOperation,
+  resolveId,
+} from "./operation.js";
 import {
   ActorStateRegistry,
   listStateEntityIds,
@@ -108,31 +113,6 @@ const layerPassthrough = <ROut, E, RIn>(
 // dependency stays one-directional (`actor.ts` → `client.ts`). They are
 // imported at the top of this file.
 
-// Hidden carrier for the ORIGINAL id-input on an OperationValue built by
-// `make`/`buildOpValue`. `buildOpValue` spreads `Schema.Class` payloads into a
-// plain struct (`{ _tag, ...fields }`), which drops the prototype — so any
-// `def.id` that reads a prototype method (e.g. `p.routingKey()`) would throw or
-// diverge if re-derived from the spread op. We stash the live instance under a
-// non-enumerable symbol so the value-dispatch ref (`buildActorRef.send` /
-// `.execute`) can recover it for primary-key derivation, keeping `ref.send(op)`
-// in lockstep with `OperationHandle.executionId`/`peek` (which read the live
-// payload). Non-enumerable + symbol-keyed ⇒ invisible to struct spreads, JSON,
-// and the wire envelope, so nothing downstream of the id derivation sees it.
-const ORIGINAL_ID_PAYLOAD = Symbol.for("effect-encore/OperationValue/originalIdPayload");
-
-const attachOriginalIdPayload = <T extends object>(op: T, payload: unknown): T => {
-  Object.defineProperty(op, ORIGINAL_ID_PAYLOAD, {
-    value: payload,
-    enumerable: false,
-    writable: false,
-    configurable: false,
-  });
-  return op;
-};
-
-const readOriginalIdPayload = (op: { readonly [key: string]: unknown }): unknown =>
-  (op as { readonly [ORIGINAL_ID_PAYLOAD]?: unknown })[ORIGINAL_ID_PAYLOAD];
-
 // ── Operation DSL ──────────────────────────────────────────────────────────
 
 /**
@@ -144,8 +124,7 @@ const readOriginalIdPayload = (op: { readonly [key: string]: unknown }): unknown
  *   the same key get distinct execIds). primaryKey defaults to entityId
  *   when omitted.
  *
- * Defined in `client.ts` (the transport seam owns the OperationDef shape);
- * re-exported here so the public barrel surface is unchanged.
+ * Defined in the internal Operation module and re-exported here.
  */
 export type { EntityIdReturn, OperationDef, OperationDefs };
 
@@ -938,20 +917,8 @@ const fromEntity = <
 
   // Build the raw OperationValue for a given tag/payload — used by `make`
   // escape hatch and internally by execute/send to feed buildActorRef.
-  const buildOpValue = (tag: string, payload: unknown) => {
-    const def = internalDefinitions[tag] as OperationDef | undefined;
-    const opaque = def?.payload !== undefined && isOpaquePayload(def.payload);
-    const buildOp = (): Record<string, unknown> => {
-      if (opaque) return { _tag: tag, _payload: payload };
-      if (payload != null && typeof payload === "object") return { _tag: tag, ...payload };
-      return { _tag: tag };
-    };
-    const op = buildOp();
-    // Preserve the live id-input so the value-dispatch ref derives the ExecId
-    // from the same value `executionId`/`peek` use — class payloads keep their
-    // prototype here even though the struct spread above dropped it.
-    return attachOriginalIdPayload(op, payload);
-  };
+  const buildOpValue = (tag: string, payload: unknown) =>
+    makeOperationValue(internalDefinitions[tag], tag, payload);
 
   class ActorClientContext extends Context.Service<
     ActorClientContext,
@@ -1132,7 +1099,6 @@ const fromEntity = <
         ActorClientFactory<Name, OperationDefs>
       >,
       entityAny,
-      buildOpValue,
     });
   }
 
@@ -1176,17 +1142,10 @@ const makeOperationHandle = <
   >;
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity erased
   readonly entityAny: ClusterEntity.Entity<string, any>;
-  readonly buildOpValue: (tag: string, payload: unknown) => Record<string, unknown>;
 }): OperationHandle<Name, Tag, C> => {
-  const { name, tag, def, definitions, contextTag, entityAny, buildOpValue } = args;
+  const { name, tag, def, definitions, contextTag, entityAny } = args;
 
-  const idOf = (payload: unknown): { readonly entityId: string; readonly primaryKey: string } =>
-    resolveId(def, payload, tag);
-
-  const execId = (payload: unknown) => {
-    const { entityId, primaryKey } = idOf(payload);
-    return ExecIdCodec.encode({ entityId, tag, primaryKey });
-  };
+  const invocationOf = (payload: unknown) => compileInvocation(entityAny, tag, def, payload);
 
   // .send dispatches through the deep `Client` seam (decision #1). The Client
   // owns the wire-envelope builder + the mailbox/resolver/snowflake strategy
@@ -1198,18 +1157,7 @@ const makeOperationHandle = <
   const sendFn = (payload: unknown) =>
     Effect.gen(function* () {
       const client = yield* Client;
-      // Pass the ORIGINAL `payload` as `idPayload` so the minted ExecId is
-      // derived from the same value `executionId`/`peek` use (via `def.id`).
-      // `buildOpValue` reconstructs class payloads as a struct spread, which
-      // loses prototype/method/`instanceof` semantics — re-deriving the id from
-      // it inside `Client.send` would drift for `Schema.Class` payloads.
-      return yield* client.send(
-        entityAny,
-        tag,
-        def,
-        buildOpValue(tag, payload) as { readonly _tag: string; readonly [key: string]: unknown },
-        payload,
-      );
+      return yield* client.send(invocationOf(payload));
     });
 
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- handle types erased
@@ -1219,9 +1167,9 @@ const makeOperationHandle = <
     execute: ((payload: unknown) =>
       Effect.gen(function* () {
         const factory = yield* contextTag;
-        const { entityId } = idOf(payload);
-        const ref = yield* factory(entityId);
-        return yield* ref.execute(buildOpValue(tag, payload) as never);
+        const invocation = invocationOf(payload);
+        const ref = yield* factory(invocation.identity.entityId);
+        return yield* ref.execute(invocation.operation as never);
       })) as never,
     send: sendFn as never,
     sendAndAwait: ((
@@ -1267,11 +1215,17 @@ const makeOperationHandle = <
             );
         }
       })) as never,
-    executionId: ((payload: unknown) => Effect.succeed(execId(payload))) as never,
+    executionId: ((payload: unknown) =>
+      Effect.succeed(invocationOf(payload).identity.execId)) as never,
     peek: ((payload: unknown) =>
-      peekImpl(entityAny, execId(payload), definitions) as never) as never,
+      peekImpl(entityAny, invocationOf(payload).identity.execId, definitions) as never) as never,
     watch: ((payload: unknown, options?: { readonly interval?: Duration.Input }) =>
-      watchImpl(entityAny, execId(payload), definitions, options) as never) as never,
+      watchImpl(
+        entityAny,
+        invocationOf(payload).identity.execId,
+        definitions,
+        options,
+      ) as never) as never,
     waitFor: ((
       payload: unknown,
       options?: {
@@ -1282,11 +1236,11 @@ const makeOperationHandle = <
     ) =>
       makeWaitFor(
         (eid) => peekImpl(entityAny, eid as string, definitions),
-        execId(payload),
+        invocationOf(payload).identity.execId,
         options as never,
       )) as never,
     rerun: ((payload: unknown) => rerunImpl(entityAny, def, tag, payload)) as never,
-    make: ((payload: unknown) => buildOpValue(tag, payload) as never) as never,
+    make: ((payload: unknown) => invocationOf(payload).operation as never) as never,
   };
 
   // Reference name to avoid unused warnings in some flows
@@ -1811,18 +1765,7 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
       const discardCall = dispatchDiscarded() as
         | Effect.Effect<unknown, unknown, unknown>
         | undefined;
-      // Prefer the ORIGINAL id-input carried by `make`/`buildOpValue` (a live
-      // `Schema.Class` instance keeps its prototype here). Re-deriving the id
-      // from the struct-spread `op` would drop prototype methods and throw or
-      // mint a divergent ExecId — diverging from `executionId`/`peek`. Fall
-      // back to the spread-derived input for hand-built ops with no carrier.
-      const carried = readOriginalIdPayload(op);
-      const resolvePkInput = (): unknown => {
-        if (carried !== undefined) return carried;
-        if (def?.payload && isOpaquePayload(def.payload)) return op["_payload"];
-        return op;
-      };
-      const pkInput = resolvePkInput();
+      const pkInput = payloadFromOperation(def, op);
       const { primaryKey } = resolveId(def, pkInput, tag);
       const execId = ExecIdCodec.encode({ entityId: _entityId, tag, primaryKey });
       return bind(Effect.map(discardCall ?? Effect.void, () => execId));

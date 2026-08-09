@@ -40,8 +40,8 @@
  *   end-to-end: `send` routes the prebuilt request through the INJECTED mailbox,
  *   and `peek / flush / redeliver` operate over its bundled storage.
  */
-import { Context, Effect, Layer, Option, Schema } from "effect";
-import type { DateTime } from "effect";
+import type { Schema } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import {
   ClusterSchema,
   type Entity as ClusterEntity,
@@ -76,66 +76,16 @@ import {
 import { ActorSenderLayer } from "./actor-sender.js";
 import { ActorDefect } from "./actor-defect.js";
 import {
-  ExecIdCodec,
   type ExecId,
   type PeekResult,
   type ReplyDefs,
   ReplySource,
   defaultReplySource,
 } from "./receipt.js";
+import type { Invocation } from "./operation.js";
+import { isOpaquePayload } from "./operation.js";
 
-// ── Operation shape + id helpers (transport-level, shared with actor.ts) ───
-//
-// These live here, NOT in actor.ts, so the runtime dependency is strictly
-// one-directional (`actor.ts` → `client.ts`). The wire-envelope builder and
-// the test-mailbox routing both need `isOpaquePayload`, and the OperationDef
-// shape is the transport contract, so it is natural for them to live alongside
-// the `Client` seam. `actor.ts` imports them back as runtime values.
-
-/**
- * Result of an entity operation's `id` fn. Either:
- * - `string` — entityId AND primaryKey use this value (the common case).
- * - `{entityId, primaryKey?}` — divergent case where the dedup key differs
- *   from the mailbox address. primaryKey defaults to entityId when omitted.
- */
-export type EntityIdReturn = string | { readonly entityId: string; readonly primaryKey?: string };
-
-export interface OperationDef {
-  readonly payload?: Schema.Top | Schema.Struct.Fields;
-  readonly success?: Schema.Top;
-  readonly error?: Schema.Top;
-  readonly persisted?: boolean;
-  readonly id: (payload: never) => EntityIdReturn;
-  readonly deliverAt?: (payload: never) => DateTime.DateTime;
-}
-
-export type OperationDefs = Record<string, OperationDef>;
-
-// Schema.Class has `fields`; scalars like Schema.String don't.
-export const isOpaquePayload = (payload: unknown): boolean =>
-  Schema.isSchema(payload) && !("fields" in (payload as object));
-
-/**
- * Invoke `def.id(payload)` and normalize to `{entityId, primaryKey}`. String
- * returns map entityId === primaryKey; object returns may diverge, with
- * primaryKey defaulting to entityId.
- */
-export const resolveId = (
-  def: OperationDef | undefined,
-  payload: unknown,
-  fallbackTag: string,
-): { readonly entityId: string; readonly primaryKey: string } => {
-  const idFn = def?.["id"] as ((p: unknown) => EntityIdReturn) | undefined;
-  if (!idFn) {
-    return { entityId: fallbackTag, primaryKey: fallbackTag };
-  }
-  const result = idFn(payload as never);
-  if (typeof result === "string") {
-    return { entityId: result, primaryKey: result };
-  }
-  return { entityId: result.entityId, primaryKey: result.primaryKey ?? result.entityId };
-};
-
+// ── Address helper ─────────────────────────────────────────────────────────
 export const resolveEntityAddress = (
   resolver: ActorAddressResolverShape,
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs erased
@@ -153,15 +103,12 @@ export const resolveEntityAddress = (
 // `makeClient`. MessageStorage duplicate decoding reads `message.context` —
 // empty context is wrong for any schema that requires services at decode time.
 export const buildOutgoingRequestForSend = (
-  // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs erased
-  entity: ClusterEntity.Entity<string, any>,
-  tag: string,
-  def: OperationDef | undefined,
+  invocation: Invocation,
   address: EntityAddress.EntityAddress,
-  opValue: { readonly _tag: string; readonly [key: string]: unknown },
   snowflakeGen: Snowflake.Generator["Service"],
 ): Effect.Effect<Message.OutgoingRequest<Rpc.Any>> =>
   Effect.gen(function* () {
+    const { entity, tag, definition, operation } = invocation;
     const rpc = entity.protocol.requests.get(tag);
     if (!rpc) {
       return yield* Effect.die(
@@ -174,14 +121,14 @@ export const buildOutgoingRequestForSend = (
     const payloadSchema = rpc.payloadSchema as Schema.Top;
 
     let payload: unknown;
-    if (!def?.payload) {
+    if (!definition.payload) {
       // Zero-payload op. compileRpc still creates an EmptyPayloadClass.
       // eslint-disable-next-line typescript-eslint/no-explicit-any -- class constructor
       payload = new (payloadSchema as any)({});
-    } else if (isOpaquePayload(def.payload)) {
-      payload = opValue["_payload"];
+    } else if (isOpaquePayload(definition.payload)) {
+      payload = operation["_payload"];
     } else {
-      const { _tag: _t, ...fields } = opValue;
+      const { _tag: _t, ...fields } = operation;
       void _t;
       // eslint-disable-next-line typescript-eslint/no-explicit-any -- class constructor
       payload = new (payloadSchema as any)(fields);
@@ -277,22 +224,10 @@ export interface ClientShape {
    * Build the wire envelope (pulled INSIDE the seam) and dispatch it through
    * the wired mailbox. Returns the minted `ExecId` for the dispatched op.
    *
-   * `idPayload` is the ORIGINAL id-input payload as the caller supplied it. When
-   * present, the minted ExecId is derived from it directly (via `def.id`) so
-   * `send` agrees with `OperationHandle.executionId`/`peek`, which derive from
-   * the same value. This matters for `Schema.Class` payloads: `opValue` carries
-   * a struct-spread reconstruction that loses class prototype/method/`instanceof`
-   * semantics, so re-running `def.id` on it can diverge. When `idPayload` is
-   * omitted (e.g. direct `Client.send` callers that only hold the op value), the
-   * id is recovered from `opValue` as before.
+   * The Invocation owns the payload, operation value, and derived identity.
+   * Client does not repeat compilation work.
    */
-  readonly send: (
-    entity: ClusterEntity.Entity<string, any>,
-    tag: string,
-    def: OperationDef | undefined,
-    opValue: { readonly _tag: string; readonly [key: string]: unknown },
-    idPayload?: unknown,
-  ) => Effect.Effect<ExecId, ClientSendError>;
+  readonly send: (invocation: Invocation) => Effect.Effect<ExecId, ClientSendError>;
   /**
    * Peek the persisted reply for `execId`. Composes the `ReplySource` seam —
    * the Client does NOT re-implement Exit-walking.
@@ -343,40 +278,12 @@ const makeClientService: Effect.Effect<
 
   return {
     resolve,
-    send: (entity, tag, def, opValue, idPayload) =>
+    send: (invocation) =>
       Effect.gen(function* () {
-        // Prefer the original id-input payload when the caller supplied it: the
-        // ExecId must agree with `OperationHandle.executionId`/`peek`, which
-        // derive from this same value via `def.id`. For `Schema.Class` payloads
-        // the `opValue` reconstruction below loses prototype/method/`instanceof`
-        // semantics, so re-deriving from it can mint a divergent ExecId.
-        //
-        // When `idPayload` is omitted (direct `Client.send` callers that only
-        // hold the op value), recover the raw id-input from the built op value:
-        // opaque/scalar payloads carry the value under `_payload`, struct
-        // payloads spread their fields alongside `_tag` (the id fn reads named
-        // fields off the object; the extra `_tag` key is harmless). Mirrors the
-        // `pkInput` derivation in `buildActorRef.send`.
-        const resolveIdInput = (): unknown => {
-          if (idPayload !== undefined) return idPayload;
-          if (def?.payload !== undefined && isOpaquePayload(def.payload)) {
-            return opValue["_payload"];
-          }
-          return opValue;
-        };
-        const idInput = resolveIdInput();
-        const { entityId, primaryKey } = resolveId(def, idInput, tag);
-        const address = resolve(entity, entityId);
-        const request = yield* buildOutgoingRequestForSend(
-          entity,
-          tag,
-          def,
-          address,
-          opValue,
-          snowflakeGen,
-        );
+        const address = resolve(invocation.entity, invocation.identity.entityId);
+        const request = yield* buildOutgoingRequestForSend(invocation, address, snowflakeGen);
         yield* mailbox.send(request);
-        return ExecIdCodec.encode({ entityId, tag, primaryKey });
+        return invocation.identity.execId;
       }),
     peek: (entity, execId, definitions) =>
       // The default adapter's R-channel is `MessageStorage | ActorAddressResolver`;
