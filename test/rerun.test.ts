@@ -1,12 +1,8 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer as L, Ref, Schema } from "effect";
 import { MessageStorage, TestRunner } from "effect/unstable/cluster";
-import {
-  Actor,
-  ActorAddressResolverLayer,
-  EncoreMessageStorage,
-  fromMessageStorage,
-} from "../src/index.js";
+import { ActorAddressResolverLayer } from "../src/actor-address-resolver.js";
+import { Actor, EncoreMessageStorage, fromMessageStorage } from "../src/index.js";
 
 // ── Test layer providing EncoreMessageStorage on top of TestRunner ─────────
 

@@ -75,13 +75,7 @@ import {
 } from "./actor-mailbox.js";
 import { ActorSenderLayer } from "./actor-sender.js";
 import { ActorDefect } from "./actor-defect.js";
-import {
-  type ExecId,
-  type PeekResult,
-  type ReplyDefs,
-  ReplySource,
-  defaultReplySource,
-} from "./receipt.js";
+import { type ExecId, type PeekResult, type ReplyDefs, peekStoredReply } from "./receipt.js";
 import type { Invocation } from "./operation.js";
 import { isOpaquePayload } from "./operation.js";
 
@@ -229,8 +223,7 @@ export interface ClientShape {
    */
   readonly send: (invocation: Invocation) => Effect.Effect<ExecId, ClientSendError>;
   /**
-   * Peek the persisted reply for `execId`. Composes the `ReplySource` seam —
-   * the Client does NOT re-implement Exit-walking.
+   * Peek the persisted reply for `execId` and classify its terminal state.
    */
   readonly peek: (
     entity: ClusterEntity.Entity<string, any>,
@@ -254,8 +247,8 @@ export class Client extends Context.Service<Client, ClientShape>()("effect-encor
 
 /**
  * Build the deep `Client` service over the wired transport Tags. Pulls the
- * mailbox, resolver, snowflake generator, storage, and (optionally) the
- * `ReplySource` from context at layer-build time, so every Client METHOD has an
+ * mailbox, resolver, snowflake generator, and storage from context at layer-build time,
+ * so every Client METHOD has an
  * empty requirement channel — the deps are captured in the closure.
  */
 const makeClientService: Effect.Effect<
@@ -267,12 +260,6 @@ const makeClientService: Effect.Effect<
   const resolver = yield* ActorAddressResolver;
   const snowflakeGen = yield* Snowflake.Generator;
   const storage = yield* MessageStorage.MessageStorage;
-  // The reply source is resolved optionally so the default storage-backed
-  // adapter is used unless a host swaps it wholesale (mirrors `peekImpl`).
-  const replySource = yield* Effect.serviceOption(ReplySource).pipe(
-    Effect.map(Option.getOrElse(() => defaultReplySource)),
-  );
-
   const resolve: ClientShape["resolve"] = (entity, entityId) =>
     resolveEntityAddress(resolver, entity, entityId);
 
@@ -286,14 +273,11 @@ const makeClientService: Effect.Effect<
         return invocation.identity.execId;
       }),
     peek: (entity, execId, definitions) =>
-      // The default adapter's R-channel is `MessageStorage | ActorAddressResolver`;
-      // both are captured here, so the Client.peek requirement is empty.
-      replySource
-        .peek(entity, execId, definitions)
-        .pipe(
-          Effect.provideService(MessageStorage.MessageStorage, storage),
-          Effect.provideService(ActorAddressResolver, resolver),
-        ),
+      // Both services are captured here, so the Client.peek requirement is empty.
+      peekStoredReply(entity, execId, definitions).pipe(
+        Effect.provideService(MessageStorage.MessageStorage, storage),
+        Effect.provideService(ActorAddressResolver, resolver),
+      ),
     flush: (entity, actorId) =>
       storage.clearAddress(resolveEntityAddress(resolver, entity, actorId)),
     redeliver: (entity, actorId) =>

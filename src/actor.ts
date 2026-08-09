@@ -23,6 +23,7 @@ import type { Rpc, RpcClient, RpcGroup } from "effect/unstable/rpc";
 import { Rpc as RpcMod } from "effect/unstable/rpc";
 import { Workflow as UpstreamWorkflow } from "effect/unstable/workflow";
 import { ActorAddressResolver, ActorAddressResolverLayer } from "./actor-address-resolver.js";
+import { assembleActorRuntime, attachFreshService } from "./actor-runtime.js";
 import { ActorDefect } from "./actor-defect.js";
 import type { MailboxError, ActorMailboxShape } from "./actor-mailbox.js";
 import { ActorMailbox, ActorMailboxLayer } from "./actor-mailbox.js";
@@ -50,13 +51,11 @@ import type { ExecId, PeekResult } from "./receipt.js";
 import {
   ExecIdCodec,
   Pending,
-  ReplySource,
-  ReplySourceLayer,
   Suspended,
-  defaultReplySource,
   isTerminal,
   makeExecId,
   mapExitToWorkflowPeekResult,
+  peekStoredReply,
 } from "./receipt.js";
 import { EncoreMessageStorage } from "./storage.js";
 import {
@@ -806,19 +805,6 @@ const rerunImpl = (
     yield* storage.deleteEnvelope(maybeRequestId.value);
   });
 
-// The entity await-engine is lifted into `receipt.ts` as the `ReplySource`
-// seam (the Exit-classification mappers + the storage-backed peek loop).
-// `peekImpl` resolves the seam from context *optionally* and falls back to the
-// `defaultReplySource` value when no `ReplySource` is provided — so the seam
-// stays swappable (provide a `ReplySource` layer at the runtime root to swap
-// the reply source wholesale) WITHOUT leaking `ReplySource` into the R-channel.
-// This keeps `peekImpl`/`watchImpl` requiring only `MessageStorage |
-// ActorAddressResolver` (matching the public `peek`/`watch`/`waitFor`/
-// `sendAndAwait` interface), so a sender-only `Client.layer.memory` /
-// `Client.layer.fromConfig` host — which bundles no `ReplySource` — still
-// self-satisfies at runtime. The
-// `defaultReplySource` adapter is the exact storage-backed loop that lived
-// inline here, so the live path is behavior-preserving.
 const peekImpl = (
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased
   entity: ClusterEntity.Entity<string, any>,
@@ -828,12 +814,7 @@ const peekImpl = (
   PeekResult,
   PersistenceError | MalformedMessage,
   MessageStorage.MessageStorage | ActorAddressResolver
-> =>
-  Effect.gen(function* () {
-    const provided = yield* Effect.serviceOption(ReplySource);
-    const replySource = Option.getOrElse(provided, () => defaultReplySource);
-    return yield* replySource.peek(entity, execId, definitions);
-  });
+> => peekStoredReply(entity, execId, definitions);
 
 // ── watch — internal implementation ──────────────────────────────────────
 
@@ -1269,7 +1250,6 @@ function toLayer<
   | ActorMailbox
   | ActorAddressResolver
   | ActorStateRegistry
-  | ReplySource
   | Snowflake.Generator,
   never,
   MessageStorage.MessageStorage | Sharding.Sharding | Rpc.MiddlewareClient<Rpcs>
@@ -1299,7 +1279,6 @@ function toLayer<
   | ActorMailbox
   | ActorAddressResolver
   | ActorStateRegistry
-  | ReplySource
   | Snowflake.Generator,
   never,
   | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress | ActorStateRegistry>
@@ -1386,27 +1365,19 @@ function toLayer(
     ActorMailboxLayer.fromSharding,
     ActorAddressResolverLayer.fromSharding,
     ActorStateRegistry.Live,
-    ReplySourceLayer.fromMessageStorage,
     Snowflake.layerGenerator,
   );
   // `Layer.fresh` for the same reason as in `toTestLayer`: the shared
   // module-level `clientServiceLayer` must be rebuilt per-actor over THIS
   // actor's transport, not memoized to the first build.
-  const consumerSupportLayers = Layer.merge(
-    transportSupportLayers,
-    Layer.provide(Layer.fresh(clientServiceLayer), transportSupportLayers),
-  );
+  const consumerSupportLayers = attachFreshService(transportSupportLayers, clientServiceLayer);
 
   const stateLayer = makeActorStateLayer(actor);
   const controlLayer = makeActorControlLayer(actor);
 
   if (build === undefined) {
     const baseLayer = Layer.merge(clientLayer, consumerSupportLayers);
-    return Layer.mergeAll(
-      baseLayer,
-      Layer.provide(stateLayer, baseLayer),
-      Layer.provide(controlLayer, baseLayer),
-    );
+    return assembleActorRuntime(baseLayer, stateLayer, controlLayer);
   }
 
   const transformed = transformHandlers(build, actorDefinitions, options?.withScope);
@@ -1422,11 +1393,7 @@ function toLayer(
     Layer.merge(Layer.merge(supportedHandlerLayer, clientLayer), consumerSupportLayers),
   );
 
-  return Layer.mergeAll(
-    baseLayer,
-    Layer.provide(stateLayer, baseLayer),
-    Layer.provide(controlLayer, baseLayer),
-  );
+  return assembleActorRuntime(baseLayer, stateLayer, controlLayer);
 }
 
 // ── Actor.toTestLayer ─────────────────────────────────────────────────────
@@ -1455,7 +1422,6 @@ function toTestLayer<
   | ActorMailbox
   | ActorAddressResolver
   | ActorStateRegistry
-  | ReplySource
   | Snowflake.Generator,
   never,
   | Exclude<RX, Scope.Scope | CurrentAddress | CurrentRunnerAddress | ActorStateRegistry>
@@ -1508,7 +1474,6 @@ function toTestLayer(
     ActorAddressResolverLayer.fromConfig,
     ActorStateRegistry.Live,
     MessageStorage.layerMemory,
-    ReplySourceLayer.fromMessageStorage,
     Snowflake.layerGenerator,
   );
   // Build the test rpcClient factory once and use it for BOTH the
@@ -1559,18 +1524,11 @@ function toTestLayer(
   // mailbox) across every `toTestLayer` in the same runtime — routing a
   // second actor's `.send` to the wrong per-entity rpcClient. `fresh` forces a
   // per-actor build over this actor's own transport.
-  const baseLayer = Layer.merge(
-    transportSupportLayers,
-    Layer.provide(Layer.fresh(clientServiceLayer), transportSupportLayers),
-  );
+  const baseLayer = attachFreshService(transportSupportLayers, clientServiceLayer);
   const stateLayer = makeActorStateLayer(actor);
   const controlLayer = makeActorControlLayer(actor);
 
-  return Layer.mergeAll(
-    baseLayer,
-    Layer.provide(stateLayer, baseLayer),
-    Layer.provide(controlLayer, baseLayer),
-  );
+  return assembleActorRuntime(baseLayer, stateLayer, controlLayer);
 }
 
 const makeActorControlLayer = <Name extends string, Defs extends OperationDefs>(

@@ -14,15 +14,16 @@
  * 2. `Snowflake.Generator` resolves under `fromSharding` — `Sharding.layer`
  *    hides its own generator, so the adapter MUST bundle one or `Client.send`
  *    dies with "Service not found: Snowflake.Generator".
- * 3. `Client.peek` composes the `ReplySource` seam — a real consumer drives a
+ * 3. `Client.peek` owns stored-reply classification. A real consumer drives a
  *    reply terminal and `peek` classifies it.
  */
 import { describe, expect, it } from "effect-bun-test";
 import { Cause, Context, Effect, Exit, Layer, Option, Ref, Schema } from "effect";
 import type { Entity as ClusterEntity } from "effect/unstable/cluster";
 import { Entity, MessageStorage, ShardingConfig, TestRunner } from "effect/unstable/cluster";
-import type { ActorMailboxShape } from "../src/index.js";
-import { Actor, ActorMailbox, Client, ClientLayer, MailboxError } from "../src/index.js";
+import type { ActorMailboxShape } from "../src/actor-mailbox.js";
+import { ActorMailbox, MailboxError } from "../src/actor-mailbox.js";
+import { Actor, Client, ClientLayer } from "../src/index.js";
 import { makeTestMailboxImpl } from "../src/client.js";
 import { compileInvocation } from "../src/operation.js";
 
@@ -190,7 +191,7 @@ describe("Client.layer.fromSharding", () => {
     }).pipe(Effect.provide(FromShardingWithHandlers)),
   );
 
-  it.scopedLive("peek classifies a typed handler Failure through the ReplySource seam", () =>
+  it.scopedLive("peek classifies a typed handler Failure from stored replies", () =>
     Effect.gen(function* () {
       const client = yield* Client;
       yield* client.send(failInvocation("nope"));

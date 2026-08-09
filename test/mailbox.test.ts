@@ -30,14 +30,9 @@ import {
 } from "effect/unstable/cluster";
 import * as Headers from "effect/unstable/http/Headers";
 import type { Rpc } from "effect/unstable/rpc";
-import {
-  Actor,
-  ActorAddressResolver,
-  ActorAddressResolverLayer,
-  ActorMailbox,
-  ActorMailboxLayer,
-  MailboxError,
-} from "../src/index.js";
+import { ActorAddressResolver, ActorAddressResolverLayer } from "../src/actor-address-resolver.js";
+import { ActorMailbox, ActorMailboxLayer, MailboxError } from "../src/actor-mailbox.js";
+import { Actor } from "../src/index.js";
 
 // Two actors: one persisted, one not. The persisted one round-trips through
 // fromConfig; the non-persisted one MUST be rejected.

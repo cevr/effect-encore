@@ -10,13 +10,13 @@ import type {
 import type { Execution } from "effect/unstable/workflow/Workflow";
 import type { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
 import { Actor } from "../src/index.js";
+import type { MailboxError } from "../src/actor-mailbox.js";
 import type {
   ActorControlClientService,
   ActorStateClientService,
   Client,
   CurrentAddress,
   ExecId,
-  MailboxError,
   PeekResult,
   WorkflowSignal,
 } from "../src/index.js";

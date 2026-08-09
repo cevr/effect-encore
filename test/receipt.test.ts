@@ -5,18 +5,15 @@ import type { MessageStorage } from "effect/unstable/cluster";
 import {
   Defect,
   decodeValue,
-  defaultReplySource,
   ExecIdCodec,
   Failure,
   Interrupted,
   mapExitToPeekResult,
   mapExitToWorkflowPeekResult,
   Pending,
+  type peekStoredReply,
   PeekResultSchema,
   type PeekResult,
-  ReplySource,
-  ReplySourceLayer,
-  type ReplySourceShape,
   Success,
   Suspended,
   isFailure,
@@ -272,13 +269,10 @@ describe("entity vs workflow Exit-classification parity", () => {
   });
 });
 
-// Pin the default adapter's requirements (Risk #2): the storage-backed peek
-// must keep requiring exactly MessageStorage + ActorAddressResolver, so the
-// actor layers still satisfy it after the lift. This is a compile-time
-// assertion — if `defaultReplySource.peek`'s R-channel drifts, `tsgo` fails.
-const _replySourcePeekRChannel: ReplySourceShape["peek"] = defaultReplySource.peek;
+// Pin the stored-reply reader requirements. Actor layers must provide exactly
+// MessageStorage and ActorAddressResolver for this operation.
 type _PeekRIsStorageAndResolver =
-  ReturnType<ReplySourceShape["peek"]> extends Effect.Effect<
+  ReturnType<typeof peekStoredReply> extends Effect.Effect<
     PeekResult,
     infer _E,
     MessageStorage.MessageStorage | ActorAddressResolver
@@ -286,15 +280,4 @@ type _PeekRIsStorageAndResolver =
     ? true
     : never;
 const _peekRChannelCheck: _PeekRIsStorageAndResolver = true;
-void _replySourcePeekRChannel;
 void _peekRChannelCheck;
-
-describe("ReplySource seam", () => {
-  test("exposes a default fromMessageStorage adapter Layer", () => {
-    expect(ReplySourceLayer.fromMessageStorage).toBeDefined();
-  });
-
-  test("the Tag is a Context.Service identifier", () => {
-    expect(ReplySource.key).toBe("effect-encore/receipt/ReplySource");
-  });
-});

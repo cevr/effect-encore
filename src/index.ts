@@ -48,14 +48,7 @@ export type {
   SignalDef,
   SignalDefs,
 } from "./step.js";
-export type {
-  ExecId,
-  ExecIdComponents,
-  PeekResult,
-  ReplyDef,
-  ReplyDefs,
-  ReplySourceShape,
-} from "./receipt.js";
+export type { ExecId, ExecIdComponents, PeekResult, ReplyDef, ReplyDefs } from "./receipt.js";
 export {
   decodeValue,
   ExecIdCodec,
@@ -74,8 +67,6 @@ export {
   isFailure,
   isSuspended,
   isTerminal,
-  ReplySource,
-  ReplySourceLayer,
 } from "./receipt.js";
 export * as Observability from "./observability.js";
 export * as State from "./state.js";
@@ -89,9 +80,5 @@ export {
 export type { EncoreMessageStorageShape, SqlMessageStorageOptions } from "./storage.js";
 export { entityIdCodec, EntityIdDecodeError } from "./entity-id-codec.js";
 export type { EntityIdCodec } from "./entity-id-codec.js";
-export { ActorAddressResolver, ActorAddressResolverLayer } from "./actor-address-resolver.js";
-export type { ActorAddressResolverShape } from "./actor-address-resolver.js";
-export { ActorMailbox, ActorMailboxLayer, MailboxError } from "./actor-mailbox.js";
-export type { ActorMailboxShape } from "./actor-mailbox.js";
 export { Client, layer as ClientLayer } from "./client.js";
-export type { ClientShape, ClientSendError } from "./client.js";
+export type { ClientSendError } from "./client.js";

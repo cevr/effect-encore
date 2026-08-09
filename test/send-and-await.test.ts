@@ -9,12 +9,8 @@ import {
   ShardingConfig,
   TestRunner,
 } from "effect/unstable/cluster";
-import {
-  ClientLayer,
-  Actor,
-  ActorAddressResolverLayer,
-  SendAndAwaitTimeout,
-} from "../src/index.js";
+import { ActorAddressResolverLayer } from "../src/actor-address-resolver.js";
+import { ClientLayer, Actor, SendAndAwaitTimeout } from "../src/index.js";
 
 // A sender-only host: the deep `Client` transport seam (`Client.layer.fromConfig`)
 // over a SHARED in-memory storage, plus the `ActorAddressResolver` + `MessageStorage`
@@ -199,18 +195,16 @@ describe("OperationHandle.sendAndAwait", () => {
 
   // Regression: a sender-only host that wires `Client.layer.memory` (the deep
   // Client transport seam over in-memory storage — NO `toLayer`, NO local
-  // Sharding, NO `ReplySource`) must be able to call `sendAndAwait` without the
-  // `peek`-loop dying with `Service not found: effect-encore/receipt/ReplySource`.
+  // Sharding) must be able to call `sendAndAwait` without another reply service.
   // With no consumer hosting the entity, the reply never becomes terminal, so
   // the call resolves to a typed `SendAndAwaitTimeout` — a clean failure that
-  // proves the seam fell back to `defaultReplySource` instead of leaking
-  // `ReplySource` into R.
+  // proves the Client owns the stored-reply read.
   //
   // `Client.layer.memory` provides the `Client` Tag but the `peek` loop still
   // requires `MessageStorage | ActorAddressResolver` directly, so those are
   // provided alongside via the same in-memory bundle.
   it.scopedLive(
-    "sender-only Client.layer.memory host can sendAndAwait without a ReplySource service",
+    "sender-only Client.layer.memory host can sendAndAwait without another reply service",
     () =>
       Effect.gen(function* () {
         const error = yield* SendAwaitActor.Process.sendAndAwait(

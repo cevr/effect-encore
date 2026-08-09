@@ -11,7 +11,8 @@ import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer, Schema } from "effect";
 import { ShardingConfig, TestRunner } from "effect/unstable/cluster";
 import type { Entity as ClusterEntity } from "effect/unstable/cluster";
-import { Actor, ActorAddressResolver, ActorAddressResolverLayer } from "../src/index.js";
+import { ActorAddressResolver, ActorAddressResolverLayer } from "../src/actor-address-resolver.js";
+import { Actor } from "../src/index.js";
 
 const TestActor = Actor.fromEntity("ParityActor", {
   Run: {

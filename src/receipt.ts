@@ -1,4 +1,4 @@
-import { Cause, Context, Effect, Exit, Layer, Option, Schema } from "effect";
+import { Cause, Effect, Exit, Option, Schema } from "effect";
 import type { Entity as ClusterEntity } from "effect/unstable/cluster";
 import { MessageStorage } from "effect/unstable/cluster";
 import type { MalformedMessage, PersistenceError } from "effect/unstable/cluster/ClusterError";
@@ -133,7 +133,7 @@ export const PeekResultSchema = <Success extends Schema.Top, Error extends Schem
 // shape persisted in `cluster_replies`), while the **workflow** poll path maps
 // a real `Exit.Exit` by walking its `Cause` tree.
 
-/** The success/error schema slots a `ReplySource` needs to decode replies. */
+/** The success and error schema slots used to decode stored replies. */
 export interface ReplyDef {
   readonly success?: Schema.Top;
   readonly error?: Schema.Top;
@@ -210,85 +210,35 @@ export const mapExitToWorkflowPeekResult = (exit: Exit.Exit<unknown, unknown>): 
   return Pending;
 };
 
-// ── ReplySource — the entity await-engine seam ────────────────────────────
-//
-// `(ExecId) => Effect<PeekResult>` lifted out of `actor.ts` as a swappable
-// `Context.Service`. `peek` carries the per-actor `entity` + `definitions`
-// (the schema slots) so a single seam serves every actor. The default adapter
-// is `fromMessageStorage` — the exact storage-backed loop that lived inline in
-// `actor.ts` (`requestIdForPrimaryKey` → `repliesForUnfiltered` →
-// `mapExitToPeekResult`), so the live path is behavior-preserving. Its peek
-// effect keeps requiring `MessageStorage | ActorAddressResolver` — the actor
-// layers already supply both, so threading the seam adds no new wiring.
-//
-// Downstreams that resolve a reply token from an external event (e.g. a Stripe
-// webhook) drive it through this same default: the webhook writes the reply
-// into `cluster_replies` and `peek`/`waitFor` see it terminal. No bespoke
-// adapter is required.
+// ── Stored reply lookup ────────────────────────────────────────────────────
 
-/* eslint-disable typescript-eslint/no-explicit-any -- entity Rpcs are type-erased at the await surface */
-export interface ReplySourceShape {
-  readonly peek: (
-    entity: ClusterEntity.Entity<string, any>,
-    execId: string,
-    definitions?: ReplyDefs,
-  ) => Effect.Effect<
-    PeekResult,
-    PersistenceError | MalformedMessage,
-    MessageStorage.MessageStorage | ActorAddressResolver
-  >;
-}
-/* eslint-enable typescript-eslint/no-explicit-any */
+export const peekStoredReply = (
+  // eslint-disable-next-line typescript-eslint/no-explicit-any -- Entity protocols are type-erased here.
+  entity: ClusterEntity.Entity<string, any>,
+  execId: string,
+  definitions?: ReplyDefs,
+): Effect.Effect<
+  PeekResult,
+  PersistenceError | MalformedMessage,
+  MessageStorage.MessageStorage | ActorAddressResolver
+> => {
+  const parsed = ExecIdCodec.decode(execId);
 
-export class ReplySource extends Context.Service<ReplySource, ReplySourceShape>()(
-  "effect-encore/receipt/ReplySource",
-) {}
-
-/**
- * Default storage-backed `ReplySource` implementation. Resolves the entity
- * address, looks up the request id for the primary key, reads the last reply,
- * and classifies its Exit into a `PeekResult`. Byte-for-byte the former inline
- * `peekImpl` body. Exposed as a value (not only a Layer) so the actor await
- * sites can `Effect.provideService` it without a layer-provide.
- */
-export const defaultReplySource: ReplySourceShape = {
-  peek: (entity, execId, definitions) => {
-    const parsed = ExecIdCodec.decode(execId);
-
-    return Effect.gen(function* () {
-      const storage = yield* MessageStorage.MessageStorage;
-      const resolver = yield* ActorAddressResolver;
-      const address = resolver.resolveEntity(entity, parsed.entityId);
-
-      const maybeRequestId = yield* storage.requestIdForPrimaryKey({
-        address,
-        tag: parsed.tag,
-        id: parsed.primaryKey,
-      });
-
-      if (Option.isNone(maybeRequestId)) {
-        return Pending as PeekResult;
-      }
-
-      const replies = yield* storage.repliesForUnfiltered([maybeRequestId.value]);
-      const last = replies[replies.length - 1];
-
-      if (!last || last._tag !== "WithExit") {
-        return Pending as PeekResult;
-      }
-
-      const def = definitions?.[parsed.tag];
-      return yield* mapExitToPeekResult(last.exit, def);
+  return Effect.gen(function* () {
+    const storage = yield* MessageStorage.MessageStorage;
+    const resolver = yield* ActorAddressResolver;
+    const address = resolver.resolveEntity(entity, parsed.entityId);
+    const maybeRequestId = yield* storage.requestIdForPrimaryKey({
+      address,
+      tag: parsed.tag,
+      id: parsed.primaryKey,
     });
-  },
+    if (Option.isNone(maybeRequestId)) return Pending;
+
+    const replies = yield* storage.repliesForUnfiltered([maybeRequestId.value]);
+    const last = replies[replies.length - 1];
+    if (last === undefined || last._tag !== "WithExit") return Pending;
+
+    return yield* mapExitToPeekResult(last.exit, definitions?.[parsed.tag]);
+  });
 };
-
-const fromMessageStorage: Layer.Layer<ReplySource> = Layer.succeed(ReplySource)(defaultReplySource);
-
-/**
- * Layer factories for the `ReplySource` seam, exposed as a namespace alongside
- * the Tag (mirrors `ActorMailboxLayer` / `ActorAddressResolverLayer`).
- */
-export const ReplySourceLayer = {
-  fromMessageStorage,
-} as const;
