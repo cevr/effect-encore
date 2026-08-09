@@ -1,5 +1,19 @@
 # effect-encore
 
+## 0.15.0
+
+### Minor Changes
+
+- [#36](https://github.com/cevr/effect-encore/pull/36) [`c419134`](https://github.com/cevr/effect-encore/commit/c41913433732cee083abd2d6a6f48e514841cfd9) Thanks [@cevr](https://github.com/cevr)! - Upgrade the runtime to Effect 4.0.0-beta.106.
+
+  Add the new `EntityNotAssignedToRunner` cluster routing error to durable send operations.
+
+  Require the Effect `Crypto` service in SQL message storage layers.
+
+### Patch Changes
+
+- [#36](https://github.com/cevr/effect-encore/pull/36) [`8378b53`](https://github.com/cevr/effect-encore/commit/8378b5394c505b8270b442975788f16ea4e6c6bc) Thanks [@cevr](https://github.com/cevr)! - Migrate the lint and typecheck toolchain to the canonical Effect stack (oxlint-plugin-effect via jsPlugins, TypeScript 7, `@effect/tsgo` diagnostics) and clear the resulting violations. Behavior is unchanged.
+
 ## 0.14.0
 
 ### Minor Changes
