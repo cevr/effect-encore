@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from "effect-bun-test";
-import { Effect, Exit, Layer, Schema } from "effect";
+import { Context, Effect, Exit, Layer, Schema } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
 import { Actor, makeExecId } from "../src/index.js";
 
@@ -202,5 +202,17 @@ describe("Actor.fromWorkflow — production layer", () => {
       const result = yield* Greeter.execute({ name: "prod" });
       expect(result).toBe("hello prod");
     }).pipe(Effect.provide(ProductionLayer)),
+  );
+
+  it.scopedLive("captures WorkflowEngine in the workflow client", () =>
+    Effect.gen(function* () {
+      const context = yield* Layer.build(ProductionLayer);
+      const client = Context.get(context, Greeter.Context);
+      const result = yield* Greeter.execute({ name: "captured" }).pipe(
+        Effect.provideService(Greeter.Context, client),
+      );
+
+      expect(result).toBe("hello captured");
+    }),
   );
 });

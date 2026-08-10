@@ -28,8 +28,11 @@ import { ActorDefect } from "./actor-defect.js";
 import type { MailboxError, ActorMailboxShape } from "./actor-mailbox.js";
 import { ActorMailbox, ActorMailboxLayer } from "./actor-mailbox.js";
 import type { Execution } from "effect/unstable/workflow/Workflow";
-import type { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
-import { layerMemory as workflowEngineLayerMemory } from "effect/unstable/workflow/WorkflowEngine";
+import {
+  WorkflowEngine,
+  type WorkflowInstance,
+  layerMemory as workflowEngineLayerMemory,
+} from "effect/unstable/workflow/WorkflowEngine";
 import {
   Context,
   Cause,
@@ -2232,7 +2235,10 @@ const workflowToLayer = (
 
   const clientLayer = Layer.effect(
     actor.Context,
-    Effect.succeed((entityId: string) => Effect.succeed(buildWorkflowActorRef(actor, entityId))),
+    Effect.gen(function* () {
+      const engine = yield* WorkflowEngine;
+      return (_entityId: string) => Effect.succeed(buildWorkflowActorRef(actor, engine));
+    }),
   );
 
   return layerPassthrough(Layer.merge(handlerLayer, clientLayer));
@@ -2243,34 +2249,36 @@ const workflowToTestLayer = (
   handler: Function,
 ): Layer.Layer<any, any, any> => {
   const wf = actor._meta.workflow;
-  const handlerLayer = Layer.provide(
-    wf.toLayer(wrapWorkflowHandler(actor, handler) as any),
-    workflowEngineLayerMemory,
-  );
+  const handlerLayer = wf.toLayer(wrapWorkflowHandler(actor, handler) as any);
 
   const clientLayer = Layer.effect(
     actor.Context,
-    Effect.succeed((entityId: string) => Effect.succeed(buildWorkflowActorRef(actor, entityId))),
+    Effect.gen(function* () {
+      const engine = yield* WorkflowEngine;
+      return (_entityId: string) => Effect.succeed(buildWorkflowActorRef(actor, engine));
+    }),
   );
 
-  return Layer.provideMerge(Layer.merge(clientLayer, workflowEngineLayerMemory), handlerLayer);
+  return Layer.provideMerge(Layer.merge(handlerLayer, clientLayer), workflowEngineLayerMemory);
 };
 
 const buildWorkflowActorRef = (
   actor: WorkflowActor<any, any, any, any>,
-  _entityId: string,
+  engine: WorkflowEngine["Service"],
 ): ActorRef<any, any> => {
   const wf = actor._meta.workflow;
 
   return {
     execute: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
       const { _tag: _, ...payload } = op;
-      return wf.execute(payload as any);
+      return wf.execute(payload as any).pipe(Effect.provideService(WorkflowEngine, engine));
     },
     send: (op: { readonly _tag: string; readonly [key: string]: unknown }) => {
       const { _tag: _, ...payload } = op;
       return Effect.map(
-        wf.execute(payload as any, { discard: true }) as Effect.Effect<string>,
+        wf
+          .execute(payload as any, { discard: true })
+          .pipe(Effect.provideService(WorkflowEngine, engine)) as Effect.Effect<string>,
         (execId) => makeExecId(execId),
       );
     },
