@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.19.0
+
+### Minor Changes
+
+- [`718b877`](https://github.com/cevr/effect-encore/commit/718b877cc436d12f542b65c14cc3e632292ef35e) Thanks [@cevr](https://github.com/cevr)! - Allow dynamic signals on workflows with typed success and error schemas.
+
 ## 0.18.1
 
 ### Patch Changes
