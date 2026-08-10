@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.18.1
+
+### Patch Changes
+
+- [`4b99b6e`](https://github.com/cevr/effect-encore/commit/4b99b6e1c2b2671d81dc8c6bfe8442e94680c6f5) Thanks [@cevr](https://github.com/cevr)! - Capture the workflow engine in workflow clients created by `Actor.toLayer`.
+
 ## 0.18.0
 
 ### Minor Changes
