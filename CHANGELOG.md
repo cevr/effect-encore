@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.25.0
+
+### Minor Changes
+
+- [`e82fee2`](https://github.com/cevr/effect-encore/commit/e82fee222c8b8e8efc67f751fa3ff4961ecf558c) Thanks [@cevr](https://github.com/cevr)! - Add one-call pending compensation decisions. Distinguish no pending compensation from a stale or conflicting exact-attempt decision. Remove `stepId` and `attempt` from `CompensationNotPendingError`. Conflict errors now carry those fields and the accepted decision when one exists.
+
 ## 0.24.0
 
 ### Minor Changes
