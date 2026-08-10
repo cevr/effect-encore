@@ -1,5 +1,12 @@
 # effect-encore
 
+## 0.26.0
+
+### Minor Changes
+
+- [`ca709b9`](https://github.com/cevr/effect-encore/commit/ca709b9970770acae1388093e1e4b4e81fc597a3) Thanks [@cevr](https://github.com/cevr)! - Add `WorkflowActor.prune(executionId)` and route workflow storage cleanup through the Client seam.
+  Keep `MessageDeletion` focused on the single-invocation deletion that Effect does not provide.
+
 ## 0.25.1
 
 ### Patch Changes
