@@ -368,6 +368,14 @@ const placed =
 Storage-only dispatch rejects non-persisted requests. Only persisted requests can
 cross this boundary. Mailbox and address resolution are internal Client strategies.
 
+#### Client storage transactions
+
+`Client.withTransaction(effect)` lets a host compose Client control operations with
+host storage work under the selected Effect `MessageStorage` transaction boundary.
+Rollback and nesting behavior come from that storage adapter. SQL storage uses the
+shared `SqlClient` transaction and nested savepoints. Memory storage provides only
+the transaction behavior defined by Effect's memory adapter.
+
 ### Test
 
 ```ts

@@ -3,8 +3,15 @@ import { BunCrypto } from "@effect/platform-bun";
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { EntityAddress, EntityId, EntityType, Envelope, ShardId } from "effect/unstable/cluster";
-import { fromSqlClient } from "../src/index.js";
+import {
+  EntityAddress,
+  EntityId,
+  EntityType,
+  Envelope,
+  ShardId,
+  ShardingConfig,
+} from "effect/unstable/cluster";
+import { Client, ClientLayer, fromSqlClient } from "../src/index.js";
 import { MessageDeletion } from "../src/storage.js";
 
 const layer = fromSqlClient().pipe(
@@ -12,6 +19,9 @@ const layer = fromSqlClient().pipe(
   Layer.provide(BunCrypto.layer),
 );
 const test = it.live.layer(layer);
+const clientTest = it.live.layer(
+  ClientLayer.fromConfig.pipe(Layer.provideMerge([layer, ShardingConfig.layer()])),
+);
 
 describe("SQL message deletion", () => {
   test("deleteInvocation removes one request and its replies", () =>
@@ -76,4 +86,25 @@ describe("SQL message deletion", () => {
       expect(remainingMessages.map((row) => String(row.id))).toEqual(["200"]);
       expect(remainingReplies.map((row) => String(row.id))).toEqual(["600"]);
     }));
+});
+
+describe("Client.withTransaction", () => {
+  clientTest("rolls back host SQL work through the selected storage adapter", () =>
+    Effect.gen(function* () {
+      const client = yield* Client;
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`CREATE TABLE transaction_probe (value INTEGER NOT NULL)`;
+
+      yield* client
+        .withTransaction(
+          sql`INSERT INTO transaction_probe (value) VALUES (42)`.pipe(
+            Effect.andThen(Effect.fail("rollback")),
+          ),
+        )
+        .pipe(Effect.flip);
+
+      const rows = yield* sql`SELECT value FROM transaction_probe`;
+      expect(rows).toEqual([]);
+    }),
+  );
 });

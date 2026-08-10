@@ -21,7 +21,7 @@ Interrupted | Defect | Suspended`. What `peek(execId)` returns and `waitFor` pol
 ## Seams (where behaviour is swapped without editing in place)
 
 - **Client** — the unified transport seam. One Tag owns
-  `send / resolve / peek / flush / redeliver / pruneWorkflow` plus the wire-envelope builder, with adapters
+  `send / resolve / peek / flush / redeliver / pruneWorkflow / withTransaction` plus the wire-envelope builder, with adapters
   `Client.layer.{fromConfig, fromSharding, memory, test}`. Supersedes the hand-assembled
   mailbox+resolver+Snowflake triad. Address resolution (`fromConfig`/`fromSharding`, carrying the
   shard-parity invariant) survives as an **internal strategy** the Client holds, not a public Tag.

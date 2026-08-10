@@ -9,7 +9,7 @@
  * Rivet's API is a DX target, not its runtime). Unlike Bite's `cad5fc7` thin
  * `Client.layer` namespace (which only re-bundled the three sender Tags), this
  * is a deep `Context.Service` Tag (ADR-0002): it owns
- * `send / peek / flush / redeliver / pruneWorkflow / resolve` and pulls the wire-envelope
+ * `send / peek / flush / redeliver / pruneWorkflow / withTransaction / resolve` and pulls the wire-envelope
  * builder INSIDE the seam. Address resolution stays an INTERNAL strategy the
  * Client holds (`ActorAddressResolver`), not a public Tag.
  *
@@ -38,7 +38,7 @@
  *   covered instead by `fromSharding` (real cluster runtime) and the
  *   `fromWorkflow` test path (WorkflowEngine-persisted). What this adapter OWNS
  *   end-to-end: `send` routes the prebuilt request through the INJECTED mailbox,
- *   and `peek / flush / redeliver / pruneWorkflow` operate over its bundled storage.
+ *   and `peek / flush / redeliver / pruneWorkflow / withTransaction` operate over its bundled storage.
  */
 import type { Schema } from "effect";
 import { Context, Effect, Layer, Option } from "effect";
@@ -245,6 +245,8 @@ export interface ClientShape {
     workflow: Parameters<ActorAddressResolverShape["resolveWorkflow"]>[0],
     executionId: string,
   ) => Effect.Effect<void, PersistenceError>;
+  /** Run storage work in one transaction owned by this Client. */
+  readonly withTransaction: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
 }
 /* eslint-enable typescript-eslint/no-explicit-any */
 
@@ -295,6 +297,7 @@ const makeClientService: Effect.Effect<
             storage.clearAddress(resolver.resolveWorkflowClock(workflow, executionId)),
           ),
         ),
+    withTransaction: storage.withTransaction,
   };
 });
 
