@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.21.0
+
+### Minor Changes
+
+- [`2709cd0`](https://github.com/cevr/effect-encore/commit/2709cd0ab0b9971b337df5bd3e18b3a68ea46734) Thanks [@cevr](https://github.com/cevr)! - Namespace durable signals and add delivery helpers that accept an execution ID.
+
 ## 0.20.0
 
 ### Minor Changes
