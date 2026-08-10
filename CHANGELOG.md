@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.25.1
+
+### Patch Changes
+
+- [`a5a3ff9`](https://github.com/cevr/effect-encore/commit/a5a3ff9cc0c05f9e962c4b3ae0c8993ec4846740) Thanks [@cevr](https://github.com/cevr)! - Align compensation conflict attempts with the positive integer workflow attempt invariant.
+
 ## 0.25.0
 
 ### Minor Changes
