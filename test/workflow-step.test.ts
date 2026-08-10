@@ -1,5 +1,6 @@
 import { describe, expect, it, test } from "effect-bun-test";
 import { Effect, Exit, Schedule, Schema } from "effect";
+import { Activity } from "effect/unstable/workflow";
 import { Actor } from "../src/index.js";
 
 // ── Basic workflow with step.run shorthand ─────────────────────────────
@@ -555,17 +556,21 @@ const IdKeyTest = Actor.toTestLayer(IdKeyWorkflow, (_payload, step) =>
   Effect.gen(function* () {
     const key = yield* step.idempotencyKey("my-step");
     const attemptKey = yield* step.idempotencyKey("my-step", { includeAttempt: true });
-    return `${step.executionId}|${key}|${attemptKey}`;
+    const effectKey = yield* Activity.idempotencyKey("my-step");
+    const effectAttemptKey = yield* Activity.idempotencyKey("my-step", {
+      includeAttempt: true,
+    });
+    return [key, attemptKey, effectKey, effectAttemptKey].join("|");
   }),
 );
 
 describe("step.idempotencyKey", () => {
-  it.scopedLive.layer(IdKeyTest)("keeps the persisted key format", () =>
+  it.scopedLive.layer(IdKeyTest)("delegates to Effect Activity", () =>
     Effect.gen(function* () {
       const result = yield* IdKeyWorkflow.execute({ id: "idem-1" });
-      const [executionId, key, attemptKey] = result.split("|");
-      expect(key).toBe(`${executionId}/my-step`);
-      expect(attemptKey).toBe(`${executionId}/my-step/1`);
+      const [key, attemptKey, effectKey, effectAttemptKey] = result.split("|");
+      expect(key).toBe(effectKey);
+      expect(attemptKey).toBe(effectAttemptKey);
     }),
   );
 });

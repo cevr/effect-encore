@@ -453,15 +453,7 @@ export const makeWorkflowExecution = <
 
     raceSignals: (name, options) => UpstreamDeferred.raceAll({ name, ...options }),
 
-    idempotencyKey: (name, options) =>
-      Effect.gen(function* () {
-        const instance = yield* WorkflowInstance;
-        if (options?.includeAttempt) {
-          const attempt = yield* UpstreamActivity.CurrentAttempt;
-          return `${instance.executionId}/${name}/${attempt}`;
-        }
-        return `${instance.executionId}/${name}`;
-      }),
+    idempotencyKey: UpstreamActivity.idempotencyKey,
 
     attempt: UpstreamActivity.CurrentAttempt,
     suspend: Effect.gen(function* () {
