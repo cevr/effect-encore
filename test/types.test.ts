@@ -9,7 +9,7 @@ import type {
 } from "effect/unstable/cluster/ClusterError";
 import type { Execution } from "effect/unstable/workflow/Workflow";
 import type { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
-import { Actor, makeSignal } from "../src/index.js";
+import { Actor } from "../src/index.js";
 import type { MailboxError } from "../src/actor-mailbox.js";
 import type { State as StateValue } from "../src/state.js";
 import type {
@@ -356,7 +356,7 @@ describe("declarative signal type-level tests", () => {
       Schema.Struct<{ id: typeof Schema.String }>,
       typeof Schema.String,
       typeof Schema.Never
-    > = makeSignal(SignalWorkflow._meta.workflow, "Dynamic", { success: Schema.String });
+    > = SignalWorkflow.signal("Dynamic", { success: Schema.String });
     void _signal;
   });
 

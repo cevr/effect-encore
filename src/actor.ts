@@ -1753,6 +1753,7 @@ const WORKFLOW_RESERVED_KEYS = new Set<string>([
   "make",
   "interrupt",
   "resume",
+  "signal",
   "executionId",
   "pipe",
 ]);
@@ -1837,6 +1838,14 @@ export type WorkflowActor<
     ActorClientService<Name, WorkflowRunDefs<Payload, Success, Error>>,
     ActorClientFactory<Name, WorkflowRunDefs<Payload, Success, Error>>
   >;
+  /** Create a durable signal whose name is selected at runtime. */
+  readonly signal: <
+    S extends Schema.Top = typeof Schema.Void,
+    E extends Schema.Top = typeof Schema.Never,
+  >(
+    name: string,
+    options?: { readonly success?: S; readonly error?: E },
+  ) => WorkflowSignal<Schema.Struct<Payload>, S, E>;
   /**
    * Run the workflow for the given payload, awaiting its terminal result.
    * Idempotent on `payload` — same payload yields same execution.
@@ -2118,6 +2127,14 @@ const fromWorkflow = <
       decideCompensation(wf, executionId, stepId, attempt, "Stop"),
   };
 
+  const signal = <
+    S extends Schema.Top = typeof Schema.Void,
+    E extends Schema.Top = typeof Schema.Never,
+  >(
+    signalName: string,
+    options?: { readonly success?: S; readonly error?: E },
+  ): WorkflowSignal<Schema.Struct<Payload>, S, E> => makeSignal(wf, signalName, options);
+
   const executionIdFn = (payload: WorkflowPayloadType<Payload>) =>
     Effect.map(wf.executionId(payload as never), (id) => makeExecId(id));
 
@@ -2188,6 +2205,7 @@ const fromWorkflow = <
     type: `Workflow/${name}` as const,
     _meta: { name, workflow: wf },
     Context: contextTag,
+    signal,
     execute: executeFn,
     send: sendFn,
     executionId: executionIdFn,
