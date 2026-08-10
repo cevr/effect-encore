@@ -347,12 +347,13 @@ const DurableCompensationTest = Actor.toTestLayer(DurableCompensation, (_payload
         earlierRuns++;
       }),
       undo: () =>
-        Effect.gen(function* () {
+        Effect.suspend(() => {
           earlierCompensations++;
           compensationOrder.push(`earlier:${earlierCompensations}`);
           if (earlierCompensations === 1) {
-            return yield* Effect.die("retry earlier compensation");
+            return StepError.make({ reason: "retry earlier compensation" });
           }
+          return Effect.void;
         }),
     });
     yield* step.run("later", {

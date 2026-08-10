@@ -271,8 +271,10 @@ compensation is a durable Activity. A completed compensation does not run again
 after replay or restart.
 
 A failed compensation suspends the workflow. The error log includes the
-`executionId`, `stepId`, and `attempt`. An operator can retry that compensation
-or stop its retries:
+`executionId`, `stepId`, and `attempt`. The `undo` Effect can fail with the
+Workflow error type. Encore uses the Workflow error schema for the durable
+compensation Activity. An operator can retry that compensation or stop its
+retries:
 
 ```ts
 yield * ProcessOrder.compensation.retry(executionId, "charge-card", 1);

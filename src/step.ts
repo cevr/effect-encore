@@ -8,7 +8,7 @@ import {
 import type { WorkflowEngine } from "effect/unstable/workflow/WorkflowEngine";
 import { WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
 import type { Cause, Duration, Exit, Scope } from "effect";
-import { Array as Arr, Cause as CauseModule, Effect, Match, Schema } from "effect";
+import { Array as Arr, Cause as CauseModule, Effect, Match, Predicate, Schema } from "effect";
 
 // ── WorkflowSignalToken ─────────────────────────────────────────────────
 
@@ -85,10 +85,10 @@ export interface StepRunOptions<
   E extends Schema.Top = typeof Schema.Never,
   R = never,
   R2 = never,
-  WE = unknown,
+  WE = never,
 > {
   readonly do: Effect.Effect<S["Type"], E["Type"], R>;
-  readonly undo?: (value: S["Type"], cause: Cause.Cause<WE>) => Effect.Effect<void, never, R2>;
+  readonly undo?: (value: S["Type"], cause: Cause.Cause<WE>) => Effect.Effect<void, WE, R2>;
   readonly success?: S;
   readonly error?: E;
   readonly retry?: { readonly times: number };
@@ -124,7 +124,10 @@ export interface WorkflowStepContext<WorkflowError extends Schema.Top> {
     <A, R, R2>(
       id: string,
       execute: Effect.Effect<A, never, R>,
-      undo: (value: A, cause: Cause.Cause<WorkflowError["Type"]>) => Effect.Effect<void, never, R2>,
+      undo: (
+        value: A,
+        cause: Cause.Cause<WorkflowError["Type"]>,
+      ) => Effect.Effect<void, WorkflowError["Type"], R2>,
     ): Effect.Effect<
       A,
       never,
@@ -207,7 +210,14 @@ export interface WorkflowExecution<WorkflowError extends Schema.Top> {
   readonly step: WorkflowStepContext<WorkflowError>;
   readonly compensate: (
     cause: Cause.Cause<WorkflowError["Type"]>,
-  ) => Effect.Effect<void, never, WorkflowEngine | WorkflowInstance>;
+  ) => Effect.Effect<
+    void,
+    never,
+    | WorkflowEngine
+    | WorkflowInstance
+    | WorkflowError["DecodingServices"]
+    | WorkflowError["EncodingServices"]
+  >;
 }
 
 export type CompensationDecision = "Retry" | "Stop";
@@ -309,7 +319,14 @@ export const makeWorkflowExecution = <
   const compensations: Array<
     (
       cause: Cause.Cause<WorkflowError["Type"]>,
-    ) => Effect.Effect<void, never, WorkflowEngine | WorkflowInstance>
+    ) => Effect.Effect<
+      void,
+      never,
+      | WorkflowEngine
+      | WorkflowInstance
+      | WorkflowError["DecodingServices"]
+      | WorkflowError["EncodingServices"]
+    >
   > = [];
 
   // Workflow scope finalizers are uninterruptible. Keep compensation in the
@@ -317,7 +334,10 @@ export const makeWorkflowExecution = <
   const addCompensation = <A, E, R, R2>(
     stepId: string,
     activity: Effect.Effect<A, E, R>,
-    undo: (value: A, cause: Cause.Cause<WorkflowError["Type"]>) => Effect.Effect<void, never, R2>,
+    undo: (
+      value: A,
+      cause: Cause.Cause<WorkflowError["Type"]>,
+    ) => Effect.Effect<void, WorkflowError["Type"], R2>,
   ) =>
     Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
@@ -340,9 +360,19 @@ export const makeWorkflowExecution = <
     stepId: string,
     value: A,
     workflowCause: Cause.Cause<WorkflowError["Type"]>,
-    undo: (value: A, cause: Cause.Cause<WorkflowError["Type"]>) => Effect.Effect<void>,
+    undo: (
+      value: A,
+      cause: Cause.Cause<WorkflowError["Type"]>,
+    ) => Effect.Effect<void, WorkflowError["Type"]>,
     attempt: number,
-  ): Effect.Effect<void, never, WorkflowEngine | WorkflowInstance> => {
+  ): Effect.Effect<
+    void,
+    never,
+    | WorkflowEngine
+    | WorkflowInstance
+    | WorkflowError["DecodingServices"]
+    | WorkflowError["EncodingServices"]
+  > => {
     const execute = undo(value, workflowCause).pipe(
       Effect.tapCause((cause) => {
         if (CauseModule.hasInterrupts(cause)) return Effect.void;
@@ -354,12 +384,16 @@ export const makeWorkflowExecution = <
     const activity = UpstreamActivity.make({
       name: compensationActivityName(stepId),
       execute,
+      error: wf.errorSchema,
     }).pipe(Effect.provideService(UpstreamActivity.CurrentAttempt, attempt));
 
     return activity.pipe(
       Effect.catchCause((cause) => {
-        // Once an undo starts, any interrupt wins over operator recovery.
-        if (CauseModule.hasInterrupts(cause)) return Effect.failCause(cause);
+        // Once an undo starts, an interrupt discards every co-occurring failure and defect.
+        if (CauseModule.hasInterrupts(cause)) {
+          const interrupts = cause.reasons.filter(CauseModule.isInterruptReason);
+          return Effect.failCause(CauseModule.fromReasons(interrupts));
+        }
         const deferred = compensationDecision(stepId, attempt);
         return UpstreamDeferred.await(deferred).pipe(
           Effect.flatMap((decision) =>
@@ -378,7 +412,7 @@ export const makeWorkflowExecution = <
 
   const runImpl = (id: string, second: unknown, third?: unknown): Effect.Effect<any, any, any> => {
     // Arity 2 + second is plain object with `do` → full options
-    if (second !== null && typeof second === "object" && "do" in second) {
+    if (Predicate.hasProperty(second, "do")) {
       const opts = second as StepRunOptions<any, any, any, any, WorkflowError["Type"]>;
       const activity = UpstreamActivity.make({
         name: id,
@@ -401,12 +435,12 @@ export const makeWorkflowExecution = <
     }
 
     // Arity 3 + third is function → shorthand with undo
-    if (typeof third === "function") {
+    if (Predicate.isFunction(third)) {
       const execute = second as Effect.Effect<any, never, any>;
       const undo = third as (
         value: any,
         cause: Cause.Cause<WorkflowError["Type"]>,
-      ) => Effect.Effect<void, never, any>;
+      ) => Effect.Effect<void, WorkflowError["Type"], any>;
 
       const activity = UpstreamActivity.make({
         name: id,

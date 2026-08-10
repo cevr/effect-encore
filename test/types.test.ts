@@ -28,6 +28,10 @@ class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   message: Schema.String,
 }) {}
 
+class ForeignError extends Schema.TaggedError<ForeignError>()("ForeignError", {
+  message: Schema.String,
+}) {}
+
 const Order = Actor.fromEntity("Order", {
   Place: {
     payload: { item: Schema.String },
@@ -336,6 +340,35 @@ describe("step DSL type-level tests", () => {
             void _typed;
             return Effect.void;
           },
+        });
+        return "ok";
+      }),
+    );
+    void _check;
+  });
+
+  test("undo can fail with the Workflow error", () => {
+    const _check = Actor.toTestLayer(FailableWorkflow, (_payload, step) =>
+      Effect.gen(function* () {
+        yield* step.run("typed-compensation-error", {
+          do: Effect.succeed("ok"),
+          success: Schema.String,
+          undo: () => Effect.fail(OrderError.make({ message: "compensation failed" })),
+        });
+        return "ok";
+      }),
+    );
+    void _check;
+  });
+
+  test("undo rejects a foreign error", () => {
+    const _check = Actor.toTestLayer(FailableWorkflow, (_payload, step) =>
+      Effect.gen(function* () {
+        yield* step.run("foreign-compensation-error", {
+          // @ts-expect-error — undo may fail only with the Workflow error
+          do: Effect.succeed("ok"),
+          success: Schema.String,
+          undo: () => Effect.fail(ForeignError.make({ message: "foreign" })),
         });
         return "ok";
       }),
