@@ -250,6 +250,39 @@ const ProcessOrderLive = Actor.toLayer(ProcessOrder, (payload, step) =>
 );
 ```
 
+Compensations run in reverse registration order after a workflow failure. Each
+compensation is a durable Activity. A completed compensation does not run again
+after replay or restart.
+
+A failed compensation suspends the workflow. The error log includes the
+`executionId`, `stepId`, and `attempt`. An operator can retry that compensation
+or stop its retries:
+
+```ts
+yield * ProcessOrder.compensation.retry(executionId, "charge-card", 1);
+yield * ProcessOrder.compensation.stop(executionId, "charge-card", 1);
+```
+
+`retry` starts the next Activity attempt. `stop` skips the failed compensation
+and continues with older compensations. The workflow keeps its original failure
+after compensation ends. An interrupt-only cause does not start compensation.
+An interrupted compensation does not wait for an operator decision.
+Decision writes are idempotent. They do not validate the Step ID or attempt.
+Use the exact values from the compensation error log.
+
+The default `waitFor` filter waits for a terminal result. It does not return a
+suspended result. Use an explicit filter when an operator must detect the wait:
+
+```ts
+const suspended =
+  yield *
+  ProcessOrder.waitFor(payload, {
+    filter: (result) => result._tag === "Suspended",
+  });
+```
+
+Keep `captureDefects` enabled for operator recovery from compensation defects.
+
 ### Signal — external resolution
 
 Signals are declared on `WorkflowDef.signals` and become typed properties on the actor:

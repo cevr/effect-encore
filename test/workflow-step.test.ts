@@ -100,23 +100,29 @@ const FailableTest = Actor.toTestLayer(Failable, (payload, step) =>
 
 // ── Workflow with retry ───────────────────────────────────────────────
 
-let retryAttempts = 0;
+let retryAttempts: number[] = [];
 
 const Retrier = Actor.fromWorkflow("Retrier", {
   payload: { id: Schema.String },
   success: Schema.String,
+  error: StepError,
   id: (p: { id: string }) => p.id,
 });
 
 const RetrierTest = Actor.toTestLayer(Retrier, (payload, step) =>
   Effect.gen(function* () {
     const result = yield* step.run("flaky", {
-      do: Effect.sync(() => {
-        retryAttempts++;
+      do: Effect.gen(function* () {
+        const attempt = yield* step.attempt;
+        retryAttempts.push(attempt);
+        if (attempt < 3) {
+          return yield* StepError.make({ reason: `failed attempt ${attempt}` });
+        }
         return `done: ${payload.id}`;
       }),
       success: Schema.String,
-      retry: { times: 3 },
+      error: StepError,
+      retry: { times: 2 },
     });
     return result;
   }),
@@ -219,10 +225,10 @@ describe("step.run — full options with error", () => {
 describe("step.run — retry", () => {
   it.scopedLive.layer(RetrierTest)("executes with retry config", () =>
     Effect.gen(function* () {
-      retryAttempts = 0;
+      retryAttempts = [];
       const result = yield* Retrier.execute({ id: "r1" });
       expect(result).toBe("done: r1");
-      expect(retryAttempts).toBeGreaterThanOrEqual(1);
+      expect(retryAttempts).toEqual([1, 2, 3]);
     }),
   );
 });
@@ -304,6 +310,169 @@ describe("declarative signals", () => {
       }),
     ).toThrow(/collides with reserved/);
   });
+
+  test("compensation is a reserved signal name", () => {
+    expect(() =>
+      Actor.fromWorkflow("BadCompensationSignal", {
+        payload: { id: Schema.String },
+        id: (p: { id: string }) => p.id,
+        signals: { compensation: {} },
+      }),
+    ).toThrow(/collides with reserved/);
+  });
+});
+
+// ── Durable compensation ───────────────────────────────────────────────
+
+const DurableCompensation = Actor.fromWorkflow("DurableCompensation", {
+  payload: { id: Schema.String },
+  error: StepError,
+  id: (p: { id: string }) => p.id,
+});
+
+let earlierRuns = 0;
+let laterRuns = 0;
+let failingRuns = 0;
+let earlierCompensations = 0;
+let laterCompensations = 0;
+let compensationOrder: string[] = [];
+
+const DurableCompensationTest = Actor.toTestLayer(DurableCompensation, (_payload, step) =>
+  Effect.gen(function* () {
+    yield* step.run("earlier", {
+      do: Effect.sync(() => {
+        earlierRuns++;
+      }),
+      undo: () =>
+        Effect.gen(function* () {
+          earlierCompensations++;
+          compensationOrder.push(`earlier:${earlierCompensations}`);
+          if (earlierCompensations === 1) {
+            return yield* Effect.die("retry earlier compensation");
+          }
+        }),
+    });
+    yield* step.run("later", {
+      do: Effect.sync(() => {
+        laterRuns++;
+      }),
+      undo: () =>
+        Effect.sync(() => {
+          laterCompensations++;
+          compensationOrder.push(`later:${laterCompensations}`);
+        }),
+    });
+    return yield* step.run("fail", {
+      do: Effect.sync(() => {
+        failingRuns++;
+        return StepError.make({ reason: "workflow failed" });
+      }).pipe(Effect.flatMap(Effect.fail)),
+      error: StepError,
+    });
+  }),
+);
+
+const InterruptCompensation = Actor.fromWorkflow("InterruptCompensation", {
+  payload: { id: Schema.String },
+  id: (payload: { id: string }) => payload.id,
+});
+
+let interruptCompensations = 0;
+
+const InterruptCompensationTest = Actor.toTestLayer(InterruptCompensation, (_payload, step) =>
+  Effect.gen(function* () {
+    yield* step.run("registered", {
+      do: Effect.void,
+      undo: () =>
+        Effect.sync(() => {
+          interruptCompensations++;
+        }),
+    });
+    return yield* step.suspend;
+  }),
+);
+
+describe("step.run — durable compensation", () => {
+  it.scopedLive.layer(DurableCompensationTest)(
+    "replays completed compensations and waits for a failed attempt decision",
+    () =>
+      Effect.gen(function* () {
+        earlierRuns = 0;
+        laterRuns = 0;
+        failingRuns = 0;
+        earlierCompensations = 0;
+        laterCompensations = 0;
+        compensationOrder = [];
+
+        const payload = { id: "durable-compensation" };
+        const executionId = yield* DurableCompensation.send(payload);
+        const suspended = yield* DurableCompensation.waitFor(payload, {
+          filter: (result) => result._tag === "Suspended",
+        });
+
+        expect(suspended._tag).toBe("Suspended");
+        expect(compensationOrder).toEqual(["later:1", "earlier:1"]);
+
+        yield* DurableCompensation.compensation.retry(executionId, "earlier", 1);
+        const completed = yield* DurableCompensation.waitFor(payload);
+
+        expect(completed._tag).toBe("Failure");
+        expect(earlierRuns).toBe(1);
+        expect(laterRuns).toBe(1);
+        expect(failingRuns).toBe(1);
+        expect(earlierCompensations).toBe(2);
+        expect(laterCompensations).toBe(1);
+        expect(compensationOrder).toEqual(["later:1", "earlier:1", "earlier:2"]);
+      }),
+  );
+
+  it.scopedLive.layer(InterruptCompensationTest)("does not compensate an interrupt", () =>
+    Effect.gen(function* () {
+      interruptCompensations = 0;
+
+      const payload = { id: "interrupt-compensation" };
+      const executionId = yield* InterruptCompensation.send(payload);
+      yield* InterruptCompensation.waitFor(payload, {
+        filter: (result) => result._tag === "Suspended",
+      });
+
+      yield* InterruptCompensation.interrupt(executionId);
+      const completed = yield* InterruptCompensation.waitFor(payload);
+
+      expect(completed._tag).toBe("Interrupted");
+      expect(interruptCompensations).toBe(0);
+    }),
+  );
+
+  it.scopedLive.layer(DurableCompensationTest)("stops a failed compensation", () =>
+    Effect.gen(function* () {
+      earlierRuns = 0;
+      laterRuns = 0;
+      failingRuns = 0;
+      earlierCompensations = 0;
+      laterCompensations = 0;
+      compensationOrder = [];
+
+      const payload = { id: "stop-durable-compensation" };
+      const executionId = yield* DurableCompensation.send(payload);
+      const suspended = yield* DurableCompensation.waitFor(payload, {
+        filter: (result) => result._tag === "Suspended",
+      });
+
+      expect(suspended._tag).toBe("Suspended");
+      yield* DurableCompensation.compensation.stop(executionId, "earlier", 1);
+
+      const completed = yield* DurableCompensation.waitFor(payload);
+
+      expect(completed._tag).toBe("Failure");
+      expect(earlierRuns).toBe(1);
+      expect(laterRuns).toBe(1);
+      expect(failingRuns).toBe(1);
+      expect(earlierCompensations).toBe(1);
+      expect(laterCompensations).toBe(1);
+      expect(compensationOrder).toEqual(["later:1", "earlier:1"]);
+    }),
+  );
 });
 
 // ── Signal round-trip inside workflow ─────────────────────────────────

@@ -39,7 +39,7 @@ export type {
   SenderContext,
 } from "./actor.js";
 export type { ActorStateRegistryShape } from "./actor-state.js";
-export { makeStepContext, makeSignal } from "./step.js";
+export { makeSignal } from "./step.js";
 export type {
   WorkflowStepContext,
   WorkflowSignal,

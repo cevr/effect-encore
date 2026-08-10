@@ -32,6 +32,7 @@ import type { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/
 import { layerMemory as workflowEngineLayerMemory } from "effect/unstable/workflow/WorkflowEngine";
 import {
   Context,
+  Cause,
   Data,
   Duration,
   Effect,
@@ -46,7 +47,7 @@ import {
 import type { DateTime, Exit, Scope } from "effect";
 import { dual } from "effect/Function";
 import type { SignalDefs, WorkflowSignal, WorkflowStepContext } from "./step.js";
-import { makeSignal, makeStepContext } from "./step.js";
+import { decideCompensation, makeSignal, makeWorkflowExecution } from "./step.js";
 import type { ExecId, PeekResult } from "./receipt.js";
 import {
   ExecIdCodec,
@@ -1736,6 +1737,7 @@ const WORKFLOW_RESERVED_KEYS = new Set<string>([
   "_meta",
   "$is",
   "Context",
+  "compensation",
   "name",
   "type",
   "of",
@@ -1906,6 +1908,18 @@ export type WorkflowActor<
   ) => Effect.Effect<void, PersistenceError, MessageDeletion | Sharding.Sharding | WorkflowEngine>;
   readonly interrupt: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   readonly resume: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
+  readonly compensation: {
+    readonly retry: (
+      executionId: string,
+      stepId: string,
+      attempt: number,
+    ) => Effect.Effect<void, never, WorkflowEngine>;
+    readonly stop: (
+      executionId: string,
+      stepId: string,
+      attempt: number,
+    ) => Effect.Effect<void, never, WorkflowEngine>;
+  };
   /**
    * Escape hatch: produce the underlying `OperationValue<"Run", ...>` for the
    * payload. Useful for external code that needs to round-trip the value
@@ -2094,6 +2108,13 @@ const fromWorkflow = <
 
   const resumeFn = (executionId: string) => wf.resume(executionId);
 
+  const compensation = {
+    retry: (executionId: string, stepId: string, attempt: number) =>
+      decideCompensation(wf, executionId, stepId, attempt, "Retry"),
+    stop: (executionId: string, stepId: string, attempt: number) =>
+      decideCompensation(wf, executionId, stepId, attempt, "Stop"),
+  };
+
   const executionIdFn = (payload: WorkflowPayloadType<Payload>) =>
     Effect.map(wf.executionId(payload as never), (id) => makeExecId(id));
 
@@ -2173,6 +2194,7 @@ const fromWorkflow = <
     rerun: rerunFn,
     interrupt: interruptFn,
     resume: resumeFn,
+    compensation,
     make,
     $is,
   } as unknown as WorkflowActor<Name, Payload, Success, Error, Signals>;
@@ -2192,8 +2214,12 @@ const isWorkflowActor = (
 const wrapWorkflowHandler = (actor: WorkflowActor<any, any, any, any>, handler: Function) => {
   const wf = actor._meta.workflow;
   return (payload: any, executionId: string) => {
-    const step = makeStepContext(wf, executionId);
-    return handler(payload, step);
+    const execution = makeWorkflowExecution(wf, executionId);
+    return Effect.catchCause(handler(payload, execution.step), (cause) => {
+      // A pure interrupt ends the run. A mixed failure still needs compensation.
+      if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
+      return execution.compensate(cause).pipe(Effect.andThen(Effect.failCause(cause)));
+    });
   };
 };
 

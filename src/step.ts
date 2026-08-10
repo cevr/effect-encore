@@ -1,4 +1,4 @@
-/* eslint-disable typescript-eslint/no-explicit-any -- workflow types require open `any` for Schedule, Effect requirements */
+/* eslint-disable typescript-eslint/no-explicit-any -- workflow types require open `any` for Effect requirements */
 import {
   Workflow as UpstreamWorkflow,
   Activity as UpstreamActivity,
@@ -8,7 +8,7 @@ import {
 import type { WorkflowEngine } from "effect/unstable/workflow/WorkflowEngine";
 import { WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
 import type { Cause, Duration, Exit, Scope } from "effect";
-import { Array as Arr, Effect, Schedule, Schema } from "effect";
+import { Array as Arr, Cause as CauseModule, Effect, Match, Schema } from "effect";
 
 // ── WorkflowSignalToken ─────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ export interface StepRunOptions<
   readonly undo?: (value: S["Type"], cause: Cause.Cause<WE>) => Effect.Effect<void, never, R2>;
   readonly success?: S;
   readonly error?: E;
-  readonly retry?: Schedule.Schedule<any, unknown> | { readonly times: number };
+  readonly retry?: { readonly times: number };
 }
 
 // ── WorkflowStepContext ─────────────────────────────────────────────────
@@ -110,7 +110,6 @@ export interface WorkflowStepContext<WorkflowError extends Schema.Top> {
       | R2
       | WorkflowEngine
       | WorkflowInstance
-      | Scope.Scope
     >;
 
     // Shorthand with undo — infallible only
@@ -125,7 +124,6 @@ export interface WorkflowStepContext<WorkflowError extends Schema.Top> {
       | R2
       | WorkflowEngine
       | WorkflowInstance
-      | Scope.Scope
     >;
 
     // Shorthand — infallible only
@@ -197,6 +195,49 @@ export interface WorkflowStepContext<WorkflowError extends Schema.Top> {
   ) => Effect.Effect<void, never, WorkflowInstance | R>;
 }
 
+export interface WorkflowExecution<WorkflowError extends Schema.Top> {
+  readonly step: WorkflowStepContext<WorkflowError>;
+  readonly compensate: (
+    cause: Cause.Cause<WorkflowError["Type"]>,
+  ) => Effect.Effect<void, never, WorkflowEngine | WorkflowInstance>;
+}
+
+export type CompensationDecision = "Retry" | "Stop";
+
+const CompensationDecision = Schema.Literals(["Retry", "Stop"]);
+
+const encodeCompensationActivityName = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Tuple([Schema.Literals(["Compensate"]), Schema.String])),
+);
+
+const encodeCompensationDecisionName = Schema.encodeSync(
+  Schema.fromJsonString(
+    Schema.Tuple([Schema.Literals(["CompensationDecision"]), Schema.String, Schema.Finite]),
+  ),
+);
+
+const compensationActivityName = (stepId: string): string =>
+  encodeCompensationActivityName(["Compensate", stepId]);
+
+// Activity storage adds CurrentAttempt to its key. Durable Deferred storage
+// does not. The decision name must carry the attempt.
+const compensationDecision = (stepId: string, attempt: number) =>
+  UpstreamDeferred.make(encodeCompensationDecisionName(["CompensationDecision", stepId, attempt]), {
+    success: CompensationDecision,
+  });
+
+export const decideCompensation = (
+  workflow: UpstreamWorkflow.Any,
+  executionId: string,
+  stepId: string,
+  attempt: number,
+  decision: CompensationDecision,
+): Effect.Effect<void, never, WorkflowEngine> => {
+  const deferred = compensationDecision(stepId, attempt);
+  const token = UpstreamDeferred.tokenFromExecutionId(deferred, { workflow, executionId });
+  return UpstreamDeferred.succeed(deferred, { token, value: decision });
+};
+
 // ── makeSignal ──────────────────────────────────────────────────────────
 
 export const makeSignal = <
@@ -230,42 +271,106 @@ export const makeSignal = <
   };
 };
 
-// ── makeStepContext ─────────────────────────────────────────────────────
+// ── makeWorkflowExecution ───────────────────────────────────────────────
 
-export const makeStepContext = <
+export const makeWorkflowExecution = <
   Name extends string,
   Payload extends UpstreamWorkflow.AnyStructSchema,
   WorkflowError extends Schema.Top,
 >(
   wf: UpstreamWorkflow.Workflow<Name, Payload, Schema.Top, WorkflowError>,
   executionId: string,
-): WorkflowStepContext<WorkflowError> => {
+): WorkflowExecution<WorkflowError> => {
+  const compensations: Array<
+    (
+      cause: Cause.Cause<WorkflowError["Type"]>,
+    ) => Effect.Effect<void, never, WorkflowEngine | WorkflowInstance>
+  > = [];
+
+  // Workflow scope finalizers are uninterruptible. Keep compensation in the
+  // workflow body so a failed undo can suspend on a Durable Deferred.
+  const addCompensation = <A, E, R, R2>(
+    stepId: string,
+    activity: Effect.Effect<A, E, R>,
+    undo: (value: A, cause: Cause.Cause<WorkflowError["Type"]>) => Effect.Effect<void, never, R2>,
+  ) =>
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const context = yield* Effect.context<R2>();
+        const value = yield* restore(activity);
+        compensations.push((cause) =>
+          runCompensation(
+            stepId,
+            value,
+            cause,
+            (result, workflowCause) => undo(result, workflowCause).pipe(Effect.provide(context)),
+            1,
+          ),
+        );
+        return value;
+      }),
+    );
+
+  const runCompensation = <A>(
+    stepId: string,
+    value: A,
+    workflowCause: Cause.Cause<WorkflowError["Type"]>,
+    undo: (value: A, cause: Cause.Cause<WorkflowError["Type"]>) => Effect.Effect<void>,
+    attempt: number,
+  ): Effect.Effect<void, never, WorkflowEngine | WorkflowInstance> => {
+    const execute = undo(value, workflowCause).pipe(
+      Effect.tapCause((cause) => {
+        if (CauseModule.hasInterrupts(cause)) return Effect.void;
+        return Effect.logError("Workflow compensation failed.", cause).pipe(
+          Effect.annotateLogs({ executionId, stepId, attempt }),
+        );
+      }),
+    );
+    const activity = UpstreamActivity.make({
+      name: compensationActivityName(stepId),
+      execute,
+    }).pipe(Effect.provideService(UpstreamActivity.CurrentAttempt, attempt));
+
+    return activity.pipe(
+      Effect.catchCause((cause) => {
+        // Once an undo starts, any interrupt wins over operator recovery.
+        if (CauseModule.hasInterrupts(cause)) return Effect.failCause(cause);
+        const deferred = compensationDecision(stepId, attempt);
+        return UpstreamDeferred.await(deferred).pipe(
+          Effect.flatMap((decision) =>
+            Match.value(decision).pipe(
+              Match.when("Retry", () =>
+                runCompensation(stepId, value, workflowCause, undo, attempt + 1),
+              ),
+              Match.when("Stop", () => Effect.void),
+              Match.exhaustive,
+            ),
+          ),
+        );
+      }),
+    );
+  };
+
   const runImpl = (id: string, second: unknown, third?: unknown): Effect.Effect<any, any, any> => {
     // Arity 2 + second is plain object with `do` → full options
     if (second !== null && typeof second === "object" && "do" in second) {
-      const opts = second as StepRunOptions<any, any, any, any>;
-      // `retry` accepts either a Schedule or the `{ times }` shorthand.
-      const resolveRetryPolicy = (retry: typeof opts.retry): unknown => {
-        if (!retry) return undefined;
-        if ("times" in (retry as object)) {
-          return Schedule.recurs((retry as { times: number }).times);
-        }
-        return retry;
-      };
-      const retryPolicy = resolveRetryPolicy(opts.retry);
-
+      const opts = second as StepRunOptions<any, any, any, any, WorkflowError["Type"]>;
       const activity = UpstreamActivity.make({
         name: id,
         success: opts.success,
         error: opts.error,
         execute: opts.do,
-        interruptRetryPolicy: retryPolicy as
-          | Schedule.Schedule<any, Cause.Cause<unknown>>
-          | undefined,
       });
 
+      if (opts.retry) {
+        const retried = UpstreamActivity.retry(activity, opts.retry);
+        if (opts.undo) {
+          return addCompensation(id, retried, opts.undo);
+        }
+        return retried;
+      }
       if (opts.undo) {
-        return wf.withCompensation(activity, opts.undo as any);
+        return addCompensation(id, activity, opts.undo);
       }
       return activity;
     }
@@ -275,7 +380,7 @@ export const makeStepContext = <
       const execute = second as Effect.Effect<any, never, any>;
       const undo = third as (
         value: any,
-        cause: Cause.Cause<unknown>,
+        cause: Cause.Cause<WorkflowError["Type"]>,
       ) => Effect.Effect<void, never, any>;
 
       const activity = UpstreamActivity.make({
@@ -284,7 +389,7 @@ export const makeStepContext = <
         execute,
       });
 
-      return wf.withCompensation(activity, undo as any);
+      return addCompensation(id, activity, undo);
     }
 
     // Arity 2 + second is Effect → shorthand
@@ -297,7 +402,7 @@ export const makeStepContext = <
     return activity;
   };
 
-  return {
+  const step: WorkflowStepContext<WorkflowError> = {
     executionId,
 
     run: runImpl as WorkflowStepContext<WorkflowError>["run"],
@@ -341,5 +446,13 @@ export const makeStepContext = <
     scope: UpstreamWorkflow.scope,
     provideScope: UpstreamWorkflow.provideScope,
     addFinalizer: UpstreamWorkflow.addFinalizer,
+  };
+
+  return {
+    step,
+    compensate: (cause) =>
+      Effect.forEach(Arr.reverse(compensations), (compensate) => compensate(cause), {
+        discard: true,
+      }),
   };
 };
