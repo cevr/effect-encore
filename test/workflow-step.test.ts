@@ -293,6 +293,8 @@ describe("declarative signals", () => {
     expect(SignalWorkflow.Approval.into).toBeDefined();
     expect(SignalWorkflow.Approval.tokenFromExecutionId).toBeDefined();
     expect(SignalWorkflow.Approval.tokenFromPayload).toBeDefined();
+    expect(SignalWorkflow.Approval.succeedAt).toBeDefined();
+    expect(SignalWorkflow.Approval.failAt).toBeDefined();
   });
 
   test("void signal defaults work", () => {
@@ -479,18 +481,18 @@ describe("step.run — durable compensation", () => {
 
 const SignalTest = Actor.toTestLayer(SignalWorkflow, (_payload, _step) =>
   Effect.gen(function* () {
-    const token = yield* SignalWorkflow.Approval.token;
-    // Resolve immediately from inside the handler for testing
-    yield* SignalWorkflow.Approval.succeed({ token, value: "approved" });
     const result = yield* SignalWorkflow.Approval.await;
     return `got: ${result}`;
   }),
 );
 
 describe("signal — inside handler", () => {
-  it.scopedLive.layer(SignalTest)("signal token + succeed + await round-trip", () =>
+  it.scopedLive.layer(SignalTest)("signal delivery by execution ID round-trips", () =>
     Effect.gen(function* () {
-      const result = yield* SignalWorkflow.execute({ id: "sig-1" });
+      const payload = { id: "sig-1" };
+      const executionId = yield* SignalWorkflow.executionId(payload);
+      yield* SignalWorkflow.Approval.succeedAt(executionId, "approved");
+      const result = yield* SignalWorkflow.execute(payload);
       expect(result).toBe("got: approved");
     }),
   );

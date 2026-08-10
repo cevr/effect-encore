@@ -33,6 +33,14 @@ export interface WorkflowSignal<
   readonly tokenFromPayload: (
     payload: Payload["~type.make.in"],
   ) => Effect.Effect<WorkflowSignalToken>;
+  readonly succeedAt: (
+    executionId: string,
+    value: S["Type"],
+  ) => Effect.Effect<void, never, WorkflowEngine | S["EncodingServices"]>;
+  readonly failAt: (
+    executionId: string,
+    error: E["Type"],
+  ) => Effect.Effect<void, never, WorkflowEngine | E["EncodingServices"]>;
   readonly succeed: (opts: {
     token: WorkflowSignalToken;
     value: S["Type"];
@@ -216,6 +224,10 @@ const encodeCompensationDecisionName = Schema.encodeSync(
   ),
 );
 
+const encodeSignalName = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Tuple([Schema.Literals(["Signal"]), Schema.String])),
+);
+
 const compensationActivityName = (stepId: string): string =>
   encodeCompensationActivityName(["Compensate", stepId]);
 
@@ -252,7 +264,7 @@ export const makeSignal = <
   name: string,
   options?: { readonly success?: S; readonly error?: E },
 ): WorkflowSignal<Payload, S, E> => {
-  const deferred = UpstreamDeferred.make(name, {
+  const deferred = UpstreamDeferred.make(encodeSignalName(["Signal", name]), {
     success: options?.success,
     error: options?.error,
   });
@@ -266,6 +278,16 @@ export const makeSignal = <
       UpstreamDeferred.tokenFromExecutionId(deferred, { workflow: wf, executionId }),
     tokenFromPayload: (payload: Payload["~type.make.in"]) =>
       UpstreamDeferred.tokenFromPayload(deferred, { workflow: wf, payload: payload as never }),
+    succeedAt: (executionId, value) =>
+      UpstreamDeferred.succeed(deferred, {
+        token: UpstreamDeferred.tokenFromExecutionId(deferred, { workflow: wf, executionId }),
+        value,
+      }),
+    failAt: (executionId, error) =>
+      UpstreamDeferred.fail(deferred, {
+        token: UpstreamDeferred.tokenFromExecutionId(deferred, { workflow: wf, executionId }),
+        error,
+      }),
     succeed: (opts) => UpstreamDeferred.succeed(deferred, opts),
     fail: (opts) => UpstreamDeferred.fail(deferred, opts),
     failCause: (opts) => UpstreamDeferred.failCause(deferred, opts),
