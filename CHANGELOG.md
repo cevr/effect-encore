@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.20.0
+
+### Minor Changes
+
+- [`b64a218`](https://github.com/cevr/effect-encore/commit/b64a218f9d4d66a40a742bd129c9b4df76fa92e6) Thanks [@cevr](https://github.com/cevr)! - Add a public dynamic signal constructor to Workflow actors.
+
 ## 0.19.0
 
 ### Minor Changes
