@@ -47,7 +47,7 @@ import {
   Schema,
   Stream,
 } from "effect";
-import type { DateTime, Exit, Scope } from "effect";
+import type { DateTime, Scope } from "effect";
 import { dual } from "effect/Function";
 import type { SignalDefs, WorkflowSignal, WorkflowStepContext } from "./step.js";
 import { decideCompensation, makeSignal, makeWorkflowExecution } from "./step.js";
@@ -838,7 +838,7 @@ const watchImpl = (
   ).pipe(Stream.changesWith(peekResultEquals), Stream.takeUntil(isTerminal));
 };
 
-const peekResultEquals = (a: PeekResult, b: PeekResult): boolean => {
+const peekResultEquals = <A, E>(a: PeekResult<A, E>, b: PeekResult<A, E>): boolean => {
   if (a._tag !== b._tag) return false;
   if (a._tag === "Success" && b._tag === "Success") return a.value === b.value;
   if (a._tag === "Failure" && b._tag === "Failure") return a.error === b.error;
@@ -852,14 +852,14 @@ const peekResultEquals = (a: PeekResult, b: PeekResult): boolean => {
 const defaultWaitSchedule: Schedule.Schedule<any, unknown> = Schedule.spaced("200 millis");
 
 /* eslint-disable typescript-eslint/no-explicit-any -- waitFor/signal require open types */
-const makeWaitFor = <S, E>(
-  peekFn: (execId: ExecId<S, E>) => Effect.Effect<PeekResult<S, E>, any, any>,
+const makeWaitFor = <S, E, PE, PR>(
+  peekFn: (execId: ExecId<S, E>) => Effect.Effect<PeekResult<S, E>, PE, PR>,
   execId: ExecId<S, E>,
   options?: {
     readonly filter?: (result: PeekResult<S, E>) => boolean;
     readonly schedule?: Schedule.Schedule<any, unknown>;
   },
-): Effect.Effect<PeekResult<S, E>, any, any> => {
+): Effect.Effect<PeekResult<S, E>, PE, PR> => {
   const filter = options?.filter ?? (isTerminal as (r: PeekResult<S, E>) => boolean);
   const sched = options?.schedule ?? defaultWaitSchedule;
   return peekFn(execId).pipe(
@@ -1818,6 +1818,16 @@ type WorkflowRunDefs<
   };
 };
 
+type WorkflowReadServices<Success extends Schema.Top, Error extends Schema.Top> =
+  | WorkflowEngine
+  | Success["DecodingServices"]
+  | Error["DecodingServices"];
+
+type WorkflowPeekResult<Success extends Schema.Top, Error extends Schema.Top> = PeekResult<
+  Success["Type"],
+  Error["Type"]
+>;
+
 // ── WorkflowActor ───────────────────────────────────────────────────
 
 export type WorkflowActor<
@@ -1876,31 +1886,67 @@ export type WorkflowActor<
   readonly peek: (
     payload: WorkflowPayloadType<Payload>,
   ) => Effect.Effect<
-    PeekResult<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>,
+    WorkflowPeekResult<Success, Error>,
     never,
-    WorkflowEngine
+    WorkflowReadServices<Success, Error>
+  >;
+  /** Inspect a workflow run by its durable execution identifier. */
+  readonly peekAt: (
+    executionId: string,
+  ) => Effect.Effect<
+    WorkflowPeekResult<Success, Error>,
+    never,
+    WorkflowReadServices<Success, Error>
   >;
   readonly watch: (
     payload: WorkflowPayloadType<Payload>,
     options?: { readonly interval?: Duration.Input },
   ) => Stream.Stream<
-    PeekResult<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>,
+    WorkflowPeekResult<Success, Error>,
     never,
-    WorkflowEngine
+    WorkflowReadServices<Success, Error>
+  >;
+  /**
+   * Watch a workflow run by its durable execution identifier.
+   * An unknown identifier stays Pending. Apply a stream timeout when the
+   * caller cannot wait without a bound.
+   */
+  readonly watchAt: (
+    executionId: string,
+    options?: { readonly interval?: Duration.Input },
+  ) => Stream.Stream<
+    WorkflowPeekResult<Success, Error>,
+    never,
+    WorkflowReadServices<Success, Error>
   >;
   readonly waitFor: (
     payload: WorkflowPayloadType<Payload>,
     options?: {
-      readonly filter?: (
-        result: PeekResult<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>,
-      ) => boolean;
+      readonly filter?: (result: WorkflowPeekResult<Success, Error>) => boolean;
       // eslint-disable-next-line typescript-eslint/no-explicit-any
       readonly schedule?: Schedule.Schedule<any, unknown>;
     },
   ) => Effect.Effect<
-    PeekResult<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>,
+    WorkflowPeekResult<Success, Error>,
     never,
-    WorkflowEngine
+    WorkflowReadServices<Success, Error>
+  >;
+  /**
+   * Wait for a workflow run selected by its durable execution identifier.
+   * An unknown identifier stays Pending. Apply `Effect.timeout` when the
+   * caller cannot wait without a bound.
+   */
+  readonly waitForAt: (
+    executionId: string,
+    options?: {
+      readonly filter?: (result: WorkflowPeekResult<Success, Error>) => boolean;
+      // eslint-disable-next-line typescript-eslint/no-explicit-any
+      readonly schedule?: Schedule.Schedule<any, unknown>;
+    },
+  ) => Effect.Effect<
+    WorkflowPeekResult<Success, Error>,
+    never,
+    WorkflowReadServices<Success, Error>
   >;
   /**
    * Surgically clear this execution's cached run reply + activity replies so
@@ -2061,42 +2107,50 @@ const fromWorkflow = <
   const execIdFor = (payload: WorkflowPayloadType<Payload>): Effect.Effect<string> =>
     wf.executionId(payload as never);
 
-  type RawPeek = PeekResult<Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>;
+  type RawPeek = WorkflowPeekResult<Success, Error>;
 
-  const peekById = (executionId: string): Effect.Effect<RawPeek, never, WorkflowEngine> =>
-    Effect.map(
-      wf.poll(executionId) as Effect.Effect<Option.Option<unknown>, never, WorkflowEngine>,
-      (optResult): RawPeek => {
-        if (Option.isNone(optResult)) return Pending as RawPeek;
-        const result = optResult.value as {
-          _tag: string;
-          exit?: Exit.Exit<unknown, unknown>;
-        };
-        if (result._tag === "Suspended") return Suspended as RawPeek;
-        if (result._tag === "Complete" && result.exit) {
-          return mapExitToWorkflowPeekResult(result.exit) as RawPeek;
-        }
-        return Pending as RawPeek;
-      },
+  const peekAtFn = (
+    executionId: string,
+  ): Effect.Effect<RawPeek, never, WorkflowReadServices<Success, Error>> =>
+    Effect.map(wf.poll(executionId), (result) =>
+      Option.match(result, {
+        onNone: () => Pending,
+        onSome: (value) => {
+          if (value._tag === "Suspended") return Suspended;
+          return mapExitToWorkflowPeekResult(value.exit);
+        },
+      }),
     );
 
   const peekFn = (payload: WorkflowPayloadType<Payload>) =>
-    Effect.flatMap(execIdFor(payload), peekById);
+    Effect.flatMap(execIdFor(payload), peekAtFn);
+
+  const watchAtFn = (
+    executionId: string,
+    options?: { readonly interval?: Duration.Input },
+  ): Stream.Stream<RawPeek, never, WorkflowReadServices<Success, Error>> => {
+    const interval = options?.interval ?? Duration.millis(200);
+    return Stream.fromEffectSchedule(peekAtFn(executionId), Schedule.spaced(interval)).pipe(
+      Stream.changesWith(peekResultEquals),
+      Stream.takeUntil(isTerminal),
+    );
+  };
 
   const watchFn = (
     payload: WorkflowPayloadType<Payload>,
     options?: { readonly interval?: Duration.Input },
-  ): Stream.Stream<RawPeek, never, WorkflowEngine> => {
-    const interval = options?.interval ?? Duration.millis(200);
-    return Stream.unwrap(
-      Effect.map(execIdFor(payload), (executionId) =>
-        Stream.fromEffectSchedule(peekById(executionId), Schedule.spaced(interval)).pipe(
-          Stream.changesWith(peekResultEquals as (a: RawPeek, b: RawPeek) => boolean),
-          Stream.takeUntil(isTerminal as (r: RawPeek) => boolean),
-        ),
-      ),
-    );
-  };
+  ): Stream.Stream<RawPeek, never, WorkflowReadServices<Success, Error>> =>
+    Stream.unwrap(Effect.map(execIdFor(payload), (executionId) => watchAtFn(executionId, options)));
+
+  const waitForAtFn = (
+    executionId: string,
+    options?: {
+      readonly filter?: (result: RawPeek) => boolean;
+      // eslint-disable-next-line typescript-eslint/no-explicit-any
+      readonly schedule?: Schedule.Schedule<any, unknown>;
+    },
+  ): Effect.Effect<RawPeek, never, WorkflowReadServices<Success, Error>> =>
+    makeWaitFor(peekAtFn, makeExecId(executionId), options);
 
   const waitForFn = (
     payload: WorkflowPayloadType<Payload>,
@@ -2105,16 +2159,8 @@ const fromWorkflow = <
       // eslint-disable-next-line typescript-eslint/no-explicit-any
       readonly schedule?: Schedule.Schedule<any, unknown>;
     },
-  ): Effect.Effect<RawPeek, never, WorkflowEngine> =>
-    Effect.flatMap(
-      execIdFor(payload),
-      (executionId) =>
-        makeWaitFor(
-          (eid) => peekById(eid as unknown as string),
-          makeExecId(executionId),
-          options as never,
-        ) as Effect.Effect<RawPeek, never, WorkflowEngine>,
-    );
+  ): Effect.Effect<RawPeek, never, WorkflowReadServices<Success, Error>> =>
+    Effect.flatMap(execIdFor(payload), (executionId) => waitForAtFn(executionId, options));
 
   const interruptFn = (executionId: string) => wf.interrupt(executionId);
 
@@ -2210,8 +2256,11 @@ const fromWorkflow = <
     send: sendFn,
     executionId: executionIdFn,
     peek: peekFn,
+    peekAt: peekAtFn,
     watch: watchFn,
+    watchAt: watchAtFn,
     waitFor: waitForFn,
+    waitForAt: waitForAtFn,
     rerun: rerunFn,
     interrupt: interruptFn,
     resume: resumeFn,

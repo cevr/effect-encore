@@ -1,7 +1,7 @@
 import { describe, expect, it, test } from "effect-bun-test";
 import { Context, Effect, Exit, Layer, Schema } from "effect";
 import { WorkflowEngine } from "effect/unstable/workflow";
-import { Actor, makeExecId } from "../src/index.js";
+import { Actor } from "../src/index.js";
 
 class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   message: Schema.String,
@@ -28,6 +28,9 @@ describe("Actor.fromWorkflow", () => {
     expect(ProcessOrder.execute).toBeDefined();
     expect(ProcessOrder.send).toBeDefined();
     expect(ProcessOrder.peek).toBeDefined();
+    expect(ProcessOrder.peekAt).toBeDefined();
+    expect(ProcessOrder.watchAt).toBeDefined();
+    expect(ProcessOrder.waitForAt).toBeDefined();
     expect(ProcessOrder.rerun).toBeDefined();
     expect(ProcessOrder.make).toBeDefined();
   });
@@ -88,13 +91,20 @@ describe("Actor.fromWorkflow — execute/send", () => {
     }),
   );
 
-  it.scopedLive.layer(GreeterTest)("peek returns Pending for non-existent execution", () =>
+  it.scopedLive.layer(GreeterTest)("inspects a workflow through its durable execution id", () =>
     Effect.gen(function* () {
-      // Use makeExecId to construct a known-bad execution id (helper still
-      // exposed for backwards compat; peek-by-payload would dedup-into-the
-      // current run, so we test the never-sent path instead).
-      void makeExecId("non-existent");
-      const result = yield* Greeter.peek({ name: "never-sent" });
+      const executionId = yield* Greeter.send({ name: "inspect-by-id" });
+      const result = yield* Greeter.waitForAt(executionId);
+      const snapshot = yield* Greeter.peekAt(executionId);
+
+      expect(result).toEqual(snapshot);
+      expect(snapshot).toEqual({ _tag: "Success", value: "hello inspect-by-id" });
+    }),
+  );
+
+  it.scopedLive.layer(GreeterTest)("peekAt returns Pending for an unknown execution id", () =>
+    Effect.gen(function* () {
+      const result = yield* Greeter.peekAt("non-existent");
       expect(result._tag).toBe("Pending");
     }),
   );

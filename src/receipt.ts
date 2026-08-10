@@ -72,7 +72,7 @@ export type PeekResult<A = unknown, E = unknown> =
   | { readonly _tag: "Defect"; readonly cause: unknown }
   | { readonly _tag: "Suspended" };
 
-export const Pending: PeekResult = { _tag: "Pending" };
+export const Pending = { _tag: "Pending" } satisfies PeekResult;
 
 export const Success = <A>(value: A): PeekResult<A, never> => ({
   _tag: "Success",
@@ -84,14 +84,15 @@ export const Failure = <E>(error: E): PeekResult<never, E> => ({
   error,
 });
 
-export const Interrupted: PeekResult = { _tag: "Interrupted" };
+export const Interrupted = { _tag: "Interrupted" } satisfies PeekResult;
 
-export const Defect = (cause: unknown): PeekResult => ({
-  _tag: "Defect",
-  cause,
-});
+export const Defect = (cause: unknown) =>
+  ({
+    _tag: "Defect",
+    cause,
+  }) satisfies PeekResult;
 
-export const Suspended: PeekResult = { _tag: "Suspended" };
+export const Suspended = { _tag: "Suspended" } satisfies PeekResult;
 
 export const isPending = <A, E>(result: PeekResult<A, E>): result is { _tag: "Pending" } =>
   result._tag === "Pending";
@@ -193,7 +194,7 @@ export const mapExitToPeekResult = (
  * `Cause` tree. Unlike the entity path this Exit is not encoded, so the error
  * is read straight off the cause rather than schema-decoded.
  */
-export const mapExitToWorkflowPeekResult = (exit: Exit.Exit<unknown, unknown>): PeekResult => {
+export const mapExitToWorkflowPeekResult = <A, E>(exit: Exit.Exit<A, E>): PeekResult<A, E> => {
   if (Exit.isSuccess(exit)) {
     return Success(exit.value);
   }

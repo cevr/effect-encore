@@ -157,6 +157,22 @@ describe("type-level tests", () => {
     void _fn;
   });
 
+  test("Greeter inspection methods accept a durable execution id", () => {
+    const _peek: (
+      executionId: string,
+    ) => Effect.Effect<PeekResult<string, never>, unknown, unknown> = Greeter.peekAt;
+    const _watch: (
+      executionId: string,
+      options?: { readonly interval?: Duration.Input },
+    ) => Stream.Stream<PeekResult<string, never>, unknown, unknown> = Greeter.watchAt;
+    const _wait: (
+      executionId: string,
+    ) => Effect.Effect<PeekResult<string, never>, unknown, unknown> = Greeter.waitForAt;
+    void _peek;
+    void _watch;
+    void _wait;
+  });
+
   test("Greeter.rerun returns Effect<void> taking payload only", () => {
     const _fn: (payload: { readonly name: string }) => Effect.Effect<void, unknown, unknown> =
       Greeter.rerun;
