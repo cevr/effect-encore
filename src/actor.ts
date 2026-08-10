@@ -49,8 +49,20 @@ import {
 } from "effect";
 import type { DateTime, Scope } from "effect";
 import { dual } from "effect/Function";
-import type { SignalDefs, WorkflowSignal, WorkflowStepContext } from "./step.js";
-import { decideCompensation, makeSignal, makeWorkflowExecution } from "./step.js";
+import type {
+  CompensationDecision,
+  CompensationNotPendingError,
+  PendingCompensation,
+  SignalDefs,
+  WorkflowSignal,
+  WorkflowStepContext,
+} from "./step.js";
+import {
+  decideCompensation,
+  makeSignal,
+  makeWorkflowExecution,
+  pendingCompensation,
+} from "./step.js";
 import type { ExecId, PeekResult } from "./receipt.js";
 import {
   ExecIdCodec,
@@ -1967,16 +1979,29 @@ export type WorkflowActor<
   readonly interrupt: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   readonly resume: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   readonly compensation: {
+    readonly pending: (
+      executionId: string,
+    ) => Effect.Effect<
+      Option.Option<PendingCompensation>,
+      never,
+      WorkflowReadServices<Success, Error>
+    >;
+    readonly decide: (
+      executionId: string,
+      stepId: string,
+      attempt: number,
+      decision: CompensationDecision,
+    ) => Effect.Effect<void, CompensationNotPendingError, WorkflowReadServices<Success, Error>>;
     readonly retry: (
       executionId: string,
       stepId: string,
       attempt: number,
-    ) => Effect.Effect<void, never, WorkflowEngine>;
+    ) => Effect.Effect<void, CompensationNotPendingError, WorkflowReadServices<Success, Error>>;
     readonly stop: (
       executionId: string,
       stepId: string,
       attempt: number,
-    ) => Effect.Effect<void, never, WorkflowEngine>;
+    ) => Effect.Effect<void, CompensationNotPendingError, WorkflowReadServices<Success, Error>>;
   };
   /**
    * Escape hatch: produce the underlying `OperationValue<"Run", ...>` for the
@@ -2167,6 +2192,13 @@ const fromWorkflow = <
   const resumeFn = (executionId: string) => wf.resume(executionId);
 
   const compensation = {
+    pending: (executionId: string) => pendingCompensation(wf, executionId),
+    decide: (
+      executionId: string,
+      stepId: string,
+      attempt: number,
+      decision: CompensationDecision,
+    ) => decideCompensation(wf, executionId, stepId, attempt, decision),
     retry: (executionId: string, stepId: string, attempt: number) =>
       decideCompensation(wf, executionId, stepId, attempt, "Retry"),
     stop: (executionId: string, stepId: string, attempt: number) =>

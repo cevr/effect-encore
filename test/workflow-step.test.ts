@@ -1,7 +1,7 @@
 import { describe, expect, it, test } from "effect-bun-test";
-import { Effect, Exit, Schedule, Schema } from "effect";
+import { Effect, Exit, Option, Result, Schedule, Schema } from "effect";
 import { Activity } from "effect/unstable/workflow";
-import { Actor } from "../src/index.js";
+import { Actor, PendingCompensation } from "../src/index.js";
 
 // ── Basic workflow with step.run shorthand ─────────────────────────────
 
@@ -340,7 +340,7 @@ let earlierCompensations = 0;
 let laterCompensations = 0;
 let compensationOrder: string[] = [];
 
-const DurableCompensationTest = Actor.toTestLayer(DurableCompensation, (_payload, step) =>
+const DurableCompensationTest = Actor.toTestLayer(DurableCompensation, (payload, step) =>
   Effect.gen(function* () {
     yield* step.run("earlier", {
       do: Effect.sync(() => {
@@ -350,7 +350,10 @@ const DurableCompensationTest = Actor.toTestLayer(DurableCompensation, (_payload
         Effect.suspend(() => {
           earlierCompensations++;
           compensationOrder.push(`earlier:${earlierCompensations}`);
-          if (earlierCompensations === 1) {
+          if (
+            earlierCompensations === 1 ||
+            (payload.id === "two-failures" && earlierCompensations === 2)
+          ) {
             return StepError.make({ reason: "retry earlier compensation" });
           }
           return Effect.void;
@@ -416,6 +419,22 @@ describe("step.run — durable compensation", () => {
 
         expect(suspended._tag).toBe("Suspended");
         expect(compensationOrder).toEqual(["later:1", "earlier:1"]);
+        expect(yield* DurableCompensation.compensation.pending(executionId)).toEqual(
+          Option.some(PendingCompensation.make({ stepId: "earlier", attempt: 1 })),
+        );
+
+        const wrongStep = yield* DurableCompensation.compensation
+          .retry(executionId, "missing", 1)
+          .pipe(Effect.flip);
+        const wrongAttempt = yield* DurableCompensation.compensation
+          .retry(executionId, "earlier", 2)
+          .pipe(Effect.flip);
+        const invalidAttempt = yield* DurableCompensation.compensation
+          .retry(executionId, "earlier", 0)
+          .pipe(Effect.flip);
+        expect(wrongStep).toHaveProperty("_tag", "CompensationNotPendingError");
+        expect(wrongAttempt).toHaveProperty("_tag", "CompensationNotPendingError");
+        expect(invalidAttempt).toHaveProperty("_tag", "CompensationNotPendingError");
 
         yield* DurableCompensation.compensation.retry(executionId, "earlier", 1);
         const completed = yield* DurableCompensation.waitFor(payload);
@@ -427,7 +446,43 @@ describe("step.run — durable compensation", () => {
         expect(earlierCompensations).toBe(2);
         expect(laterCompensations).toBe(1);
         expect(compensationOrder).toEqual(["later:1", "earlier:1", "earlier:2"]);
+        expect(yield* DurableCompensation.compensation.pending(executionId)).toEqual(Option.none());
       }),
+  );
+
+  it.scopedLive.layer(DurableCompensationTest)("publishes each failed compensation attempt", () =>
+    Effect.gen(function* () {
+      earlierRuns = 0;
+      laterRuns = 0;
+      failingRuns = 0;
+      earlierCompensations = 0;
+      laterCompensations = 0;
+      compensationOrder = [];
+
+      const payload = { id: "two-failures" };
+      const executionId = yield* DurableCompensation.send(payload);
+      yield* DurableCompensation.waitFor(payload, {
+        filter: (result) => result._tag === "Suspended",
+      });
+      yield* DurableCompensation.compensation.retry(executionId, "earlier", 1);
+
+      const pending = yield* DurableCompensation.compensation.pending(executionId).pipe(
+        Effect.repeat({
+          while: Option.match({
+            onNone: () => true,
+            onSome: ({ attempt }) => attempt !== 2,
+          }),
+          schedule: Schedule.spaced("10 millis"),
+        }),
+      );
+      expect(pending).toEqual(
+        Option.some(PendingCompensation.make({ stepId: "earlier", attempt: 2 })),
+      );
+
+      yield* DurableCompensation.compensation.stop(executionId, "earlier", 2);
+      expect((yield* DurableCompensation.waitFor(payload))._tag).toBe("Failure");
+      expect(earlierCompensations).toBe(2);
+    }),
   );
 
   it.scopedLive.layer(InterruptCompensationTest)("does not compensate an interrupt", () =>
@@ -440,12 +495,73 @@ describe("step.run — durable compensation", () => {
         filter: (result) => result._tag === "Suspended",
       });
 
+      expect(yield* InterruptCompensation.compensation.pending(executionId)).toEqual(Option.none());
+      const error = yield* InterruptCompensation.compensation
+        .retry(executionId, "registered", 1)
+        .pipe(Effect.flip);
+      expect(error).toHaveProperty("_tag", "CompensationNotPendingError");
+
       yield* InterruptCompensation.interrupt(executionId);
       const completed = yield* InterruptCompensation.waitFor(payload);
 
       expect(completed._tag).toBe("Interrupted");
       expect(interruptCompensations).toBe(0);
     }),
+  );
+
+  it.scopedLive.layer(DurableCompensationTest)("accepts one concurrent compensation decision", () =>
+    Effect.gen(function* () {
+      earlierRuns = 0;
+      laterRuns = 0;
+      failingRuns = 0;
+      earlierCompensations = 0;
+      laterCompensations = 0;
+      compensationOrder = [];
+
+      const payload = { id: "concurrent-decisions" };
+      const executionId = yield* DurableCompensation.send(payload);
+      yield* DurableCompensation.waitFor(payload, {
+        filter: (result) => result._tag === "Suspended",
+      });
+
+      const results = yield* Effect.all(
+        [
+          DurableCompensation.compensation.retry(executionId, "earlier", 1),
+          DurableCompensation.compensation.stop(executionId, "earlier", 1),
+        ].map(Effect.result),
+        { concurrency: "unbounded" },
+      );
+      expect(results.filter(Result.isSuccess)).toHaveLength(1);
+      expect(results.filter(Result.isFailure)).toHaveLength(1);
+      expect((yield* DurableCompensation.waitFor(payload))._tag).toBe("Failure");
+    }),
+  );
+
+  it.scopedLive.layer(DurableCompensationTest)(
+    "clears a pending compensation when the workflow ends",
+    () =>
+      Effect.gen(function* () {
+        earlierRuns = 0;
+        laterRuns = 0;
+        failingRuns = 0;
+        earlierCompensations = 0;
+        laterCompensations = 0;
+        compensationOrder = [];
+
+        const payload = { id: "interrupt-pending-compensation" };
+        const executionId = yield* DurableCompensation.send(payload);
+        yield* DurableCompensation.waitFor(payload, {
+          filter: (result) => result._tag === "Suspended",
+        });
+        yield* DurableCompensation.interrupt(executionId);
+        expect((yield* DurableCompensation.waitFor(payload))._tag).toBe("Interrupted");
+        expect(yield* DurableCompensation.compensation.pending(executionId)).toEqual(Option.none());
+
+        const error = yield* DurableCompensation.compensation
+          .stop(executionId, "earlier", 1)
+          .pipe(Effect.flip);
+        expect(error).toHaveProperty("_tag", "CompensationNotPendingError");
+      }),
   );
 
   it.scopedLive.layer(DurableCompensationTest)("stops a failed compensation", () =>

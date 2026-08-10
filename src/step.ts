@@ -5,10 +5,19 @@ import {
   DurableDeferred as UpstreamDeferred,
   DurableClock as UpstreamClock,
 } from "effect/unstable/workflow";
-import type { WorkflowEngine } from "effect/unstable/workflow/WorkflowEngine";
-import { WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
+import { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
 import type { Cause, Duration, Exit, Scope } from "effect";
-import { Array as Arr, Cause as CauseModule, Effect, Match, Predicate, Schema } from "effect";
+import {
+  Array as Arr,
+  Cause as CauseModule,
+  Effect,
+  Exit as ExitModule,
+  Match,
+  Option,
+  Predicate,
+  Schedule,
+  Schema,
+} from "effect";
 
 // ── WorkflowSignalToken ─────────────────────────────────────────────────
 
@@ -222,7 +231,27 @@ export interface WorkflowExecution<WorkflowError extends Schema.Top> {
 
 export type CompensationDecision = "Retry" | "Stop";
 
-const CompensationDecision = Schema.Literals(["Retry", "Stop"]);
+export const CompensationDecision = Schema.Literals(["Retry", "Stop"]);
+
+export class PendingCompensation extends Schema.Class<PendingCompensation>(
+  "effect-encore/PendingCompensation",
+)({
+  stepId: Schema.String,
+  attempt: Schema.Int.check(Schema.isGreaterThan(0)),
+}) {}
+
+export class CompensationNotPendingError extends Schema.TaggedError<CompensationNotPendingError>()(
+  "CompensationNotPendingError",
+  {
+    stepId: Schema.String,
+    attempt: Schema.Finite,
+  },
+) {}
+
+const CompensationPlan = Schema.Array(Schema.String);
+const compensationPlan = UpstreamDeferred.make("CompensationPlan", {
+  success: CompensationPlan,
+});
 
 const encodeCompensationActivityName = Schema.encodeSync(
   Schema.fromJsonString(Schema.Tuple([Schema.Literals(["Compensate"]), Schema.String])),
@@ -231,6 +260,12 @@ const encodeCompensationActivityName = Schema.encodeSync(
 const encodeCompensationDecisionName = Schema.encodeSync(
   Schema.fromJsonString(
     Schema.Tuple([Schema.Literals(["CompensationDecision"]), Schema.String, Schema.Finite]),
+  ),
+);
+
+const encodeCompensationFailureName = Schema.encodeSync(
+  Schema.fromJsonString(
+    Schema.Tuple([Schema.Literals(["CompensationFailure"]), Schema.String, Schema.Finite]),
   ),
 );
 
@@ -248,17 +283,143 @@ const compensationDecision = (stepId: string, attempt: number) =>
     success: CompensationDecision,
   });
 
-export const decideCompensation = (
+const compensationFailure = (stepId: string, attempt: number) =>
+  UpstreamDeferred.make(encodeCompensationFailureName(["CompensationFailure", stepId, attempt]), {
+    success: PendingCompensation,
+  });
+
+const readDeferredAt = <S extends Schema.Constraint>(
+  workflow: UpstreamWorkflow.Any,
+  executionId: string,
+  deferred: UpstreamDeferred.DurableDeferred<S>,
+) =>
+  WorkflowEngine.pipe(
+    Effect.flatMap((engine) =>
+      engine
+        .deferredResult(deferred)
+        .pipe(
+          Effect.provideService(WorkflowInstance, WorkflowInstance.initial(workflow, executionId)),
+        ),
+    ),
+    Effect.map(
+      Option.flatMap((exit) => {
+        if (ExitModule.isSuccess(exit)) return Option.some(exit.value);
+        return Option.none();
+      }),
+    ),
+  );
+
+const pendingForStep = (
   workflow: UpstreamWorkflow.Any,
   executionId: string,
   stepId: string,
   attempt: number,
+): Effect.Effect<Option.Option<PendingCompensation>, never, WorkflowEngine> =>
+  readDeferredAt(workflow, executionId, compensationFailure(stepId, attempt)).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.succeedNone,
+        onSome: (pending) =>
+          readDeferredAt(workflow, executionId, compensationDecision(stepId, attempt)).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () => Effect.succeedSome(pending),
+                onSome: (decision) => {
+                  if (decision === "Stop") return Effect.succeedNone;
+                  return pendingForStep(workflow, executionId, stepId, attempt + 1);
+                },
+              }),
+            ),
+          ),
+      }),
+    ),
+  );
+
+/** Read the exact failed compensation attempt that awaits an operator decision. */
+export const pendingCompensation = <
+  Name extends string,
+  Payload extends UpstreamWorkflow.AnyStructSchema,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+>(
+  workflow: UpstreamWorkflow.Workflow<Name, Payload, Success, Error>,
+  executionId: string,
+): Effect.Effect<
+  Option.Option<PendingCompensation>,
+  never,
+  WorkflowEngine | Success["DecodingServices"] | Error["DecodingServices"]
+> =>
+  workflow.poll(executionId).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.succeedNone,
+        onSome: (result) => {
+          if (result._tag === "Complete") return Effect.succeedNone;
+          return readDeferredAt(workflow, executionId, compensationPlan).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () => Effect.succeedNone,
+                onSome: (plan) =>
+                  Effect.reduce(
+                    plan,
+                    () => Option.none<PendingCompensation>(),
+                    (pending, stepId) => {
+                      if (Option.isSome(pending)) return Effect.succeed(pending);
+                      return pendingForStep(workflow, executionId, stepId, 1);
+                    },
+                  ),
+              }),
+            ),
+          );
+        },
+      }),
+    ),
+  );
+
+/**
+ * Persist an operator decision for the exact pending compensation attempt.
+ *
+ * This waits until the cluster exposes the durable winning decision. Apply
+ * `Effect.timeout` at the application boundary when the request needs a bound.
+ */
+export const decideCompensation = <
+  Name extends string,
+  Payload extends UpstreamWorkflow.AnyStructSchema,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+>(
+  workflow: UpstreamWorkflow.Workflow<Name, Payload, Success, Error>,
+  executionId: string,
+  stepId: string,
+  attempt: number,
   decision: CompensationDecision,
-): Effect.Effect<void, never, WorkflowEngine> => {
-  const deferred = compensationDecision(stepId, attempt);
-  const token = UpstreamDeferred.tokenFromExecutionId(deferred, { workflow, executionId });
-  return UpstreamDeferred.succeed(deferred, { token, value: decision });
-};
+): Effect.Effect<
+  void,
+  CompensationNotPendingError,
+  WorkflowEngine | Success["DecodingServices"] | Error["DecodingServices"]
+> =>
+  Effect.gen(function* () {
+    const pending = yield* pendingCompensation(workflow, executionId);
+    if (
+      Option.isNone(pending) ||
+      pending.value.stepId !== stepId ||
+      pending.value.attempt !== attempt
+    ) {
+      return yield* CompensationNotPendingError.make({ stepId, attempt });
+    }
+
+    const deferred = compensationDecision(stepId, attempt);
+    const token = UpstreamDeferred.tokenFromExecutionId(deferred, { workflow, executionId });
+    yield* UpstreamDeferred.succeed(deferred, { token, value: decision });
+    const accepted = yield* readDeferredAt(workflow, executionId, deferred).pipe(
+      Effect.repeat({
+        while: (result) => Option.isNone(result),
+        schedule: Schedule.spaced("10 millis"),
+      }),
+    );
+    if (Option.isSome(accepted) && accepted.value === decision) return;
+    return yield* CompensationNotPendingError.make({ stepId, attempt });
+  });
 
 // ── makeSignal ──────────────────────────────────────────────────────────
 
@@ -316,8 +477,9 @@ export const makeWorkflowExecution = <
   wf: UpstreamWorkflow.Workflow<Name, Payload, Schema.Top, WorkflowError>,
   executionId: string,
 ): WorkflowExecution<WorkflowError> => {
-  const compensations: Array<
-    (
+  const compensations: Array<{
+    readonly stepId: string;
+    readonly run: (
       cause: Cause.Cause<WorkflowError["Type"]>,
     ) => Effect.Effect<
       void,
@@ -326,8 +488,8 @@ export const makeWorkflowExecution = <
       | WorkflowInstance
       | WorkflowError["DecodingServices"]
       | WorkflowError["EncodingServices"]
-    >
-  > = [];
+    >;
+  }> = [];
 
   // Workflow scope finalizers are uninterruptible. Keep compensation in the
   // workflow body so a failed undo can suspend on a Durable Deferred.
@@ -343,15 +505,17 @@ export const makeWorkflowExecution = <
       Effect.gen(function* () {
         const context = yield* Effect.context<R2>();
         const value = yield* restore(activity);
-        compensations.push((cause) =>
-          runCompensation(
-            stepId,
-            value,
-            cause,
-            (result, workflowCause) => undo(result, workflowCause).pipe(Effect.provide(context)),
-            1,
-          ),
-        );
+        compensations.push({
+          stepId,
+          run: (cause) =>
+            runCompensation(
+              stepId,
+              value,
+              cause,
+              (result, workflowCause) => undo(result, workflowCause).pipe(Effect.provide(context)),
+              1,
+            ),
+        });
         return value;
       }),
     );
@@ -395,7 +559,12 @@ export const makeWorkflowExecution = <
           return Effect.failCause(CauseModule.fromReasons(interrupts));
         }
         const deferred = compensationDecision(stepId, attempt);
-        return UpstreamDeferred.await(deferred).pipe(
+        const pending = PendingCompensation.make({ stepId, attempt });
+        return UpstreamDeferred.into(
+          Effect.succeed(pending),
+          compensationFailure(stepId, attempt),
+        ).pipe(
+          Effect.andThen(UpstreamDeferred.await(deferred)),
           Effect.flatMap((decision) =>
             Match.value(decision).pipe(
               Match.when("Retry", () =>
@@ -501,9 +670,18 @@ export const makeWorkflowExecution = <
 
   return {
     step,
-    compensate: (cause) =>
-      Effect.forEach(Arr.reverse(compensations), (compensate) => compensate(cause), {
-        discard: true,
-      }),
+    compensate: (cause) => {
+      const plan = Arr.reverse(compensations);
+      return UpstreamDeferred.into(
+        Effect.succeed(plan.map(({ stepId }) => stepId)),
+        compensationPlan,
+      ).pipe(
+        Effect.andThen(
+          Effect.forEach(plan, ({ run }) => run(cause), {
+            discard: true,
+          }),
+        ),
+      );
+    },
   };
 };

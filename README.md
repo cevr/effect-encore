@@ -273,20 +273,35 @@ after replay or restart.
 A failed compensation suspends the workflow. The error log includes the
 `executionId`, `stepId`, and `attempt`. The `undo` Effect can fail with the
 Workflow error type. Encore uses the Workflow error schema for the durable
-compensation Activity. An operator can retry that compensation or stop its
-retries:
+compensation Activity. An operator can read the pending compensation. The
+operator can then retry it or stop its retries:
 
 ```ts
-yield * ProcessOrder.compensation.retry(executionId, "charge-card", 1);
-yield * ProcessOrder.compensation.stop(executionId, "charge-card", 1);
+const pending = yield * ProcessOrder.compensation.pending(executionId);
+
+yield *
+  Option.match(pending, {
+    onNone: () => Effect.void,
+    onSome: ({ stepId, attempt }) =>
+      ProcessOrder.compensation.decide(executionId, stepId, attempt, "Retry"),
+  });
 ```
 
 `retry` starts the next Activity attempt. `stop` skips the failed compensation
 and continues with older compensations. The workflow keeps its original failure
 after compensation ends. An interrupt-only cause does not start compensation.
-An interrupted compensation does not wait for an operator decision.
-Decision writes are idempotent. They do not validate the Step ID or attempt.
-Use the exact values from the compensation error log.
+An interrupted compensation does not wait for an operator decision. `retry`
+and `stop` are convenience methods over `decide`. Every decision checks the
+pending Step ID and attempt. A stale or conflicting decision fails with
+`CompensationNotPendingError`.
+
+`decide` waits until the durable winning decision is visible. Apply
+`Effect.timeout` at the application boundary when an operator request needs a
+time limit. `pending` reads the durable compensation history. Its work grows
+with the number of compensation attempts for that workflow execution.
+
+Step IDs share the durable Activity namespace. Do not use a Step ID that is an
+encoded Encore internal tuple such as `["Compensate","charge-card"]`.
 
 The default `waitFor` filter waits for a terminal result. It does not return a
 suspended result. Use an explicit filter when an operator must detect the wait:
