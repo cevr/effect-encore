@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.27.0
+
+### Minor Changes
+
+- [`65a2d7d`](https://github.com/cevr/effect-encore/commit/65a2d7d585269eaa2df502f0fa1a6756b6486c25) Thanks [@cevr](https://github.com/cevr)! - Add `Client.withTransaction` so hosts can compose actor storage changes into one owned transaction.
+
 ## 0.26.0
 
 ### Minor Changes
