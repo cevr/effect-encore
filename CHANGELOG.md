@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.24.0
+
+### Minor Changes
+
+- [`37c9523`](https://github.com/cevr/effect-encore/commit/37c9523bf9dd80bb19111d4073e87a11856e49b8) Thanks [@cevr](https://github.com/cevr)! - Expose pending workflow compensation attempts. Return no pending attempt for a completed run. Reject stale and conflicting operator decisions with a typed error. Wait until the durable winning decision is visible before returning.
+
 ## 0.23.0
 
 ### Minor Changes
