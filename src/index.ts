@@ -81,3 +81,4 @@ export { entityIdCodec, EntityIdDecodeError } from "./entity-id-codec.js";
 export type { EntityIdCodec } from "./entity-id-codec.js";
 export { Client, layer as ClientLayer } from "./client.js";
 export type { ClientSendError } from "./client.js";
+export { canonicalJsonSha256, canonicalJsonString } from "./canonical-json.js";

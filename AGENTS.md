@@ -21,6 +21,7 @@ bun test              # bun test
 - `v3/src/actor.ts` — v3 mirror using `@effect/cluster`, `@effect/rpc`, `@effect/workflow` imports
 - `v3/src/actor-state.ts` — v3 mirror of live entity state helpers
 - `src/receipt.ts` — `ExecId<S,E>` branded type, `PeekResult` ADT
+- `src/canonical-json.ts` — stable JSON encoding and SHA-256 for durable identities
 - Both v3 and v4 import from the same `effect@4.x` — v3 distinction is only the cluster/rpc/workflow packages
 
 ## API surface
@@ -188,5 +189,6 @@ Discriminator: `Schema.isSchema(payload) && !("fields" in payload)`. Schema.Clas
 - v3 `Cause` API differs: use `failureOption`/`dieOption`/`isInterruptedOnly` instead of v4's `findErrorOption`/`findDefect`/`findInterrupt`
 - v3 `Effect.repeat({ schedule, while })` returns the schedule's `Out`, not the effect's value — for waitFor-style polls in v3, use `Stream.repeatEffectWithSchedule` + `takeUntil` + `runLast`
 - `withCompensation` is NOT on the actor — it's a workflow primitive. Import from `Workflow` directly.
+- Use `canonicalJsonString` and `canonicalJsonSha256` for durable JSON identities. Do not add another serializer.
 - Workflow `executionId` (the cluster slot the engine writes to) = upstream's hashed execution id for `id(payload)` — NOT the raw `id(payload)` string. `Workflow*.peek/rerun/executionId` use `wf.executionId(payload)` internally so they line up with the engine's writes.
 - Adapters MUST implement `EncoreMessageStorage.deleteEnvelope` for entity `.rerun` to work; the unimplemented fallback dies loudly rather than silently coarsening to flush.

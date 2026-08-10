@@ -201,6 +201,22 @@ internal rerun deletion operations. It uses Effect Cluster's default
 `fromSqlClientWithShardingConfig()` when the host provides a custom
 `ShardingConfig`.
 
+### Canonical JSON identity
+
+Use one stable JSON representation for durable workflow identities and
+idempotency keys. Object keys use recursive UTF-16 order. Array order stays
+unchanged.
+
+```ts
+import { canonicalJsonSha256, canonicalJsonString } from "effect-encore";
+
+const encoded = canonicalJsonString({ z: 1, a: 2 });
+// {"a":2,"z":1}
+
+const digest = yield * canonicalJsonSha256({ z: 1, a: 2 });
+// lowercase 64-character SHA-256 digest
+```
+
 ### Handle — Workflow (Step DSL)
 
 Workflow handlers receive `(payload, step)`. The Step interface gives one convenient
