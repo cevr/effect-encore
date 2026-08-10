@@ -248,7 +248,7 @@ export class CompensationDecisionConflictError extends Schema.TaggedError<Compen
   "CompensationDecisionConflictError",
   {
     stepId: Schema.String,
-    attempt: Schema.Finite,
+    attempt: Schema.Int.check(Schema.isGreaterThan(0)),
     acceptedDecision: Schema.Option(CompensationDecision),
   },
 ) {}
@@ -465,8 +465,8 @@ export const decideCompensation = <
     }
     if (pending.value.stepId !== stepId || pending.value.attempt !== attempt) {
       return yield* CompensationDecisionConflictError.make({
-        stepId,
-        attempt,
+        stepId: pending.value.stepId,
+        attempt: pending.value.attempt,
         acceptedDecision: Option.none(),
       });
     }
