@@ -241,11 +241,14 @@ export const decideCompensation = (
 // ── makeSignal ──────────────────────────────────────────────────────────
 
 export const makeSignal = <
+  Name extends string,
   Payload extends UpstreamWorkflow.AnyStructSchema,
+  WorkflowSuccess extends Schema.Top,
+  WorkflowError extends Schema.Top,
   S extends Schema.Top = typeof Schema.Void,
   E extends Schema.Top = typeof Schema.Never,
 >(
-  wf: UpstreamWorkflow.Workflow<string, Payload, Schema.Top, Schema.Top>,
+  wf: UpstreamWorkflow.Workflow<Name, Payload, WorkflowSuccess, WorkflowError>,
   name: string,
   options?: { readonly success?: S; readonly error?: E },
 ): WorkflowSignal<Payload, S, E> => {

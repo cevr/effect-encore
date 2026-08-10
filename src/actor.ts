@@ -2040,7 +2040,7 @@ const fromWorkflow = <
       });
     }
     // eslint-disable-next-line typescript-eslint/no-explicit-any
-    signals[sigName] = makeSignal(wf as any, sigName, {
+    signals[sigName] = makeSignal(wf, sigName, {
       success: sigDef.success,
       error: sigDef.error,
     });

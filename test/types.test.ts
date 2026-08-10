@@ -9,7 +9,7 @@ import type {
 } from "effect/unstable/cluster/ClusterError";
 import type { Execution } from "effect/unstable/workflow/Workflow";
 import type { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
-import { Actor } from "../src/index.js";
+import { Actor, makeSignal } from "../src/index.js";
 import type { MailboxError } from "../src/actor-mailbox.js";
 import type { State as StateValue } from "../src/state.js";
 import type {
@@ -351,6 +351,15 @@ const NoSignalWorkflow = Actor.fromWorkflow("NoSignalWorkflow", {
 });
 
 describe("declarative signal type-level tests", () => {
+  test("dynamic signals accept workflows with typed success and error schemas", () => {
+    const _signal: WorkflowSignal<
+      Schema.Struct<{ id: typeof Schema.String }>,
+      typeof Schema.String,
+      typeof Schema.Never
+    > = makeSignal(SignalWorkflow._meta.workflow, "Dynamic", { success: Schema.String });
+    void _signal;
+  });
+
   test("signal property is typed as WorkflowSignal with correct schemas", () => {
     const _approval: WorkflowSignal<
       Schema.Struct<{ id: typeof Schema.String }>,
