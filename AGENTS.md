@@ -125,7 +125,7 @@ PagerDuty: {
 
 - Format: `entityId\0tag\0primaryKey` (null byte separator — safe with colons in any segment)
 - `OperationHandle.executionId(payload)` — pure-internally `Effect<ExecId<S,E>>`
-- `WorkflowActor.executionId(payload)` — `Effect<ExecId<S,E>>` (needs `WorkflowEngine`); upstream computes from workflow `id(payload)`
+- `WorkflowActor.executionId(payload)` — `Effect<ExecId<S,E>>`; upstream computes from workflow `id(payload)`
 - Workflow compensation can suspend. Do not run it from a workflow scope finalizer. Build it in the workflow body so `DurableDeferred.await` can suspend and replay.
 - A compensation Activity name identifies the Step. `Activity.CurrentAttempt` identifies the retry. The decision Durable Deferred name must include both the Step ID and attempt.
 - Keep replay-side logs inside the Activity body. Code after a cached Activity result runs again on every replay.
