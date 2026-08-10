@@ -1,8 +1,7 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Fiber, Layer as L, Ref, Schema } from "effect";
 import { ClusterWorkflowEngine, MessageStorage, TestRunner } from "effect/unstable/cluster";
-import { Actor, fromMessageStorage } from "../src/index.js";
-import { MessageDeletion } from "../src/storage.js";
+import { Actor, ClientLayer } from "../src/index.js";
 
 // ── Test deletion layer on top of TestRunner ───────────────────────────────
 
@@ -11,44 +10,40 @@ import { MessageDeletion } from "../src/storage.js";
 // clearing that index, a re-execute after rerun returns the cached completion
 // reply instead of running the handler again. We wrap clearAddress here to
 // surgically wipe primaryKey entries that point at the cleared address.
-const MessageDeletionTest = L.effect(
-  MessageDeletion,
+const WorkflowMessageStorageTest = L.effect(
+  MessageStorage.MessageStorage,
   Effect.gen(function* () {
     const driver = yield* MessageStorage.MemoryDriver;
     const baseClearAddress = driver.storage.clearAddress;
-    return fromMessageStorage(
-      {
-        ...driver.storage,
-        clearAddress: (address) =>
-          Effect.gen(function* () {
-            // Snapshot every primaryKey entry whose envelope sits at this
-            // address before the upstream clearAddress drops the requests map.
-            const toDelete: string[] = [];
-            for (const [pk, entry] of driver.requestsByPrimaryKey.entries()) {
-              const env = entry.envelope as { address: { entityType: string; entityId: string } };
-              if (
-                env.address.entityType === address.entityType &&
-                env.address.entityId === address.entityId
-              ) {
-                toDelete.push(pk);
-              }
+    return MessageStorage.MessageStorage.of({
+      ...driver.storage,
+      clearAddress: (address) =>
+        Effect.gen(function* () {
+          // Snapshot every primaryKey entry whose envelope sits at this
+          // address before the upstream clearAddress drops the requests map.
+          const toDelete: string[] = [];
+          for (const [pk, entry] of driver.requestsByPrimaryKey.entries()) {
+            const env = entry.envelope;
+            if (
+              env.address.entityType === address.entityType &&
+              env.address.entityId === address.entityId
+            ) {
+              toDelete.push(pk);
             }
-            yield* baseClearAddress(address);
-            for (const pk of toDelete) driver.requestsByPrimaryKey.delete(pk);
-          }),
-      },
-      {
-        // deleteEnvelope is unused by workflow rerun; stub it.
-        deleteEnvelope: () => Effect.void,
-      },
-    );
+          }
+          yield* baseClearAddress(address);
+          for (const pk of toDelete) driver.requestsByPrimaryKey.delete(pk);
+        }),
+    });
   }),
 );
 
 // Wire WorkflowEngine over the TestRunner's MessageStorage + Sharding (the
 // real cluster engine, not layerMemory) so clearAddress actually wipes state.
+const WorkflowClientTest = ClientLayer.fromSharding.pipe(L.provide(WorkflowMessageStorageTest));
+
 const TestCluster = L.provideMerge(
-  L.merge(MessageDeletionTest, ClusterWorkflowEngine.layer),
+  L.merge(WorkflowClientTest, ClusterWorkflowEngine.layer),
   TestRunner.layer,
 );
 
@@ -98,6 +93,43 @@ describe("WorkflowActor.rerun", () => {
         // Never sent — rerun should be a clean no-op.
         yield* Noop.rerun({ id: "never-sent" });
         expect(true).toBe(true);
+      }).pipe(Effect.provide(handlers));
+    }).pipe(Effect.provide(TestCluster)),
+  );
+
+  it.scopedLive("prune removes a completed workflow by execution id", () =>
+    Effect.gen(function* () {
+      const driver = yield* MessageStorage.MemoryDriver;
+      const Prunable = Actor.fromWorkflow("PrunableWorkflow", {
+        payload: { id: Schema.String },
+        success: Schema.String,
+        id: (payload: { id: string }) => payload.id,
+      });
+      const handlers = Actor.toLayer(Prunable, ({ id }) => Effect.succeed(`done:${id}`));
+      const countEntries = (executionId: string) => {
+        let count = 0;
+        for (const entry of driver.requests.values()) {
+          const envelope = entry.envelope;
+          if (
+            "address" in envelope &&
+            envelope.address.entityType === "Workflow/PrunableWorkflow" &&
+            envelope.address.entityId === executionId
+          ) {
+            count++;
+          }
+        }
+        return count;
+      };
+
+      return yield* Effect.gen(function* () {
+        const executionId = yield* Prunable.send({ id: "retained" });
+        yield* Prunable.waitForAt(executionId);
+        expect(countEntries(executionId)).toBeGreaterThan(0);
+
+        yield* Prunable.prune(executionId);
+
+        expect(countEntries(executionId)).toBe(0);
+        expect(yield* Prunable.peekAt(executionId)).toEqual({ _tag: "Pending" });
       }).pipe(Effect.provide(handlers));
     }).pipe(Effect.provide(TestCluster)),
   );

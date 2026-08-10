@@ -21,7 +21,7 @@ Interrupted | Defect | Suspended`. What `peek(execId)` returns and `waitFor` pol
 ## Seams (where behaviour is swapped without editing in place)
 
 - **Client** — the unified transport seam. One Tag owns
-  `send / resolve / peek / flush / redeliver` plus the wire-envelope builder, with adapters
+  `send / resolve / peek / flush / redeliver / pruneWorkflow` plus the wire-envelope builder, with adapters
   `Client.layer.{fromConfig, fromSharding, memory, test}`. Supersedes the hand-assembled
   mailbox+resolver+Snowflake triad. Address resolution (`fromConfig`/`fromSharding`, carrying the
   shard-parity invariant) survives as an **internal strategy** the Client holds, not a public Tag.
@@ -40,6 +40,6 @@ Interrupted | Defect | Suspended`. What `peek(execId)` returns and `waitFor` pol
 - **Stored reply lookup** — the Client-owned read path from ExecId to PeekResult. It uses Effect
   `MessageStorage` and the internal address resolver. Exit classification and ExecIdCodec remain pure,
   public utilities. There is no separate reply service.
-- **Message deletion** — the internal storage capability for `deleteInvocation` and `deleteAddress`.
-  Effect owns all normal `MessageStorage` operations. Encore's public SQL and custom layer factories
-  add only the deletion behavior required by rerun.
+- **Message deletion** — the internal storage capability for `deleteInvocation`.
+  Effect owns address-wide `MessageStorage` cleanup. Encore adds only the single-invocation deletion
+  required by entity rerun.

@@ -2,11 +2,9 @@ import {
   ClusterSchema,
   type Entity as ClusterEntity,
   Entity,
-  EntityAddress,
-  EntityId,
-  EntityType,
+  type EntityAddress,
   MessageStorage,
-  Sharding,
+  type Sharding,
   type ShardingConfig,
   Snowflake,
 } from "effect/unstable/cluster";
@@ -116,9 +114,9 @@ export class SendAndAwaitTimeout extends Data.TaggedError(
   readonly timeout: Duration.Duration;
 }> {}
 
-// ── Layer passthrough (v4 polyfill — v3 has Layer.passthrough) ────────────
+// ── Layer passthrough ─────────────────────────────────────────────────────
 // Adds the layer's input requirements to its output so provided services
-// flow through to program code. Same as Layer.passthrough in v3.
+// flow through to program code.
 const layerPassthrough = <ROut, E, RIn>(
   layer: Layer.Layer<ROut, E, RIn>,
 ): Layer.Layer<ROut | RIn, E, RIn> =>
@@ -1966,7 +1964,7 @@ export type WorkflowActor<
    * the next `.execute(samePayload)` runs from scratch.
    *
    * Composes `WorkflowEngine.interrupt` (signals the running fiber, no-op if
-   * completed) with message deletion (wipes run reply +
+   * completed) with the Client lifecycle operation (wipes run reply +
    * cached activity replies stored at the workflow's `EntityAddress`).
    *
    * Caveat: rerun-while-running interrupts the fiber and clears state, but
@@ -1976,7 +1974,9 @@ export type WorkflowActor<
    */
   readonly rerun: (
     payload: WorkflowPayloadType<Payload>,
-  ) => Effect.Effect<void, PersistenceError, MessageDeletion | Sharding.Sharding | WorkflowEngine>;
+  ) => Effect.Effect<void, PersistenceError, Client | WorkflowEngine>;
+  /** Remove one completed workflow execution and its durable clock state. */
+  readonly prune: (executionId: string) => Effect.Effect<void, PersistenceError, Client>;
   readonly interrupt: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   readonly resume: (executionId: string) => Effect.Effect<void, never, WorkflowEngine>;
   readonly compensation: {
@@ -2019,51 +2019,6 @@ export type WorkflowActor<
     OperationBrand<Name, "Run", Schema.Schema.Type<Success>, Schema.Schema.Type<Error>>;
   readonly $is: (tag: "Run") => (value: unknown) => boolean;
 };
-
-// ── Workflow address resolver ─────────────────────────────────────────────
-// Workflows live at EntityAddress(entityType=`Workflow/${name}`, entityId=executionId,
-// shardId=getShardId(entityId, shardGroup)). Mirror of ClusterWorkflowEngine's
-// `entityAddressFor` (`ClusterWorkflowEngine.js:84-92`). Activity replies and
-// the run reply both persist at this address — clearing it wipes everything.
-/* eslint-disable typescript-eslint/no-explicit-any -- workflow type erased */
-const resolveWorkflowAddress = (
-  workflow: UpstreamWorkflow.Workflow<any, any, any, any>,
-  executionId: string,
-) =>
-  Effect.gen(function* () {
-    const sharding = yield* Sharding.Sharding;
-    const entityId = EntityId.make(executionId);
-    const shardGroupFn = Context.get(workflow.annotations, ClusterSchema.ShardGroup);
-    const shardGroup = shardGroupFn(entityId);
-    return EntityAddress.make({
-      entityType: EntityType.make(`Workflow/${workflow._tag}`),
-      entityId,
-      shardId: sharding.getShardId(entityId, shardGroup),
-    });
-  });
-
-// DurableClock sub-entity address. Mirrors upstream `clearClock` in
-// `ClusterWorkflowEngine.js:124-134`: clock entityType is the constant
-// `Workflow/-/DurableClock`, entityId is the parent workflow's executionId,
-// shardId uses the parent workflow's shardGroup annotation. Required for
-// `step.sleep` cleanup on rerun — without this, orphan clock entries remain
-// in storage and fire later into a workflow that no longer expects them.
-const resolveWorkflowClockAddress = (
-  workflow: UpstreamWorkflow.Workflow<any, any, any, any>,
-  executionId: string,
-) =>
-  Effect.gen(function* () {
-    const sharding = yield* Sharding.Sharding;
-    const entityId = EntityId.make(executionId);
-    const shardGroupFn = Context.get(workflow.annotations, ClusterSchema.ShardGroup);
-    const shardGroup = shardGroupFn(entityId);
-    return EntityAddress.make({
-      entityType: EntityType.make("Workflow/-/DurableClock"),
-      entityId,
-      shardId: sharding.getShardId(entityId, shardGroup),
-    });
-  });
-/* eslint-enable typescript-eslint/no-explicit-any */
 
 // ── Actor.fromWorkflow ────────────────────────────────────────────────────
 
@@ -2223,32 +2178,31 @@ const fromWorkflow = <
   const executionIdFn = (payload: WorkflowPayloadType<Payload>) =>
     Effect.map(wf.executionId(payload as never), (id) => makeExecId(id));
 
-  // rerun(payload): WorkflowEngine.interrupt + clearAddress on the workflow's
+  const pruneFn = (executionId: string) =>
+    Client.use((client) => client.pruneWorkflow(wf, executionId));
+
+  // rerun(payload): WorkflowEngine.interrupt + Client.pruneWorkflow on the workflow's
   // EntityAddress AND on the DurableClock sub-entity. Wipes the run reply,
   // every cached activity reply (they all live at the workflow address —
   // confirmed in MessageStorage.d.ts:401 and ClusterWorkflowEngine.js where
   // activities use `requestIdForPrimaryKey` against the workflow's entity
   // address), and any pending step.sleep clock entries (mirror of upstream
-  // `clearClock` in ClusterWorkflowEngine.js:124-134 — upstream only clears
+  // `clearClock` in ClusterWorkflowEngine — upstream only clears
   // the clock when a running fiber observes the InterruptSignal, which
   // doesn't happen if the workflow is suspended waiting on the clock). Required
   // so a workflow using step.sleep can be safely rerun without orphan clock
   // fires. interrupt() is a fiber signal and is a no-op if the workflow has
-  // already completed (per ClusterWorkflowEngine.js:172-200); clearAddress()
+  // already completed; clearAddress()
   // then wipes persisted state regardless. Caveat: rerun-while-running
   // interrupts the fiber and clears state, but the fiber's wind-down may
   // queue behind the next execute; cleanup is best-effort eventual.
   const rerunFn = (
     payload: WorkflowPayloadType<Payload>,
-  ): Effect.Effect<void, PersistenceError, MessageDeletion | Sharding.Sharding | WorkflowEngine> =>
+  ): Effect.Effect<void, PersistenceError, Client | WorkflowEngine> =>
     Effect.gen(function* () {
       const executionId = yield* execIdFor(payload);
       yield* wf.interrupt(executionId);
-      const deletion = yield* MessageDeletion;
-      const address = yield* resolveWorkflowAddress(wf, executionId);
-      yield* deletion.deleteAddress(address);
-      const clockAddress = yield* resolveWorkflowClockAddress(wf, executionId);
-      yield* deletion.deleteAddress(clockAddress);
+      yield* pruneFn(executionId);
     });
 
   const executeFn = (payload: WorkflowPayloadType<Payload>) =>
@@ -2301,6 +2255,7 @@ const fromWorkflow = <
     waitFor: waitForFn,
     waitForAt: waitForAtFn,
     rerun: rerunFn,
+    prune: pruneFn,
     interrupt: interruptFn,
     resume: resumeFn,
     compensation,

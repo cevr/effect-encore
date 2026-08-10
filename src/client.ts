@@ -9,7 +9,7 @@
  * Rivet's API is a DX target, not its runtime). Unlike Bite's `cad5fc7` thin
  * `Client.layer` namespace (which only re-bundled the three sender Tags), this
  * is a deep `Context.Service` Tag (ADR-0002): it owns
- * `send / peek / flush / redeliver / resolve` and pulls the wire-envelope
+ * `send / peek / flush / redeliver / pruneWorkflow / resolve` and pulls the wire-envelope
  * builder INSIDE the seam. Address resolution stays an INTERNAL strategy the
  * Client holds (`ActorAddressResolver`), not a public Tag.
  *
@@ -38,7 +38,7 @@
  *   covered instead by `fromSharding` (real cluster runtime) and the
  *   `fromWorkflow` test path (WorkflowEngine-persisted). What this adapter OWNS
  *   end-to-end: `send` routes the prebuilt request through the INJECTED mailbox,
- *   and `peek / flush / redeliver` operate over its bundled storage.
+ *   and `peek / flush / redeliver / pruneWorkflow` operate over its bundled storage.
  */
 import type { Schema } from "effect";
 import { Context, Effect, Layer, Option } from "effect";
@@ -240,6 +240,11 @@ export interface ClientShape {
     entity: ClusterEntity.Entity<string, any>,
     actorId: string,
   ) => Effect.Effect<void, PersistenceError>;
+  /** Remove one workflow execution and its durable clock state. */
+  readonly pruneWorkflow: (
+    workflow: Parameters<ActorAddressResolverShape["resolveWorkflow"]>[0],
+    executionId: string,
+  ) => Effect.Effect<void, PersistenceError>;
 }
 /* eslint-enable typescript-eslint/no-explicit-any */
 
@@ -282,6 +287,14 @@ const makeClientService: Effect.Effect<
       storage.clearAddress(resolveEntityAddress(resolver, entity, actorId)),
     redeliver: (entity, actorId) =>
       storage.resetAddress(resolveEntityAddress(resolver, entity, actorId)),
+    pruneWorkflow: (workflow, executionId) =>
+      storage
+        .clearAddress(resolver.resolveWorkflow(workflow, executionId))
+        .pipe(
+          Effect.andThen(
+            storage.clearAddress(resolver.resolveWorkflowClock(workflow, executionId)),
+          ),
+        ),
   };
 });
 

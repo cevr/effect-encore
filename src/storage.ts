@@ -1,8 +1,8 @@
 /**
- * MessageDeletion owns the deletion operations that Effect does not provide.
+ * MessageDeletion owns the invocation deletion that Effect does not provide.
  *
- * Effect owns normal message storage. Encore only resolves and deletes one
- * invocation or one address for rerun operations.
+ * Effect owns normal message storage, including address cleanup. Encore only
+ * resolves and deletes one invocation for entity rerun operations.
  *
  * Adapters provide BOTH tags:
  * - upstream `MessageStorage.MessageStorage` is still required by the runner
@@ -33,9 +33,6 @@ export interface MessageDeletionShape {
     readonly tag: string;
     readonly primaryKey: string;
   }) => Effect.Effect<void, PersistenceError>;
-  readonly deleteAddress: (
-    address: EntityAddress.EntityAddress,
-  ) => Effect.Effect<void, PersistenceError>;
 }
 
 export interface SqlMessageStorageOptions {
@@ -77,7 +74,6 @@ export const fromMessageStorage = (
       if (requestId._tag === "None") return;
       yield* ext.deleteEnvelope(requestId.value);
     }),
-  deleteAddress: storage.clearAddress,
 });
 
 /**

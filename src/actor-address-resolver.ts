@@ -92,6 +92,28 @@ const computeShardId = (
   return ShardId.make(group, id);
 };
 
+type ResolveShardId = Sharding.Sharding["Service"]["getShardId"];
+type WorkflowValue = Parameters<ActorAddressResolverShape["resolveWorkflow"]>[0];
+
+const makeWorkflowResolvers = (getShardId: ResolveShardId) => {
+  const resolve = (workflow: WorkflowValue, executionId: string, entityType: string) => {
+    const entityId = EntityId.make(executionId);
+    const shardGroup = Context.get(workflow.annotations, ClusterSchema.ShardGroup)(entityId);
+    return EntityAddress.make({
+      entityType: EntityType.make(entityType),
+      entityId,
+      shardId: getShardId(entityId, shardGroup),
+    });
+  };
+
+  return {
+    resolveWorkflow: (workflow: WorkflowValue, executionId: string) =>
+      resolve(workflow, executionId, `Workflow/${workflow._tag}`),
+    resolveWorkflowClock: (workflow: WorkflowValue, executionId: string) =>
+      resolve(workflow, executionId, "Workflow/-/DurableClock"),
+  };
+};
+
 // ─── Layers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -106,6 +128,9 @@ const fromConfig: Layer.Layer<ActorAddressResolver, never, ShardingConfig.Shardi
     Effect.gen(function* () {
       const config = yield* ShardingConfig.ShardingConfig;
       const shardsPerGroup = config.shardsPerGroup;
+      const workflowResolvers = makeWorkflowResolvers((entityId, group) =>
+        computeShardId(entityId, group, shardsPerGroup),
+      );
 
       /* eslint-disable typescript-eslint/no-explicit-any -- entity Rpcs type-erased */
       const resolveEntity = (
@@ -121,39 +146,11 @@ const fromConfig: Layer.Layer<ActorAddressResolver, never, ShardingConfig.Shardi
         });
       };
 
-      const resolveWorkflow = (
-        workflow: UpstreamWorkflow.Workflow<any, any, any, any>,
-        executionId: string,
-      ): EntityAddress.EntityAddress => {
-        const entityId = EntityId.make(executionId);
-        const shardGroupFn = Context.get(workflow.annotations, ClusterSchema.ShardGroup);
-        const shardGroup = shardGroupFn(entityId);
-        return EntityAddress.make({
-          entityType: EntityType.make(`Workflow/${workflow._tag}`),
-          entityId,
-          shardId: computeShardId(entityId, shardGroup, shardsPerGroup),
-        });
-      };
-
-      const resolveWorkflowClock = (
-        workflow: UpstreamWorkflow.Workflow<any, any, any, any>,
-        executionId: string,
-      ): EntityAddress.EntityAddress => {
-        const entityId = EntityId.make(executionId);
-        const shardGroupFn = Context.get(workflow.annotations, ClusterSchema.ShardGroup);
-        const shardGroup = shardGroupFn(entityId);
-        return EntityAddress.make({
-          entityType: EntityType.make("Workflow/-/DurableClock"),
-          entityId,
-          shardId: computeShardId(entityId, shardGroup, shardsPerGroup),
-        });
-      };
       /* eslint-enable typescript-eslint/no-explicit-any */
 
       return {
         resolveEntity,
-        resolveWorkflow,
-        resolveWorkflowClock,
+        ...workflowResolvers,
       };
     }),
   );
@@ -167,6 +164,7 @@ const fromSharding: Layer.Layer<ActorAddressResolver, never, Sharding.Sharding> 
   ActorAddressResolver,
   Effect.gen(function* () {
     const sharding = yield* Sharding.Sharding;
+    const workflowResolvers = makeWorkflowResolvers(sharding.getShardId);
 
     /* eslint-disable typescript-eslint/no-explicit-any -- entity Rpcs type-erased */
     const resolveEntity = (
@@ -182,39 +180,11 @@ const fromSharding: Layer.Layer<ActorAddressResolver, never, Sharding.Sharding> 
       });
     };
 
-    const resolveWorkflow = (
-      workflow: UpstreamWorkflow.Workflow<any, any, any, any>,
-      executionId: string,
-    ): EntityAddress.EntityAddress => {
-      const entityId = EntityId.make(executionId);
-      const shardGroupFn = Context.get(workflow.annotations, ClusterSchema.ShardGroup);
-      const shardGroup = shardGroupFn(entityId);
-      return EntityAddress.make({
-        entityType: EntityType.make(`Workflow/${workflow._tag}`),
-        entityId,
-        shardId: sharding.getShardId(entityId, shardGroup),
-      });
-    };
-
-    const resolveWorkflowClock = (
-      workflow: UpstreamWorkflow.Workflow<any, any, any, any>,
-      executionId: string,
-    ): EntityAddress.EntityAddress => {
-      const entityId = EntityId.make(executionId);
-      const shardGroupFn = Context.get(workflow.annotations, ClusterSchema.ShardGroup);
-      const shardGroup = shardGroupFn(entityId);
-      return EntityAddress.make({
-        entityType: EntityType.make("Workflow/-/DurableClock"),
-        entityId,
-        shardId: sharding.getShardId(entityId, shardGroup),
-      });
-    };
     /* eslint-enable typescript-eslint/no-explicit-any */
 
     return {
       resolveEntity,
-      resolveWorkflow,
-      resolveWorkflowClock,
+      ...workflowResolvers,
     };
   }),
 );

@@ -32,6 +32,7 @@ describe("Actor.fromWorkflow", () => {
     expect(ProcessOrder.watchAt).toBeDefined();
     expect(ProcessOrder.waitForAt).toBeDefined();
     expect(ProcessOrder.rerun).toBeDefined();
+    expect(ProcessOrder.prune).toBeDefined();
     expect(ProcessOrder.make).toBeDefined();
   });
 

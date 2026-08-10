@@ -5,11 +5,10 @@ Declarative actors and durable workflows for `@effect/cluster`.
 ## Commands
 
 ```bash
-bun run gate          # all checks concurrent: typecheck, typecheck:v3, lint, fmt, build, test
-bun run typecheck     # tsgo --noEmit for v4 and v3, patched by @effect/tsgo
-bun run typecheck:v3  # tsgo --noEmit -p v3/tsconfig.json
+bun run gate          # all checks concurrent: typecheck, lint, fmt, build, test
+bun run typecheck     # tsgo --noEmit, patched by @effect/tsgo
 bun run lint          # oxlint type-aware; Effect diagnostics run through tsgo plugin
-bun run build         # tsdown v4 + v3 concurrent
+bun run build         # tsdown
 bun test              # bun test
 ```
 
@@ -17,12 +16,10 @@ bun test              # bun test
 
 - `src/actor.ts` — v4 actor API: `Actor.fromEntity`, `Actor.fromWorkflow`, `toLayer`, `toTestLayer`, types, runtime
 - `src/actor-state.ts` — live entity state registry and `Actor.registerState` helpers
-- `src/storage.ts` — `EncoreMessageStorage` Context.Service (extends upstream `MessageStorage` with `deleteEnvelope`)
-- `v3/src/actor.ts` — v3 mirror using `@effect/cluster`, `@effect/rpc`, `@effect/workflow` imports
-- `v3/src/actor-state.ts` — v3 mirror of live entity state helpers
+- `src/storage.ts` — `MessageDeletion` Context.Service for single-invocation deletion
 - `src/receipt.ts` — `ExecId<S,E>` branded type, `PeekResult` ADT
 - `src/canonical-json.ts` — stable JSON encoding and SHA-256 for durable identities
-- Both v3 and v4 import from the same `effect@4.x` — v3 distinction is only the cluster/rpc/workflow packages
+- The package supports Effect v4 only.
 
 ## API surface
 
@@ -91,6 +88,7 @@ yield * Geocode.peek({ locationId: "loc-A" });
 yield * Geocode.watch({ locationId: "loc-A" });
 yield * Geocode.waitFor({ locationId: "loc-A" });
 yield * Geocode.rerun({ locationId: "loc-A" }); // interrupt + clearAddress; clears run reply + activity replies
+yield * Geocode.prune(executionId); // remove terminal run, activity, and clock state
 yield * Geocode.interrupt(executionId); // takes execId, fiber-signal only
 yield * Geocode.resume(executionId);
 const op = Geocode.make({ locationId: "loc-A" }); // OperationValue escape hatch
@@ -133,17 +131,18 @@ PagerDuty: {
 - Validate each compensation decision against the pending attempt. A different pending attempt or accepted decision must fail with `CompensationDecisionConflictError`. A run with no current or recorded attempt must fail with `CompensationNotPendingError`.
 - Keep replay-side logs inside the Activity body. Code after a cached Activity result runs again on every replay.
 
-## Surgical rerun (`<Op>.rerun(payload)`)
+## Workflow pruning and surgical rerun
 
 Dedup records survive forever — that's the property the library sells. `.rerun(payload)` is the surgical escape hatch:
 
-- **Entity**: derives `{entityId, primaryKey}` via `id`, looks up the requestId for the primaryKey, calls `EncoreMessageStorage.deleteEnvelope(requestId)`. No-op on non-existent execId.
-- **Workflow**: `WorkflowEngine.interrupt(executionId)` (signals fiber if running, no-op if completed) + `EncoreMessageStorage.clearAddress(workflowAddress)` (wipes run reply AND every cached activity reply at the same address).
+- **Entity**: derives `{entityId, primaryKey}` via `id`, looks up the requestId for the primaryKey, and calls `MessageDeletion.deleteInvocation`. A missing execution is a no-op.
+- **Workflow prune**: `WorkflowActor.prune(executionId)` removes the run, activity, and durable clock addresses through `Client`.
+- **Workflow rerun**: `WorkflowEngine.interrupt(executionId)` signals the fiber. It then calls the same Client prune operation.
 - Workflow rerun-while-running is best-effort: cleanup is eventual; next `.execute(samePayload)` may queue behind the interrupted fiber's wind-down. No data corruption, just transient ordering.
 
-## `EncoreMessageStorage`
+## `MessageDeletion`
 
-Encore's storage tag extends upstream `MessageStorage` with `deleteEnvelope(requestId)`. Adapters provide both:
+Encore adds one internal storage operation that Effect does not provide. Adapters provide it with upstream `MessageStorage`:
 
 ```ts
 import { encoreMessageStorageLayer, fromMessageStorage, fromSqlClient } from "effect-encore";
@@ -157,10 +156,10 @@ const storageLayer = encoreMessageStorageLayer(upstreamStorageLayer, {
 const sqlStorageLayer = fromSqlClient(); // requires SqlClient.SqlClient
 ```
 
-Required by `OperationHandle.rerun` and `WorkflowActor.rerun`. Adapters that haven't implemented yet should fail loud (`Effect.die`) rather than coarsen to `flush`.
+`OperationHandle.rerun` requires it. Workflow pruning uses Client and upstream address cleanup. Adapters that have not implemented single-invocation deletion must fail as a defect.
 
 `fromSqlClient()` provides both upstream `MessageStorage.MessageStorage` and
-Encore's `EncoreMessageStorage` over Effect Cluster's default
+Encore's `MessageDeletion` over Effect Cluster's default
 `cluster_messages` / `cluster_replies` tables. Use
 `fromSqlClientWithShardingConfig()` when the runtime owns sharding config.
 
@@ -181,7 +180,6 @@ Discriminator: `Schema.isSchema(payload) && !("fields" in payload)`. Schema.Clas
 - Effect diagnostics live in the `@effect/language-service` tsconfig plugin.
 - `@effect/tsgo` patches `tsgo`; run `bun install` or `bun run prepare` after dependency changes.
 - `serviceNotAsClass` is enabled for v4 services. Use `class X extends Context.Service<X, Shape>()("key") {}`.
-- The v3 mirror inherits the root tsconfig but maps `effect` to `effect-v3`.
 
 ## Gotchas
 
@@ -189,9 +187,7 @@ Discriminator: `Schema.isSchema(payload) && !("fields" in payload)`. Schema.Clas
 - Entity `interrupt` clears the mailbox via `clearAddress`; in-flight handlers run to completion (Sharding.passivate not public)
 - Entity peek returns **encoded** values from storage; `decodeValue` uses `Schema.decodeUnknownEffect` with fallback
 - Workflow peek uses real `Exit.Exit` (not encoded) — walk `Cause` tree via `Cause.findErrorOption`/`findDefect`/`findInterrupt`
-- v3 `Cause` API differs: use `failureOption`/`dieOption`/`isInterruptedOnly` instead of v4's `findErrorOption`/`findDefect`/`findInterrupt`
-- v3 `Effect.repeat({ schedule, while })` returns the schedule's `Out`, not the effect's value — for waitFor-style polls in v3, use `Stream.repeatEffectWithSchedule` + `takeUntil` + `runLast`
 - `withCompensation` is NOT on the actor — it's a workflow primitive. Import from `Workflow` directly.
 - Use `canonicalJsonString` and `canonicalJsonSha256` for durable JSON identities. Do not add another serializer.
 - Workflow `executionId` (the cluster slot the engine writes to) = upstream's hashed execution id for `id(payload)` — NOT the raw `id(payload)` string. `Workflow*.peek/rerun/executionId` use `wf.executionId(payload)` internally so they line up with the engine's writes.
-- Adapters MUST implement `EncoreMessageStorage.deleteEnvelope` for entity `.rerun` to work; the unimplemented fallback dies loudly rather than silently coarsening to flush.
+- Adapters must implement `MessageDeletion.deleteInvocation` for entity `.rerun`.

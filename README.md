@@ -54,6 +54,9 @@ const ProcessOrder = Actor.fromWorkflow("ProcessOrder", {
 });
 ```
 
+Use `ProcessOrder.prune(executionId)` after retention ends. It removes the run,
+activity, and durable clock records for that workflow execution.
+
 ### Identity & Type Guards
 
 ```ts
