@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.23.0
+
+### Minor Changes
+
+- [`af28e8d`](https://github.com/cevr/effect-encore/commit/af28e8d93a91cd8bc587e8ce0777f48f06d1f0fb) Thanks [@cevr](https://github.com/cevr)! - Allow workflow compensations to fail with the Workflow error type. Persist the failure with the Workflow error schema before operator recovery.
+
 ## 0.22.0
 
 ### Minor Changes
