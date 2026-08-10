@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.22.0
+
+### Minor Changes
+
+- [`93c3a0f`](https://github.com/cevr/effect-encore/commit/93c3a0fa81047f8ccc347a6e873faf028146787e) Thanks [@cevr](https://github.com/cevr)! - Add workflow inspection methods that accept a durable execution identifier.
+
 ## 0.21.1
 
 ### Patch Changes
