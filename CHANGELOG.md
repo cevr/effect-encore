@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.18.0
+
+### Minor Changes
+
+- [`50ebc06`](https://github.com/cevr/effect-encore/commit/50ebc0649d18b18488f2322c8e111977cb272f60) Thanks [@cevr](https://github.com/cevr)! - Add stable canonical JSON encoding and SHA-256 helpers for durable workflow identities.
+
 ## 0.17.0
 
 ### Minor Changes
