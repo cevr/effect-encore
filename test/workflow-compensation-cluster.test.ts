@@ -44,8 +44,8 @@ it.scopedLive("arbitrates compensation decisions through the cluster engine", ()
 
       const results = yield* Effect.all(
         [
-          ClusterCompensation.compensation.retry(executionId, "registered", 1),
-          ClusterCompensation.compensation.stop(executionId, "registered", 1),
+          ClusterCompensation.compensation.decidePending(executionId, "Retry"),
+          ClusterCompensation.compensation.decidePending(executionId, "Stop"),
         ].map(Effect.result),
         { concurrency: "unbounded" },
       ).pipe(Effect.timeout("5 seconds"));
@@ -54,7 +54,9 @@ it.scopedLive("arbitrates compensation decisions through the cluster engine", ()
       expect(results.filter(Result.isFailure)).toHaveLength(1);
       for (const result of results) {
         if (Result.isFailure(result)) {
-          expect(result.failure).toHaveProperty("_tag", "CompensationNotPendingError");
+          expect(["CompensationNotPendingError", "CompensationDecisionConflictError"]).toContain(
+            result.failure._tag,
+          );
         }
       }
       expect((yield* ClusterCompensation.waitFor(payload))._tag).toBe("Failure");

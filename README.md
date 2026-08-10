@@ -278,13 +278,7 @@ operator can then retry it or stop its retries:
 
 ```ts
 const pending = yield * ProcessOrder.compensation.pending(executionId);
-
-yield *
-  Option.match(pending, {
-    onNone: () => Effect.void,
-    onSome: ({ stepId, attempt }) =>
-      ProcessOrder.compensation.decide(executionId, stepId, attempt, "Retry"),
-  });
+yield * ProcessOrder.compensation.decidePending(executionId, "Retry");
 ```
 
 `retry` starts the next Activity attempt. `stop` skips the failed compensation
@@ -292,8 +286,9 @@ and continues with older compensations. The workflow keeps its original failure
 after compensation ends. An interrupt-only cause does not start compensation.
 An interrupted compensation does not wait for an operator decision. `retry`
 and `stop` are convenience methods over `decide`. Every decision checks the
-pending Step ID and attempt. A stale or conflicting decision fails with
-`CompensationNotPendingError`.
+pending Step ID and attempt. A different pending attempt or durable decision
+fails with `CompensationDecisionConflictError`. A run without a pending attempt
+fails with `CompensationNotPendingError`.
 
 `decide` waits until the durable winning decision is visible. Apply
 `Effect.timeout` at the application boundary when an operator request needs a

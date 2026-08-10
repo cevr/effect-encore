@@ -432,9 +432,9 @@ describe("step.run — durable compensation", () => {
         const invalidAttempt = yield* DurableCompensation.compensation
           .retry(executionId, "earlier", 0)
           .pipe(Effect.flip);
-        expect(wrongStep).toHaveProperty("_tag", "CompensationNotPendingError");
-        expect(wrongAttempt).toHaveProperty("_tag", "CompensationNotPendingError");
-        expect(invalidAttempt).toHaveProperty("_tag", "CompensationNotPendingError");
+        expect(wrongStep).toHaveProperty("_tag", "CompensationDecisionConflictError");
+        expect(wrongAttempt).toHaveProperty("_tag", "CompensationDecisionConflictError");
+        expect(invalidAttempt).toHaveProperty("_tag", "CompensationDecisionConflictError");
 
         yield* DurableCompensation.compensation.retry(executionId, "earlier", 1);
         const completed = yield* DurableCompensation.waitFor(payload);
@@ -447,6 +447,15 @@ describe("step.run — durable compensation", () => {
         expect(laterCompensations).toBe(1);
         expect(compensationOrder).toEqual(["later:1", "earlier:1", "earlier:2"]);
         expect(yield* DurableCompensation.compensation.pending(executionId)).toEqual(Option.none());
+
+        yield* DurableCompensation.compensation.retry(executionId, "earlier", 1);
+        const conflictingDecision = yield* DurableCompensation.compensation
+          .stop(executionId, "earlier", 1)
+          .pipe(Effect.flip);
+        expect(conflictingDecision).toHaveProperty("_tag", "CompensationDecisionConflictError");
+        if (conflictingDecision._tag === "CompensationDecisionConflictError") {
+          expect(conflictingDecision.acceptedDecision).toEqual(Option.some("Retry"));
+        }
       }),
   );
 
@@ -526,13 +535,20 @@ describe("step.run — durable compensation", () => {
 
       const results = yield* Effect.all(
         [
-          DurableCompensation.compensation.retry(executionId, "earlier", 1),
-          DurableCompensation.compensation.stop(executionId, "earlier", 1),
+          DurableCompensation.compensation.decidePending(executionId, "Retry"),
+          DurableCompensation.compensation.decidePending(executionId, "Stop"),
         ].map(Effect.result),
         { concurrency: "unbounded" },
       );
       expect(results.filter(Result.isSuccess)).toHaveLength(1);
       expect(results.filter(Result.isFailure)).toHaveLength(1);
+      for (const result of results) {
+        if (Result.isFailure(result)) {
+          expect(["CompensationNotPendingError", "CompensationDecisionConflictError"]).toContain(
+            result.failure._tag,
+          );
+        }
+      }
       expect((yield* DurableCompensation.waitFor(payload))._tag).toBe("Failure");
     }),
   );

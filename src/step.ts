@@ -15,7 +15,6 @@ import {
   Match,
   Option,
   Predicate,
-  Schedule,
   Schema,
 } from "effect";
 
@@ -242,11 +241,21 @@ export class PendingCompensation extends Schema.Class<PendingCompensation>(
 
 export class CompensationNotPendingError extends Schema.TaggedError<CompensationNotPendingError>()(
   "CompensationNotPendingError",
+  {},
+) {}
+
+export class CompensationDecisionConflictError extends Schema.TaggedError<CompensationDecisionConflictError>()(
+  "CompensationDecisionConflictError",
   {
     stepId: Schema.String,
     attempt: Schema.Finite,
+    acceptedDecision: Schema.Option(CompensationDecision),
   },
 ) {}
+
+export type CompensationDecisionError =
+  | CompensationNotPendingError
+  | CompensationDecisionConflictError;
 
 const CompensationPlan = Schema.Array(Schema.String);
 const compensationPlan = UpstreamDeferred.make("CompensationPlan", {
@@ -292,7 +301,7 @@ const readDeferredAt = <S extends Schema.Constraint>(
   workflow: UpstreamWorkflow.Any,
   executionId: string,
   deferred: UpstreamDeferred.DurableDeferred<S>,
-) =>
+): Effect.Effect<Option.Option<S["Type"]>, never, WorkflowEngine> =>
   WorkflowEngine.pipe(
     Effect.flatMap((engine) =>
       engine
@@ -376,6 +385,46 @@ export const pendingCompensation = <
     ),
   );
 
+const commitCompensationDecision = (
+  workflow: UpstreamWorkflow.Any,
+  executionId: string,
+  stepId: string,
+  attempt: number,
+  decision: CompensationDecision,
+): Effect.Effect<void, CompensationDecisionConflictError, WorkflowEngine> =>
+  Effect.gen(function* () {
+    const deferred = compensationDecision(stepId, attempt);
+    const accepted = yield* readDeferredAt(workflow, executionId, deferred);
+    if (Option.isSome(accepted)) {
+      if (accepted.value === decision) return;
+      return yield* CompensationDecisionConflictError.make({
+        stepId,
+        attempt,
+        acceptedDecision: accepted,
+      });
+    }
+
+    const token = UpstreamDeferred.tokenFromExecutionId(deferred, { workflow, executionId });
+    yield* UpstreamDeferred.succeed(deferred, { token, value: decision });
+    const awaitAccepted = (): Effect.Effect<CompensationDecision, never, WorkflowEngine> =>
+      readDeferredAt(workflow, executionId, deferred).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.sleep("10 millis").pipe(Effect.andThen(Effect.suspend(awaitAccepted))),
+            onSome: Effect.succeed,
+          }),
+        ),
+      );
+    const winner = yield* awaitAccepted();
+    if (winner === decision) return;
+    return yield* CompensationDecisionConflictError.make({
+      stepId,
+      attempt,
+      acceptedDecision: Option.some(winner),
+    });
+  });
+
 /**
  * Persist an operator decision for the exact pending compensation attempt.
  *
@@ -395,30 +444,60 @@ export const decideCompensation = <
   decision: CompensationDecision,
 ): Effect.Effect<
   void,
-  CompensationNotPendingError,
+  CompensationDecisionError,
   WorkflowEngine | Success["DecodingServices"] | Error["DecodingServices"]
 > =>
   Effect.gen(function* () {
     const pending = yield* pendingCompensation(workflow, executionId);
-    if (
-      Option.isNone(pending) ||
-      pending.value.stepId !== stepId ||
-      pending.value.attempt !== attempt
-    ) {
-      return yield* CompensationNotPendingError.make({ stepId, attempt });
+    if (Option.isNone(pending)) {
+      const accepted = yield* readDeferredAt(
+        workflow,
+        executionId,
+        compensationDecision(stepId, attempt),
+      );
+      if (Option.isNone(accepted)) return yield* CompensationNotPendingError.make();
+      if (accepted.value === decision) return;
+      return yield* CompensationDecisionConflictError.make({
+        stepId,
+        attempt,
+        acceptedDecision: accepted,
+      });
     }
+    if (pending.value.stepId !== stepId || pending.value.attempt !== attempt) {
+      return yield* CompensationDecisionConflictError.make({
+        stepId,
+        attempt,
+        acceptedDecision: Option.none(),
+      });
+    }
+    return yield* commitCompensationDecision(workflow, executionId, stepId, attempt, decision);
+  });
 
-    const deferred = compensationDecision(stepId, attempt);
-    const token = UpstreamDeferred.tokenFromExecutionId(deferred, { workflow, executionId });
-    yield* UpstreamDeferred.succeed(deferred, { token, value: decision });
-    const accepted = yield* readDeferredAt(workflow, executionId, deferred).pipe(
-      Effect.repeat({
-        while: (result) => Option.isNone(result),
-        schedule: Schedule.spaced("10 millis"),
-      }),
+/** Persist a decision for the compensation attempt that is pending now. */
+export const decidePendingCompensation = <
+  Name extends string,
+  Payload extends UpstreamWorkflow.AnyStructSchema,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+>(
+  workflow: UpstreamWorkflow.Workflow<Name, Payload, Success, Error>,
+  executionId: string,
+  decision: CompensationDecision,
+): Effect.Effect<
+  void,
+  CompensationDecisionError,
+  WorkflowEngine | Success["DecodingServices"] | Error["DecodingServices"]
+> =>
+  Effect.gen(function* () {
+    const pending = yield* pendingCompensation(workflow, executionId);
+    if (Option.isNone(pending)) return yield* CompensationNotPendingError.make();
+    return yield* commitCompensationDecision(
+      workflow,
+      executionId,
+      pending.value.stepId,
+      pending.value.attempt,
+      decision,
     );
-    if (Option.isSome(accepted) && accepted.value === decision) return;
-    return yield* CompensationNotPendingError.make({ stepId, attempt });
   });
 
 // ── makeSignal ──────────────────────────────────────────────────────────

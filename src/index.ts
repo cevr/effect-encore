@@ -41,11 +41,13 @@ export type {
 export type { ActorStateRegistryShape } from "./actor-state.js";
 export {
   CompensationDecision,
+  CompensationDecisionConflictError,
   CompensationNotPendingError,
   makeSignal,
   PendingCompensation,
 } from "./step.js";
 export type {
+  CompensationDecisionError,
   WorkflowStepContext,
   WorkflowSignal,
   WorkflowSignalToken,

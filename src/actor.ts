@@ -51,7 +51,7 @@ import type { DateTime, Scope } from "effect";
 import { dual } from "effect/Function";
 import type {
   CompensationDecision,
-  CompensationNotPendingError,
+  CompensationDecisionError,
   PendingCompensation,
   SignalDefs,
   WorkflowSignal,
@@ -59,6 +59,7 @@ import type {
 } from "./step.js";
 import {
   decideCompensation,
+  decidePendingCompensation,
   makeSignal,
   makeWorkflowExecution,
   pendingCompensation,
@@ -1991,17 +1992,21 @@ export type WorkflowActor<
       stepId: string,
       attempt: number,
       decision: CompensationDecision,
-    ) => Effect.Effect<void, CompensationNotPendingError, WorkflowReadServices<Success, Error>>;
+    ) => Effect.Effect<void, CompensationDecisionError, WorkflowReadServices<Success, Error>>;
+    readonly decidePending: (
+      executionId: string,
+      decision: CompensationDecision,
+    ) => Effect.Effect<void, CompensationDecisionError, WorkflowReadServices<Success, Error>>;
     readonly retry: (
       executionId: string,
       stepId: string,
       attempt: number,
-    ) => Effect.Effect<void, CompensationNotPendingError, WorkflowReadServices<Success, Error>>;
+    ) => Effect.Effect<void, CompensationDecisionError, WorkflowReadServices<Success, Error>>;
     readonly stop: (
       executionId: string,
       stepId: string,
       attempt: number,
-    ) => Effect.Effect<void, CompensationNotPendingError, WorkflowReadServices<Success, Error>>;
+    ) => Effect.Effect<void, CompensationDecisionError, WorkflowReadServices<Success, Error>>;
   };
   /**
    * Escape hatch: produce the underlying `OperationValue<"Run", ...>` for the
@@ -2199,6 +2204,8 @@ const fromWorkflow = <
       attempt: number,
       decision: CompensationDecision,
     ) => decideCompensation(wf, executionId, stepId, attempt, decision),
+    decidePending: (executionId: string, decision: CompensationDecision) =>
+      decidePendingCompensation(wf, executionId, decision),
     retry: (executionId: string, stepId: string, attempt: number) =>
       decideCompensation(wf, executionId, stepId, attempt, "Retry"),
     stop: (executionId: string, stepId: string, attempt: number) =>

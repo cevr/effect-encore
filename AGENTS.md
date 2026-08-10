@@ -130,7 +130,7 @@ PagerDuty: {
 - A compensation can fail with the Workflow error. Use the Workflow error schema for its durable Activity.
 - A compensation Activity name identifies the Step. `Activity.CurrentAttempt` identifies the retry. The decision Durable Deferred name must include both the Step ID and attempt.
 - Persist the compensation plan and each failed attempt. Operator code must discover the pending Step ID and attempt. It must not guess them.
-- Validate each compensation decision against the pending attempt. A stale or conflicting decision must fail with `CompensationNotPendingError`.
+- Validate each compensation decision against the pending attempt. A different pending attempt or accepted decision must fail with `CompensationDecisionConflictError`. A run with no current or recorded attempt must fail with `CompensationNotPendingError`.
 - Keep replay-side logs inside the Activity body. Code after a cached Activity result runs again on every replay.
 
 ## Surgical rerun (`<Op>.rerun(payload)`)
