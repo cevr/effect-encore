@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.21.1
+
+### Patch Changes
+
+- [`49fd9ed`](https://github.com/cevr/effect-encore/commit/49fd9edb0aa73607cf4a7bb7cafd6308a0d8fe51) Thanks [@cevr](https://github.com/cevr)! - Delegate workflow idempotency keys to Effect Activity.
+
 ## 0.21.0
 
 ### Minor Changes
