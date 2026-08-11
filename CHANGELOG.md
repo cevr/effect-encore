@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.27.1
+
+### Patch Changes
+
+- [`106c47e`](https://github.com/cevr/effect-encore/commit/106c47ecf522d7da0445adf57c0e237fce976714) Thanks [@cevr](https://github.com/cevr)! - Accept Effect duration input for an actor's maximum idle time.
+
 ## 0.27.0
 
 ### Minor Changes
