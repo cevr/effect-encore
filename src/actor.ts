@@ -330,7 +330,7 @@ type ActorHandlers<Defs extends OperationDefs, R = never> = {
 
 export interface HandlerOptions {
   readonly spanAttributes?: Record<string, string>;
-  readonly maxIdleTime?: number;
+  readonly maxIdleTime?: Duration.Input;
   readonly concurrency?: number | "unbounded";
   readonly mailboxCapacity?: number | "unbounded";
 }

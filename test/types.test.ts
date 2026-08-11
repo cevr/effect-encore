@@ -18,6 +18,7 @@ import type {
   Client,
   CurrentAddress,
   ExecId,
+  HandlerOptions,
   PeekResult,
   WorkflowSignal,
 } from "../src/index.js";
@@ -73,6 +74,9 @@ type _StateHidesRead = Assert<"read" extends keyof StateValue<number> ? false : 
 type _StateHidesWrite = Assert<"write" extends keyof StateValue<number> ? false : true>;
 type _StateHidesPubSub = Assert<"pubsub" extends keyof StateValue<number> ? false : true>;
 type _StateHidesSemaphore = Assert<"semaphore" extends keyof StateValue<number> ? false : true>;
+type _ActorIdlePolicyAcceptsDurationLiteral = Assert<
+  "5 minutes" extends NonNullable<HandlerOptions["maxIdleTime"]> ? true : false
+>;
 
 // ExecId is a string at runtime
 type _ExecIdIsString = Assert<ExecId extends string ? true : false>;

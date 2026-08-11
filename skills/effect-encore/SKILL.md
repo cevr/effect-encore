@@ -366,7 +366,7 @@ const CounterClient = Actor.toLayer(Counter);
 ```ts
 Actor.toLayer(actor, handlers, {
   spanAttributes: { team: "platform" },
-  maxIdleTime: 60_000,
+  maxIdleTime: "5 minutes",
   concurrency: 10,
   mailboxCapacity: 100,
 });
