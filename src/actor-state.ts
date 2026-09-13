@@ -12,6 +12,17 @@ export class ActorStateUnavailable extends Data.TaggedError(
 }> {}
 
 /**
+ * What the registry keys on: entity type plus entity id. A full
+ * `EntityAddress` satisfies it structurally, so callers that already hold one
+ * pass it as-is; callers that only know the type and id need not invent a
+ * `ShardId` to read state.
+ */
+export interface ActorStateKey {
+  readonly entityType: string;
+  readonly entityId: string;
+}
+
+/**
  * Registry-internal read-only view of an entity's live state: a current-value
  * read plus a change stream. Derived from a {@link State.State} by
  * {@link registerState}; the public state vocabulary is `State<A>`. Not
@@ -48,9 +59,7 @@ export interface ActorStateRegistryService {
     address: EntityAddress.EntityAddress,
     handle: AnyActorStateHandle,
   ) => Effect.Effect<void>;
-  readonly get: (
-    address: EntityAddress.EntityAddress,
-  ) => Effect.Effect<AnyActorStateHandle, ActorStateUnavailable>;
+  readonly get: (key: ActorStateKey) => Effect.Effect<AnyActorStateHandle, ActorStateUnavailable>;
   readonly list: (entityType: string) => Effect.Effect<ReadonlyArray<string>>;
 }
 
@@ -78,15 +87,15 @@ export class ActorStateRegistry extends Context.Service<
             next.delete(key);
             return next;
           }),
-        get: (address) =>
+        get: (key) =>
           Ref.get(entries).pipe(
             Effect.flatMap((current) => {
-              const handle = Option.fromNullishOr(current.get(addressKey(address)));
+              const handle = Option.fromNullishOr(current.get(addressKey(key)));
               if (Option.isNone(handle)) {
                 return Effect.fail(
                   new ActorStateUnavailable({
-                    entityType: String(address.entityType),
-                    entityId: String(address.entityId),
+                    entityType: String(key.entityType),
+                    entityId: String(key.entityId),
                   }),
                 );
               }
@@ -125,22 +134,22 @@ export const registerState = <A, Error = never, Requirements = never>(
   });
 
 export const stateOf = <State, Error = never>(
-  address: EntityAddress.EntityAddress,
+  key: ActorStateKey,
 ): Effect.Effect<State, Error | ActorStateUnavailable, ActorStateRegistry> =>
   Effect.gen(function* () {
     const registry = yield* ActorStateRegistry;
-    const erased = yield* registry.get(address);
+    const erased = yield* registry.get(key);
     const handle = restoreActorStateHandle<State, Error>(erased);
     return yield* handle.get;
   });
 
 export const watchStateOf = <State, Error = never>(
-  address: EntityAddress.EntityAddress,
+  key: ActorStateKey,
 ): Stream.Stream<State, Error | ActorStateUnavailable, ActorStateRegistry> =>
   Stream.unwrap(
     Effect.gen(function* () {
       const registry = yield* ActorStateRegistry;
-      const erased = yield* registry.get(address);
+      const erased = yield* registry.get(key);
       const handle = restoreActorStateHandle<State, Error>(erased);
       return handle.watch;
     }),
@@ -155,10 +164,10 @@ export const listStateEntityIds = (
   });
 
 export const waitForStateOf = <State, Error = never>(
-  address: EntityAddress.EntityAddress,
+  key: ActorStateKey,
   predicate: (state: State) => boolean,
 ): Effect.Effect<State, Error | ActorStateUnavailable, ActorStateRegistry> =>
-  watchStateOf<State, Error>(address).pipe(
+  watchStateOf<State, Error>(key).pipe(
     Stream.filter(predicate),
     Stream.runHead,
     Effect.flatMap((option) =>
@@ -166,7 +175,7 @@ export const waitForStateOf = <State, Error = never>(
         onNone: () =>
           Effect.die(
             new Error(
-              `effect-encore/waitForStateOf: state stream ended before predicate matched for ${String(address.entityType)}:${String(address.entityId)}`,
+              `effect-encore/waitForStateOf: state stream ended before predicate matched for ${String(key.entityType)}:${String(key.entityId)}`,
             ),
           ),
         onSome: Effect.succeed,
@@ -176,13 +185,13 @@ export const waitForStateOf = <State, Error = never>(
 
 export interface ActorStateObservation<State, Error, Requirements> {
   readonly get: (
-    address: EntityAddress.EntityAddress,
+    key: ActorStateKey,
   ) => Effect.Effect<State, Error | ActorStateUnavailable, ActorStateRegistry | Requirements>;
   readonly watch: (
-    address: EntityAddress.EntityAddress,
+    key: ActorStateKey,
   ) => Stream.Stream<State, Error | ActorStateUnavailable, ActorStateRegistry | Requirements>;
   readonly waitFor: (
-    address: EntityAddress.EntityAddress,
+    key: ActorStateKey,
     predicate: (state: State) => boolean,
   ) => Effect.Effect<State, Error | ActorStateUnavailable, ActorStateRegistry | Requirements>;
 }
@@ -191,8 +200,8 @@ export const makeActorStateObservation = <Input, State, Error, Requirements>(opt
   readonly decodeState: (value: Input) => Effect.Effect<State, Error, Requirements>;
   readonly decodeFailure: (cause: unknown) => Effect.Effect<never, Error, Requirements>;
 }): ActorStateObservation<State, Error, Requirements> => {
-  const watch = (address: EntityAddress.EntityAddress) =>
-    watchStateOf<Input, Error>(address).pipe(
+  const watch = (key: ActorStateKey) =>
+    watchStateOf<Input, Error>(key).pipe(
       Stream.catch((cause: Error | ActorStateUnavailable) =>
         Stream.fromEffect(options.decodeFailure(cause)),
       ),
@@ -200,14 +209,14 @@ export const makeActorStateObservation = <Input, State, Error, Requirements>(opt
     );
 
   return {
-    get: (address) =>
-      stateOf<Input, Error>(address).pipe(
+    get: (key) =>
+      stateOf<Input, Error>(key).pipe(
         Effect.catch(options.decodeFailure),
         Effect.flatMap(options.decodeState),
       ),
     watch,
-    waitFor: (address, predicate) =>
-      watch(address).pipe(
+    waitFor: (key, predicate) =>
+      watch(key).pipe(
         Stream.filter(predicate),
         Stream.runHead,
         Effect.flatMap((option) =>
@@ -215,7 +224,7 @@ export const makeActorStateObservation = <Input, State, Error, Requirements>(opt
             onNone: () =>
               Effect.die(
                 new Error(
-                  `effect-encore/waitForState: state stream ended before predicate matched for ${String(address.entityType)}:${String(address.entityId)}`,
+                  `effect-encore/waitForState: state stream ended before predicate matched for ${String(key.entityType)}:${String(key.entityId)}`,
                 ),
               ),
             onSome: Effect.succeed,
@@ -225,8 +234,8 @@ export const makeActorStateObservation = <Input, State, Error, Requirements>(opt
   };
 };
 
-const addressKey = (address: EntityAddress.EntityAddress): string =>
-  `${String(address.entityType)}\x00${String(address.entityId)}`;
+const addressKey = (key: ActorStateKey): string =>
+  `${String(key.entityType)}\x00${String(key.entityId)}`;
 
 interface AddressKeyParts {
   readonly entityType: string;
