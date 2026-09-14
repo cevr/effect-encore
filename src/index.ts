@@ -8,7 +8,7 @@ export {
   waitForStateOf,
   watchStateOf,
 } from "./actor-state.js";
-export type { ActorStateRegistryService } from "./actor-state.js";
+export type { ActorStateKey, ActorStateRegistryService } from "./actor-state.js";
 export type {
   EntityActor,
   AnyEntityActor,

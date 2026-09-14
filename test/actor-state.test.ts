@@ -1,7 +1,7 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Context, Effect, Fiber, Layer, Schema, Stream, SubscriptionRef } from "effect";
 import { ShardingConfig } from "effect/unstable/cluster";
-import { Actor, ActorStateRegistry, listStateEntityIds } from "../src/index.js";
+import { Actor, ActorStateRegistry, listStateEntityIds, stateOf } from "../src/index.js";
 
 const TestShardingConfig = ShardingConfig.layer({
   shardsPerGroup: 300,
@@ -180,6 +180,18 @@ describe("Actor state protocol", () => {
       const registry = yield* ActorStateRegistry;
       expect(yield* registry.list("Stateful")).toContain("registry-direct");
       expect(yield* listStateEntityIds("Stateful")).toContain("registry-direct");
+    }));
+
+  test("reads registered state by entity type and id without a shard", () =>
+    Effect.gen(function* () {
+      // The registry keys on type + id. A consumer that enumerated ids through
+      // `listStateEntityIds` holds no `ShardId`, so `stateOf` accepts the pair
+      // directly; a full `EntityAddress` still satisfies the same key.
+      const makeRef = yield* Stateful.Context;
+      const ref = yield* makeRef("keyed");
+      yield* ref.execute(Stateful.Increment.make({ id: "keyed", amount: 7 }));
+
+      expect(yield* stateOf<number>({ entityType: "Stateful", entityId: "keyed" })).toBe(7);
     }));
 
   test("Control service exposes bound mailbox operations", () =>
