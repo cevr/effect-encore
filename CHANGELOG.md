@@ -1,5 +1,22 @@
 # effect-encore
 
+## 0.31.0
+
+### Minor Changes
+
+- [#66](https://github.com/cevr/effect-encore/pull/66) [`ad5d6f9`](https://github.com/cevr/effect-encore/commit/ad5d6f9302a0e4fb412126f195f0927ae5170b37) Thanks [@cevr](https://github.com/cevr)! - Read actor state by entity type and id without a `ShardId`
+
+  `ActorStateRegistry` keys handles on entity type plus entity id and ignores
+  the shard, but `stateOf`, `watchStateOf`, `waitForStateOf`, and
+  `ActorStateObservation` demanded a full `EntityAddress`. A consumer that
+  enumerated ids through `listStateEntityIds` had to invent a placeholder
+  `ShardId.make("default", 0)` to read the state it had just listed.
+
+  The read functions now take `ActorStateKey` (`{ entityType, entityId }`).
+  An `EntityAddress` satisfies it structurally, so existing callers keep
+  working. `register` and `deregister` still take the address the actor
+  runs under.
+
 ## 0.30.0
 
 ### Minor Changes
