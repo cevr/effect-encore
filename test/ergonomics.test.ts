@@ -1,6 +1,6 @@
 import { describe, expect, it, test } from "effect-bun-test";
 import { Effect, Layer, Schema } from "effect";
-import { ShardingConfig } from "effect/unstable/cluster";
+import { ShardingConfig } from "effect/cluster";
 import { Actor } from "../src/index.js";
 
 const TestShardingConfig = ShardingConfig.layer({

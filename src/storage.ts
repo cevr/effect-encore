@@ -12,16 +12,11 @@
  * Use `fromMessageStorage(storage, ext)` to build the deletion service.
  * Use `layer(upstream, ext)` to provide both services.
  */
-import {
-  ClusterError,
-  MessageStorage,
-  ShardingConfig,
-  SqlMessageStorage,
-} from "effect/unstable/cluster";
-import { SqlClient } from "effect/unstable/sql";
-import type { PersistenceError } from "effect/unstable/cluster/ClusterError";
-import type { EntityAddress } from "effect/unstable/cluster";
-import type * as Snowflake from "effect/unstable/cluster/Snowflake";
+import { ClusterError, MessageStorage, ShardingConfig, SqlMessageStorage } from "effect/cluster";
+import { SqlClient } from "effect/sql";
+import type { PersistenceError } from "effect/cluster/ClusterError";
+import type { EntityAddress } from "effect/cluster";
+import type * as Snowflake from "effect/cluster/Snowflake";
 import { Context, Effect, Layer } from "effect";
 import type * as Crypto from "effect/Crypto";
 

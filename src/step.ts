@@ -4,9 +4,9 @@ import {
   Activity as UpstreamActivity,
   DurableDeferred as UpstreamDeferred,
   DurableClock as UpstreamClock,
-} from "effect/unstable/workflow";
-import { WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
-import type { WorkflowEngine } from "effect/unstable/workflow/WorkflowEngine";
+} from "effect/workflow";
+import { WorkflowInstance } from "effect/workflow/WorkflowEngine";
+import type { WorkflowEngine } from "effect/workflow/WorkflowEngine";
 import type { Cause, Duration, Exit, Scope } from "effect";
 import { Array as Arr, Effect, Predicate, Schema } from "effect";
 import {

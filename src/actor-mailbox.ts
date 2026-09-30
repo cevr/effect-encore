@@ -32,14 +32,14 @@
  * acceleration path, not the only delivery mechanism. Tradeoff: latency
  * bounded by `entityMessagePollInterval`, not correctness.
  */
-import type { Rpc } from "effect/unstable/rpc";
-import { ClusterSchema, type Message, MessageStorage, Sharding } from "effect/unstable/cluster";
+import type { Rpc } from "effect/rpc";
+import { ClusterSchema, type Message, MessageStorage, Sharding } from "effect/cluster";
 import type {
   MailboxFull,
   AlreadyProcessingMessage,
   EntityNotAssignedToRunner,
   PersistenceError,
-} from "effect/unstable/cluster/ClusterError";
+} from "effect/cluster/ClusterError";
 import { Context, Data, Effect, Layer } from "effect";
 import { ActorDefect } from "./actor-defect.js";
 

@@ -6,9 +6,9 @@ import type {
   EntityNotAssignedToRunner,
   MailboxFull,
   PersistenceError,
-} from "effect/unstable/cluster/ClusterError";
-import type { Execution } from "effect/unstable/workflow/Workflow";
-import type { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
+} from "effect/cluster/ClusterError";
+import type { Execution } from "effect/workflow/Workflow";
+import type { WorkflowEngine, WorkflowInstance } from "effect/workflow/WorkflowEngine";
 import { Actor } from "../src/index.js";
 import type { MailboxError } from "../src/actor-mailbox.js";
 import type { State as StateValue } from "../src/state.js";

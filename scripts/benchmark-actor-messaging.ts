@@ -1,5 +1,5 @@
 import { Effect, Layer, ManagedRuntime, Schema } from "effect";
-import { ShardingConfig } from "effect/unstable/cluster";
+import { ShardingConfig } from "effect/cluster";
 import { Actor } from "../src/index.js";
 
 const Messaging = Actor.fromEntity("MessagingBenchmark", {

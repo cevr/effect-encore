@@ -1,4 +1,5 @@
-import { Crypto, Effect, Encoding, Predicate, Schema } from "effect";
+import { Crypto, Effect, Predicate, Schema } from "effect";
+import { Hex } from "effect/encoding";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 const decodeJson = Schema.decodeUnknownSync(Schema.Json);
@@ -135,5 +136,5 @@ export const canonicalJsonSha256 = Effect.fn("effect-encore/canonicalJsonSha256"
 ) {
   const crypto = yield* Crypto.Crypto;
   const digest = yield* crypto.digest("SHA-256", textEncoder.encode(canonicalJsonString(value)));
-  return Encoding.encodeHex(digest);
+  return Hex.encode(digest);
 });

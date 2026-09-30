@@ -1,7 +1,7 @@
 import { describe, expect, it, test } from "effect-bun-test";
 import { Context, DateTime, Effect, Layer, PrimaryKey, Schema, SchemaGetter } from "effect";
-import { ClusterSchema, ShardingConfig } from "effect/unstable/cluster";
-import * as DeliverAt from "effect/unstable/cluster/DeliverAt";
+import { ClusterSchema, ShardingConfig } from "effect/cluster";
+import * as DeliverAt from "effect/cluster/DeliverAt";
 import { Actor } from "../src/index.js";
 import { unwrapOpaquePayload } from "../src/internal/invocation-compiler.js";
 

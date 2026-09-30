@@ -1,6 +1,6 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Fiber, Layer as L, Ref, Schema } from "effect";
-import { ClusterWorkflowEngine, MessageStorage, TestRunner } from "effect/unstable/cluster";
+import { ClusterWorkflowEngine, MessageStorage, TestRunner } from "effect/cluster";
 import { Actor, ClientLayer } from "../src/index.js";
 
 // ── Test deletion layer on top of TestRunner ───────────────────────────────

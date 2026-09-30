@@ -18,7 +18,7 @@
 //     Actor.withProtocol((protocol) => protocol.middleware(MyMiddleware)),
 //   )
 
-export { CurrentAddress } from "effect/unstable/cluster/Entity";
+export { CurrentAddress } from "effect/cluster/Entity";
 
 export const defaultSpanAttributes = (actorName: string) =>
   ({

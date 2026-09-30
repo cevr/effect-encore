@@ -6,22 +6,22 @@ import {
   type Sharding,
   type ShardingConfig,
   Snowflake,
-} from "effect/unstable/cluster";
-import { CurrentAddress, CurrentRunnerAddress } from "effect/unstable/cluster/Entity";
+} from "effect/cluster";
+import { CurrentAddress, CurrentRunnerAddress } from "effect/cluster/Entity";
 import type {
   AlreadyProcessingMessage,
   EntityNotAssignedToRunner,
   MailboxFull,
   MalformedMessage,
   PersistenceError,
-} from "effect/unstable/cluster/ClusterError";
-import type { Rpc, RpcClient, RpcGroup } from "effect/unstable/rpc";
+} from "effect/cluster/ClusterError";
+import type { Rpc, RpcClient, RpcGroup } from "effect/rpc";
 import { ActorAddressResolver, ActorAddressResolverLayer } from "./actor-address-resolver.js";
 import { ActorDefect } from "./actor-defect.js";
 import type { MailboxError, ActorMailboxService } from "./actor-mailbox.js";
 import { ActorMailbox, ActorMailboxLayer } from "./actor-mailbox.js";
-import type { Execution } from "effect/unstable/workflow/Workflow";
-import type { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
+import type { Execution } from "effect/workflow/Workflow";
+import type { WorkflowEngine, WorkflowInstance } from "effect/workflow/WorkflowEngine";
 import {
   Context,
   Data,

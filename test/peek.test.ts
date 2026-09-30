@@ -1,6 +1,6 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer, Schema } from "effect";
-import { TestRunner } from "effect/unstable/cluster";
+import { TestRunner } from "effect/cluster";
 import { Actor } from "../src/index.js";
 
 class ProcessError extends Schema.TaggedError<ProcessError>()("ProcessError", {

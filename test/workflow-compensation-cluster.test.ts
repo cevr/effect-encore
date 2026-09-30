@@ -1,6 +1,6 @@
 import { expect, it } from "effect-bun-test";
 import { Effect, Layer, Result, Schema } from "effect";
-import { ClusterWorkflowEngine, TestRunner } from "effect/unstable/cluster";
+import { ClusterWorkflowEngine, TestRunner } from "effect/cluster";
 import { Actor } from "../src/index.js";
 
 class CompensationError extends Schema.TaggedError<CompensationError>()("CompensationError", {

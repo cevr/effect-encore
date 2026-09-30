@@ -2,7 +2,7 @@ import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { BunCrypto } from "@effect/platform-bun";
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 import {
   EntityAddress,
   EntityId,
@@ -10,7 +10,7 @@ import {
   Envelope,
   ShardId,
   ShardingConfig,
-} from "effect/unstable/cluster";
+} from "effect/cluster";
 import { Client, ClientLayer, fromSqlClient } from "../src/index.js";
 import { MessageDeletion } from "../src/storage.js";
 

@@ -1,5 +1,5 @@
-import { CurrentAddress } from "effect/unstable/cluster/Entity";
-import type { EntityAddress } from "effect/unstable/cluster";
+import { CurrentAddress } from "effect/cluster/Entity";
+import type { EntityAddress } from "effect/cluster";
 import { Context, Data, Effect, Layer, Option, Ref, Stream } from "effect";
 import type { Scope } from "effect";
 import * as State from "./state.js";

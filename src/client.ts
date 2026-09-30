@@ -48,15 +48,15 @@ import {
   type Sharding,
   type ShardingConfig,
   Snowflake,
-} from "effect/unstable/cluster";
+} from "effect/cluster";
 import type {
   AlreadyProcessingMessage,
   EntityNotAssignedToRunner,
   MailboxFull,
   MalformedMessage,
   PersistenceError,
-} from "effect/unstable/cluster/ClusterError";
-import type { Rpc, RpcClient } from "effect/unstable/rpc";
+} from "effect/cluster/ClusterError";
+import type { Rpc, RpcClient } from "effect/rpc";
 import {
   ActorAddressResolver,
   ActorAddressResolverLayer,

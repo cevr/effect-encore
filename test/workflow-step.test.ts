@@ -1,6 +1,6 @@
 import { describe, expect, it, test } from "effect-bun-test";
 import { Effect, Exit, Option, Result, Schedule, Schema } from "effect";
-import { Activity } from "effect/unstable/workflow";
+import { Activity } from "effect/workflow";
 import { Actor, PendingCompensation } from "../src/index.js";
 
 // ── Basic workflow with step.run shorthand ─────────────────────────────

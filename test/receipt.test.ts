@@ -1,7 +1,7 @@
 import { describe, expect, test } from "effect-bun-test";
 import { Effect, Exit, Schema } from "effect";
-import type { RpcMessage } from "effect/unstable/rpc";
-import type { MessageStorage } from "effect/unstable/cluster";
+import type { RpcMessage } from "effect/rpc";
+import type { MessageStorage } from "effect/cluster";
 import {
   Defect,
   decodeValue,

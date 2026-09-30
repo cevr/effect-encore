@@ -8,7 +8,7 @@ import {
   Sharding,
   ShardingConfig,
   TestRunner,
-} from "effect/unstable/cluster";
+} from "effect/cluster";
 import { ActorAddressResolverLayer } from "../src/actor-address-resolver.js";
 import { ClientLayer, Actor, SendAndAwaitTimeout } from "../src/index.js";
 

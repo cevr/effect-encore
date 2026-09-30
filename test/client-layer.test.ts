@@ -19,9 +19,9 @@
  */
 import { describe, expect, it } from "effect-bun-test";
 import { Cause, Context, Effect, Exit, Layer, Option, Ref, Schema } from "effect";
-import type { Entity as ClusterEntity } from "effect/unstable/cluster";
-import { Entity, MessageStorage, ShardingConfig, TestRunner } from "effect/unstable/cluster";
-import { SqlClient } from "effect/unstable/sql";
+import type { Entity as ClusterEntity } from "effect/cluster";
+import { Entity, MessageStorage, ShardingConfig, TestRunner } from "effect/cluster";
+import { SqlClient } from "effect/sql";
 import { BunCrypto } from "@effect/platform-bun";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import type { ActorMailboxService } from "../src/actor-mailbox.js";

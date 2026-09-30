@@ -26,7 +26,7 @@
  * `ActorMailbox` would land on a different shard than the consumer expects.
  * This invariant is pinned by `address-resolver.test.ts`.
  */
-import type { Entity as ClusterEntity } from "effect/unstable/cluster";
+import type { Entity as ClusterEntity } from "effect/cluster";
 import {
   ClusterSchema,
   EntityAddress,
@@ -35,8 +35,8 @@ import {
   ShardId,
   Sharding,
   ShardingConfig,
-} from "effect/unstable/cluster";
-import type { Workflow as UpstreamWorkflow } from "effect/unstable/workflow";
+} from "effect/cluster";
+import type { Workflow as UpstreamWorkflow } from "effect/workflow";
 import { Context, Effect, Layer } from "effect";
 
 // ─── Service ────────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ export class ActorAddressResolver extends Context.Service<
   ActorAddressResolverService
 >()("effect-encore/actor-address-resolver/ActorAddressResolver") {}
 
-// ─── Internal: hash math (mirror of effect/unstable/cluster's internal hash) ──
+// ─── Internal: hash math (mirror of effect/cluster's internal hash) ──
 //
 // djb2 + bit-mix, copied from upstream's internal hash function.
 // Replicated rather than imported because the upstream module is internal.

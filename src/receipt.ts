@@ -1,8 +1,8 @@
 import { Cause, Effect, Exit, Option, Schema } from "effect";
-import type { Entity as ClusterEntity } from "effect/unstable/cluster";
-import { MessageStorage } from "effect/unstable/cluster";
-import type { MalformedMessage, PersistenceError } from "effect/unstable/cluster/ClusterError";
-import type { RpcMessage } from "effect/unstable/rpc";
+import type { Entity as ClusterEntity } from "effect/cluster";
+import { MessageStorage } from "effect/cluster";
+import type { MalformedMessage, PersistenceError } from "effect/cluster/ClusterError";
+import type { RpcMessage } from "effect/rpc";
 import { ActorAddressResolver } from "./actor-address-resolver.js";
 
 // ── ExecId — branded execution identifier ────────────────────────────────

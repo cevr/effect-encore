@@ -1,11 +1,11 @@
 /* oxlint-disable effect/noAs, effect/noChainedTypeAssertions, effect/noKnownValueWidening, effect/noUnknownParameters, effect/noUnsafeDictionaryType -- This module is the single erased boundary between upstream Workflow runtime types and Encore's schema-derived actor interface. */
 /* eslint-disable typescript-eslint/no-explicit-any -- upstream Workflow and Rpc dispatch are erased at this compiler boundary */
-import type { PersistenceError } from "effect/unstable/cluster/ClusterError";
-import { Workflow as UpstreamWorkflow } from "effect/unstable/workflow";
+import type { PersistenceError } from "effect/cluster/ClusterError";
+import { Workflow as UpstreamWorkflow } from "effect/workflow";
 import {
   WorkflowEngine,
   layerMemory as workflowEngineLayerMemory,
-} from "effect/unstable/workflow/WorkflowEngine";
+} from "effect/workflow/WorkflowEngine";
 import type { Duration, Schedule, Schema } from "effect";
 import { Cause, Context, Effect, Layer, Option, Predicate, Stream } from "effect";
 import { ActorDefect } from "../actor-defect.js";

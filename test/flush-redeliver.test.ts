@@ -1,6 +1,6 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer, Schema } from "effect";
-import { TestRunner } from "effect/unstable/cluster";
+import { TestRunner } from "effect/cluster";
 import type { Client } from "../src/index.js";
 import { Actor, ClientLayer } from "../src/index.js";
 

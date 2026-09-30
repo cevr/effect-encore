@@ -19,7 +19,7 @@
  * `ActorSenderLayer.layerMemory` is the trivial-case bundle: in-memory
  * storage + default sharding config + the three Tags.
  */
-import { MessageStorage, ShardingConfig, Snowflake } from "effect/unstable/cluster";
+import { MessageStorage, ShardingConfig, Snowflake } from "effect/cluster";
 import { Layer } from "effect";
 import { type ActorAddressResolver, ActorAddressResolverLayer } from "./actor-address-resolver.js";
 import { type ActorMailbox, ActorMailboxLayer } from "./actor-mailbox.js";

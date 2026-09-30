@@ -18,8 +18,8 @@ import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { BunCrypto } from "@effect/platform-bun";
 import { describe, expect, it } from "effect-bun-test";
 import { Cause, Context, Effect, Exit, Layer, Option, Schema } from "effect";
-import { SqlClient } from "effect/unstable/sql";
-import type { Entity as ClusterEntity } from "effect/unstable/cluster";
+import { SqlClient } from "effect/sql";
+import type { Entity as ClusterEntity } from "effect/cluster";
 import {
   EntityAddress,
   EntityId,
@@ -30,9 +30,9 @@ import {
   ShardingConfig,
   Snowflake,
   TestRunner,
-} from "effect/unstable/cluster";
-import * as Headers from "effect/unstable/http/Headers";
-import type { Rpc } from "effect/unstable/rpc";
+} from "effect/cluster";
+import * as Headers from "effect/http/Headers";
+import type { Rpc } from "effect/rpc";
 import { ActorAddressResolver, ActorAddressResolverLayer } from "../src/actor-address-resolver.js";
 import { ActorMailbox, ActorMailboxLayer, MailboxError } from "../src/actor-mailbox.js";
 import { Actor, fromSqlClient } from "../src/index.js";

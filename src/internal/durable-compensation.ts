@@ -1,8 +1,8 @@
 import type { Cause } from "effect";
 import { Cause as CauseModule, Effect, Exit, Match, Option, Schema } from "effect";
-import { Activity, DurableDeferred } from "effect/unstable/workflow";
-import type { Workflow } from "effect/unstable/workflow";
-import { WorkflowEngine, WorkflowInstance } from "effect/unstable/workflow/WorkflowEngine";
+import { Activity, DurableDeferred } from "effect/workflow";
+import type { Workflow } from "effect/workflow";
+import { WorkflowEngine, WorkflowInstance } from "effect/workflow/WorkflowEngine";
 
 export type CompensationDecision = "Retry" | "Stop";
 

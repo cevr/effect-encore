@@ -1,6 +1,6 @@
 # effect-encore
 
-Declarative actors and durable workflows for effect v4 (`effect/unstable/cluster`).
+Declarative actors and durable workflows for effect v4 (`effect/cluster`).
 
 ```bash
 bun add effect-encore
@@ -10,7 +10,7 @@ Peer dependency: `effect >= 4.0.0-beta.106`. This package supports Effect v4 onl
 
 ## Why
 
-Effect's cluster API (`effect/unstable/cluster`) requires custom `Schema.Class`, `Rpc.make`, `RpcGroup`, `Entity.make`, handler wiring, and a hand-rolled client service. Workflows add `Activity`, `DurableDeferred`, `DurableClock`, and `Workflow.make` on top. effect-encore compresses both into a declarative DSL — define entities and workflows as plain objects, get typed actors with execute/send/peek/watch/waitFor and a step DSL for durable orchestration.
+Effect's cluster API (`effect/cluster`) requires custom `Schema.Class`, `Rpc.make`, `RpcGroup`, `Entity.make`, handler wiring, and a hand-rolled client service. Workflows add `Activity`, `DurableDeferred`, `DurableClock`, and `Workflow.make` on top. effect-encore compresses both into a declarative DSL — define entities and workflows as plain objects, get typed actors with execute/send/peek/watch/waitFor and a step DSL for durable orchestration.
 
 ## Core API
 
@@ -340,7 +340,7 @@ Sender-only / ops-only hosts that must NOT register entity managers wire ONE `Cl
 
 ```ts
 import { Layer } from "effect";
-import { MessageStorage, ShardingConfig } from "effect/unstable/cluster";
+import { MessageStorage, ShardingConfig } from "effect/cluster";
 import { ClientLayer } from "effect-encore";
 
 const SenderSupport = ClientLayer.fromConfig.pipe(
@@ -428,7 +428,7 @@ yield * Order.redeliver("ord-1");
 Transform the underlying `RpcGroup` protocol — middleware, annotations, or any protocol-level operation:
 
 ```ts
-import { RpcMiddleware } from "effect/unstable/rpc";
+import { RpcMiddleware } from "effect/rpc";
 
 class AuthMiddleware extends RpcMiddleware.Service<AuthMiddleware>()("AuthMiddleware", {
   error: Schema.Never,

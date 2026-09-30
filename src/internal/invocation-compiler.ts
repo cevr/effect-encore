@@ -7,11 +7,11 @@ import {
   Envelope,
   Message,
   type Snowflake,
-} from "effect/unstable/cluster";
-import * as DeliverAt from "effect/unstable/cluster/DeliverAt";
-import * as Headers from "effect/unstable/http/Headers";
-import type { Rpc } from "effect/unstable/rpc";
-import { Rpc as RpcMod } from "effect/unstable/rpc";
+} from "effect/cluster";
+import * as DeliverAt from "effect/cluster/DeliverAt";
+import * as Headers from "effect/http/Headers";
+import type { Rpc } from "effect/rpc";
+import { Rpc as RpcMod } from "effect/rpc";
 import { ActorDefect } from "../actor-defect.js";
 import type { ExecId } from "../receipt.js";
 import { ExecIdCodec } from "../receipt.js";
@@ -204,7 +204,9 @@ const makeOpaquePayloadSchema = (
   // The public constructor accepts the decoded user payload. The transformed
   // schema itself stores the internal carrier so Envelope.primaryKey can read
   // the cluster protocol before the original codec encodes the wire value.
-  (wrapped as Schema.Top).make = (input, options) => payloadClass.make({ value: input }, options);
+  // Schemas inherit `make` as a lazy getter, so the override is an own property.
+  const make: Schema.Top["make"] = (input, options) => payloadClass.make({ value: input }, options);
+  Object.defineProperty(wrapped, "make", { value: make, enumerable: true });
   return wrapped;
 };
 

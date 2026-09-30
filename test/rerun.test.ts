@@ -1,6 +1,6 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer as L, Ref, Schema } from "effect";
-import { MessageStorage, TestRunner } from "effect/unstable/cluster";
+import { MessageStorage, TestRunner } from "effect/cluster";
 import { ActorAddressResolverLayer } from "../src/actor-address-resolver.js";
 import { Actor, ClientLayer, fromMessageStorage } from "../src/index.js";
 import { MessageDeletion } from "../src/storage.js";

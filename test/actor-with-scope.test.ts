@@ -1,13 +1,7 @@
 import { describe, expect, it } from "effect-bun-test";
 import { Context, Effect, Layer, Schema } from "effect";
-import {
-  EntityAddress,
-  EntityId,
-  EntityType,
-  ShardId,
-  ShardingConfig,
-} from "effect/unstable/cluster";
-import { CurrentAddress } from "effect/unstable/cluster/Entity";
+import { EntityAddress, EntityId, EntityType, ShardId, ShardingConfig } from "effect/cluster";
+import { CurrentAddress } from "effect/cluster/Entity";
 import { Actor } from "../src/index.js";
 
 const TestShardingConfig = ShardingConfig.layer({

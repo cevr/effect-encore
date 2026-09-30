@@ -1,6 +1,6 @@
 import { describe, expect, it, test } from "effect-bun-test";
 import { Context, Effect, Exit, Layer, Schema } from "effect";
-import { WorkflowEngine } from "effect/unstable/workflow";
+import { WorkflowEngine } from "effect/workflow";
 import { Actor } from "../src/index.js";
 
 class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {

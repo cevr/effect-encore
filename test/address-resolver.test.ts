@@ -9,8 +9,8 @@
  */
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer, Schema } from "effect";
-import { ShardingConfig, TestRunner } from "effect/unstable/cluster";
-import type { Entity as ClusterEntity } from "effect/unstable/cluster";
+import { ShardingConfig, TestRunner } from "effect/cluster";
+import type { Entity as ClusterEntity } from "effect/cluster";
 import { ActorAddressResolver, ActorAddressResolverLayer } from "../src/actor-address-resolver.js";
 import { Actor } from "../src/index.js";
 
