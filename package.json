@@ -46,12 +46,12 @@
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.1",
     "@changesets/cli": "^3.0.2",
-    "@effect/platform-bun": "4.0.0-rc.118",
-    "@effect/sql-sqlite-bun": "4.0.0-rc.118",
-    "@effect/tsgo": "^0.41.0",
+    "@effect/platform-bun": "4.0.0",
+    "@effect/sql-sqlite-bun": "4.0.0",
+    "@effect/tsgo": "^0.47.2",
     "@types/bun": "1.4.1",
     "@typescript/native-preview": "^7.0.0-dev.20260707.2",
-    "effect": "4.0.0-rc.118",
+    "effect": "4.0.0",
     "effect-bun-test": "0.3.0",
     "lefthook": "^2.1.12",
     "oxfmt": "^0.66.0",
@@ -61,7 +61,7 @@
     "typescript": "^7.0.2"
   },
   "peerDependencies": {
-    "effect": ">=4.0.0-rc.118 <5"
+    "effect": ">=4.0.0 <5"
   },
   "packageManager": "bun@1.4.0"
 }
