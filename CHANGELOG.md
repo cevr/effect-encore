@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.33.0
+
+### Minor Changes
+
+- [`ac6d27b`](https://github.com/cevr/effect-encore/commit/ac6d27b5de810b00ab1b9a425f5b13c02d13f2e7) Thanks [@cevr](https://github.com/cevr)! - Requires Effect 4.0.0. The peer range is now `>=4.0.0 <5`.
+
 ## 0.32.0
 
 ### Minor Changes
