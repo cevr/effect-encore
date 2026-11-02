@@ -18,7 +18,7 @@ import type { PersistenceError } from "effect/cluster/ClusterError";
 import type { EntityAddress } from "effect/cluster";
 import type * as Snowflake from "effect/cluster/Snowflake";
 import { Context, Effect, Layer } from "effect";
-import type * as Crypto from "effect/Crypto";
+import type { Digest } from "effect/crypto";
 
 // ─── Shape ──────────────────────────────────────────────────────────────────
 
@@ -105,13 +105,13 @@ export const fromSqlClientWithShardingConfig = (
 ): Layer.Layer<
   MessageStorage.MessageStorage | MessageDeletion,
   never,
-  SqlClient.SqlClient | ShardingConfig.ShardingConfig | Crypto.Crypto
+  SqlClient.SqlClient | ShardingConfig.ShardingConfig | Digest.Digest
 > => {
   const tables = sqlTables(options);
   const upstream: Layer.Layer<
     MessageStorage.MessageStorage,
     never,
-    SqlClient.SqlClient | ShardingConfig.ShardingConfig | Crypto.Crypto
+    SqlClient.SqlClient | ShardingConfig.ShardingConfig | Digest.Digest
   > = SqlMessageStorage.layer;
   const encore = Layer.effect(
     MessageDeletion,
@@ -139,5 +139,5 @@ export const fromSqlClient = (
 ): Layer.Layer<
   MessageStorage.MessageStorage | MessageDeletion,
   never,
-  SqlClient.SqlClient | Crypto.Crypto
+  SqlClient.SqlClient | Digest.Digest
 > => fromSqlClientWithShardingConfig(options).pipe(Layer.provide(ShardingConfig.layerDefaults));

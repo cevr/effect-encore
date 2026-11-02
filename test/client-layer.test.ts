@@ -356,8 +356,8 @@ describe("Actor.toTestLayer (inline test-mailbox composition)", () => {
 // `makeTestMailboxImpl` (the same wrapper `toTestLayer` uses).
 // oxlint-disable-next-line effect/noAs -- upstream toLayer erases this test handler map to never
 const directHandlerLayer = ClientActor._meta.entity.toLayer({
-  Process: ({ operation }: { operation: { input: string } }) =>
-    Effect.succeed(`processed: ${operation.input}`),
+  Process: ({ payload }: { payload: { input: string } }) =>
+    Effect.succeed(`processed: ${payload.input}`),
   Fail: () => Effect.fail(ProcessError.make({ message: "bad" })),
 } as never);
 

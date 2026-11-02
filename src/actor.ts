@@ -1519,7 +1519,8 @@ const transformHandlers = (
         const raw = request["payload"];
         const buildOperation = (): Record<string, unknown> => {
           if (opaque) return { _tag: tag, _payload: unwrapOpaquePayload(raw) };
-          return { _tag: tag, ...((raw ?? {}) as object) };
+          if (!Predicate.isObjectOrArray(raw)) return { _tag: tag };
+          return Object.assign(Object.create(Object.getPrototypeOf(raw)), { _tag: tag }, raw);
         };
         const operation = buildOperation();
         const body = handler({ operation, request }) as Effect.Effect<unknown, unknown, unknown>;
