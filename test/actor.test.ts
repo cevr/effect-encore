@@ -220,6 +220,27 @@ describe("OperationHandle dispatch via toTestLayer", () => {
     const execId = Effect.runSync(Counter.Increment.executionId({ amount: 5 }));
     expect(String(execId)).toBe("5\x00Increment\x005");
   });
+
+  effectTest("a second toTestLayer built in the same runtime sends through its own mailbox", () => {
+    const Tally = Actor.fromEntity("Tally", {
+      Add: {
+        payload: { amount: Schema.Finite },
+        success: Schema.Finite,
+        id: (p: { amount: number }) => String(p.amount),
+      },
+    });
+    const TallyTest = Layer.provide(
+      Actor.toTestLayer(Tally, {
+        Add: ({ operation }) => Effect.succeed(operation.amount),
+      }),
+      TestShardingConfig,
+    );
+
+    return Effect.gen(function* () {
+      const execId = yield* Tally.Add.send({ amount: 2 });
+      expect(String(execId)).toBe("2\x00Add\x002");
+    }).pipe(Effect.provide(TallyTest));
+  });
 });
 
 describe("scalar payload", () => {

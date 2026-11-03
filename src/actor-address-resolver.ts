@@ -33,16 +33,17 @@ export class ActorAddressResolver extends Context.Service<
   ActorAddressResolverService
 >()("effect-encore/actor-address-resolver/ActorAddressResolver") {}
 
-const hashOptimize = (n: number): number => (n & 0xbfffffff) | ((n >>> 1) & 0x40000000);
+const mirroredClusterHashOptimize = (n: number): number =>
+  (n & 0xbfffffff) | ((n >>> 1) & 0x40000000);
 
-const hashString = (str: string): number => {
+const mirroredClusterHashString = (str: string): number => {
   let h = 5381;
   let i = str.length;
   while (i) {
     // eslint-disable-next-line typescript-eslint/no-magic-numbers -- djb2
     h = (h * 33) ^ str.charCodeAt(--i);
   }
-  return hashOptimize(h);
+  return mirroredClusterHashOptimize(h);
 };
 
 const computeShardId = (
@@ -50,7 +51,7 @@ const computeShardId = (
   group: string,
   shardsPerGroup: number,
 ): ShardId.ShardId => {
-  const id = Math.abs(hashString(entityId) % shardsPerGroup) + 1;
+  const id = Math.abs(mirroredClusterHashString(entityId) % shardsPerGroup) + 1;
   return ShardId.make(group, id);
 };
 
