@@ -1,3 +1,19 @@
+/**
+ * ActorMailboxLayer.fromConfig behavior coverage.
+ *
+ * codex (2026-05-05) called out that the mailbox path was under-tested: most
+ * `.send` coverage went through `Actor.toTestLayer`, which bypasses storage
+ * by invoking the test rpc client directly. This file pins:
+ *
+ * 1. Persisted gate — non-persisted requests fail loudly (mirror of upstream
+ *    `Sharding.sendOutgoing`'s persisted check).
+ * 2. Success enqueues to `MessageStorage.saveRequest`.
+ * 3. Duplicate primaryKey is treated as enqueued (no error), per codex's
+ *    correction to handle both `SaveResult.Success` and `SaveResult.Duplicate`.
+ * 4. Cross-process delivery — a producer using `fromConfig` writes to the same
+ *    storage that a consumer's poll loop reads from, exercising the path that
+ *    motivated this work.
+ */
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { BunCrypto } from "@effect/platform-bun";
 import { describe, expect, it } from "effect-bun-test";

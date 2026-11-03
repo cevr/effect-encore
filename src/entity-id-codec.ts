@@ -1,3 +1,24 @@
+/**
+ * Collision-safe codec for tuple-shaped entity ids.
+ *
+ * `Entity.toLayer` keys entities by a `string` `entityId`. When the natural
+ * key is a tuple (e.g. `(workspaceId, sessionId, branchId)`), a naive
+ * `${a}:${b}:${c}` join collides whenever a component contains `:`:
+ *
+ *     encode("a:", "x")  === "a::x"
+ *     encode("a", ":x")  === "a::x"   // collision
+ *
+ * `encodeURIComponent` encodes both `:` and `/`, leaving encoded components
+ * free of separators. `entityIdCodec(schema)` validates the tuple shape via
+ * the supplied schema, then encodes/decodes through that buffer.
+ *
+ * @example
+ * const Key = Schema.Tuple(Schema.String, Schema.String, Schema.String);
+ * const codec = Actor.entityIdCodec(Key);
+ * codec.encode(["ws-1", "sess-2", "branch:3"]); // "ws-1:sess-2:branch%3A3"
+ * yield* codec.decode("ws-1:sess-2:branch%3A3"); // ["ws-1", "sess-2", "branch:3"]
+ */
+
 import { Effect, Schema } from "effect";
 
 const SEPARATOR = ":";

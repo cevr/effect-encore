@@ -11,11 +11,24 @@ export class ActorStateUnavailable extends Data.TaggedError(
   readonly entityId: string;
 }> {}
 
+/**
+ * What the registry keys on: entity type plus entity id. A full
+ * `EntityAddress` satisfies it structurally, so callers that already hold one
+ * pass it as-is; callers that only know the type and id need not invent a
+ * `ShardId` to read state.
+ */
 export interface ActorStateKey {
   readonly entityType: string;
   readonly entityId: string;
 }
 
+/**
+ * Registry-internal read-only view of an entity's live state: a current-value
+ * read plus a change stream. Derived from a {@link State.State} by
+ * {@link registerState}; the public state vocabulary is `State<A>`. Not
+ * exported — the package barrel surfaces `State<A>` (see `index.ts`), not this
+ * handle.
+ */
 interface ActorStateHandle<StateValue, Error = never> {
   readonly get: Effect.Effect<StateValue, Error>;
   readonly watch: Stream.Stream<StateValue, Error>;

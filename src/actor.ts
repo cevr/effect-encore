@@ -88,6 +88,11 @@ import type {
 
 export type { WorkflowActor, WorkflowDef } from "./internal/workflow-actor.js";
 
+/**
+ * Raised by `Op.sendAndAwait` when the entity's reply does not become terminal
+ * within the required `timeout`. Carries the `entityType` + `execId` of the
+ * awaited operation and the normalized `timeout` that elapsed.
+ */
 export class SendAndAwaitTimeout extends Data.TaggedError(
   "effect-encore/actor/SendAndAwaitTimeout",
 )<{
@@ -114,8 +119,32 @@ const assembleActorRuntime = <Base, State, Control, E, R, StateR, ControlR>(
 ): Layer.Layer<Base | State | Control, E, R | Exclude<StateR, Base> | Exclude<ControlR, Base>> =>
   Layer.mergeAll(base, Layer.provide(state, base), Layer.provide(control, base));
 
+/**
+ * Result of an entity operation's `id` fn. Either:
+ * - `string` — entityId AND primaryKey use this value (the common case).
+ * - `{entityId, primaryKey?}` — divergent case where the dedup key differs
+ *   from the mailbox address (e.g., PagerDuty: dedup_key for routing, but
+ *   `${dedup_key}:${event_action}` for dedup so distinct event actions on
+ *   the same key get distinct execIds). primaryKey defaults to entityId
+ *   when omitted.
+ *
+ * Defined in the internal Operation module and re-exported here.
+ */
 export type { EntityIdReturn, OperationDef, OperationDefs };
 
+/**
+ * Requirement bundle for hosts that send messages to actors.
+ *
+ * Producer-side `.send` composes into a single transport Tag — the deep
+ * `Client` seam (ADR-0002) — which owns the
+ * wire-envelope builder and the mailbox/resolver/snowflake strategy internally.
+ * Use `Actor.SenderContext` in `R` instead of re-listing the former
+ * `MessageStorage | ActorAddressResolver | Sharding` triad at every producer-op
+ * signature.
+ *
+ * Wire ONE `Client.layer.*` adapter (`fromConfig` / `fromSharding` / `memory` /
+ * `test`) at the host boundary to satisfy it.
+ */
 export type SenderContext = Client;
 
 type ReservedKeys =
@@ -281,6 +310,19 @@ export interface HandlerOptions {
   readonly mailboxCapacity?: number | "unbounded";
 }
 
+/**
+ * Options for `Actor.toLayer` / `Actor.toTestLayer` that extend
+ * `HandlerOptions` with a per-call scope builder.
+ *
+ * `withScope` runs before every handler invocation. It receives the resolved
+ * `EntityAddress` for the activation and returns a `Context` that is merged
+ * into the handler's runtime via `Effect.provide`. Tags declared in that
+ * Context become available to handlers via `yield* Tag`.
+ *
+ * Use this to derive per-entity services from the entity id (e.g. parse a
+ * tuple key, then build a workspace-scoped Context) without threading them
+ * as handler parameters or polluting the actor's outer Layer requirements.
+ */
 export interface ToLayerOptions<S = never, ES = never, RS = never> extends HandlerOptions {
   readonly withScope?: (
     address: EntityAddress.EntityAddress,
@@ -361,8 +403,18 @@ export interface ActorControlClientService<Name extends string> {
 }
 
 export interface ActorControlClient {
+  /**
+   * Stop accepting more pending work for this actor id by clearing its mailbox.
+   * In-flight handler cancellation depends on cluster passivation support.
+   */
   readonly interrupt: (entityId: string) => Effect.Effect<void, PersistenceError>;
+  /**
+   * Clear pending persisted work for this actor id.
+   */
   readonly flush: (entityId: string) => Effect.Effect<void, PersistenceError>;
+  /**
+   * Mark persisted pending work for this actor id as redeliverable.
+   */
   readonly redeliver: (entityId: string) => Effect.Effect<void, PersistenceError>;
 }
 
@@ -396,6 +448,14 @@ export const provideLayerBuildContext = <A, E, R>(
     ),
   );
 
+/**
+ * The layer-build context is captured wherever the actor layer is built. When
+ * that happens inside another actor's handler (a nested composition root), the
+ * fiber context carries that outer actor's `CurrentAddress`, runner address,
+ * state registry, and scope. Those must not shadow the values the entity
+ * manager provides to the handler build, or the inner actor would read the
+ * outer entity's identity.
+ */
 function omitLayerBuildContextExclusions<R>(
   context: Context.Context<Exclude<R, ActorLayerBuildContextExclusions>>,
 ): Context.Context<Exclude<R, ActorLayerBuildContextExclusions>>;
@@ -410,6 +470,17 @@ function omitLayerBuildContextExclusions<R>(
   )(context);
 }
 
+/**
+ * Typed state declaration for an entity. When supplied via `fromEntity`'s
+ * options, `getState` / `watchState` / `waitForState` infer their return
+ * State and Error channels — callers no longer pass `<State>` generics at
+ * every call site.
+ *
+ * The `schema` is type-only — it is not used at runtime to validate the
+ * registered handle's emissions. Encore relies on the handle returning the
+ * declared type honestly; treat the schema as a typing contract, not a
+ * boundary parse.
+ */
 export interface ActorStateDef {
   readonly schema?: Schema.Top;
   readonly error?: Schema.Top;
@@ -431,6 +502,11 @@ export interface FromEntityOptions<S extends ActorStateDef | void = void> {
   readonly state?: S;
 }
 
+/**
+ * `PayloadInput<C>` is the user-facing payload type for an operation. For
+ * struct fields, it's the readonly struct; for opaque/scalar payload, it's
+ * the raw scalar; for empty payload, it's `void`.
+ */
 export type PayloadInput<C extends OperationDef> = C extends {
   readonly payload: infer F extends Schema.Struct.Fields;
 }
@@ -443,6 +519,12 @@ export type PayloadInput<C extends OperationDef> = C extends {
       ? Schema.Schema.Type<P>
       : void;
 
+/**
+ * Per-operation handle. The dispatch surface for a single tag — replaces the
+ * old `Actor.ref(id)` + `Actor.Op({...})` value-construction pattern with a
+ * payload-only API. The `id` fn on the OperationDef is invoked internally to
+ * derive `{entityId, primaryKey}` for routing and dedup.
+ */
 export interface OperationHandle<
   Name extends string,
   Tag extends string,
@@ -469,6 +551,28 @@ export interface OperationHandle<
     | EntityNotAssignedToRunner,
     Client
   >;
+  /**
+   * Fire a durable `send` and then poll the persisted reply until it becomes
+   * terminal, returning the applied result. Composes `send` + `peek` so a
+   * sender-only host can block on an entity's outcome.
+   *
+   * Semantics:
+   * 1. Works **without local Sharding** — usable from a `Client.layer.memory` /
+   *    `Client.layer.fromConfig` sender host (the `Client` transport seam +
+   *    `MessageStorage` for the `peek` loop), unlike `.execute` which requires
+   *    `ActorClientService`.
+   * 2. Dedup: if a prior `send` with the same `primaryKey` already has a
+   *    terminal persisted reply, the mailbox dedups and `sendAndAwait` returns
+   *    that persisted result immediately (matches `send`/`peek` semantics).
+   * 3. Ops with a future `deliverAt` poll until delivery + processing — the
+   *    `timeout` must exceed the `deliverAt` delay.
+   * 4. The default poll interval is 200ms;
+   *    override via `schedule`.
+   *
+   * A persisted `Failure` reply surfaces in the error channel; `Defect` and
+   * `Interrupted` replies die; exceeding the (required) `timeout` fails with
+   * `SendAndAwaitTimeout`.
+   */
   readonly sendAndAwait: (
     payload: PayloadInput<C>,
     options: {
@@ -549,6 +653,16 @@ export type EntityActor<
       ActorStateClientService<Name>,
       ActorStateClient<State, StateError>
     >;
+    /**
+     * Stop accepting more work for this entity — clears the pending mailbox.
+     * Distinct intent from `flush` ("clean slate"): use `interrupt` when you
+     * want the entity to stop processing new messages but want to preserve
+     * the conceptual "I asked the actor to stop" semantics.
+     *
+     * Programmatic in-flight fiber cancellation requires `Sharding.passivate`,
+     * which is not yet a public API in effect-cluster. In practice, in-flight
+     * handlers run to completion; only queued/pending work is cleared.
+     */
     readonly interrupt: (entityId: string) => Effect.Effect<void, PersistenceError, Client>;
     readonly flush: (actorId: string) => Effect.Effect<void, PersistenceError, Client>;
     readonly redeliver: (actorId: string) => Effect.Effect<void, PersistenceError, Client>;

@@ -1,3 +1,28 @@
+/**
+ * `State` is a typed view over an entity's state cell, plus a
+ * subscribable stream of every change.
+ *
+ * Unlike a `Ref`, `State` has no in-memory cell of its own — the
+ * backing store the `read`/`write` closures close over is the source
+ * of truth. Reads decode the live store on demand; writes encode and
+ * overwrite it. A `PubSub<A>` backs {@link changes} and is fed by every
+ * write routed through `State` (and may be fed externally via
+ * {@link publish}, which serializes through the same lock, so
+ * subscribers see committed changes initiated outside `State` in
+ * write order).
+ *
+ * Read and write are Effect-typed so schemas with asynchronous
+ * transforms (or service requirements) are supported. `update` and
+ * `modify` serialize through a per-`State` semaphore so read/apply/
+ * write triples are atomic across fibers; `set` shares the same lock
+ * so all writes are linearized.
+ *
+ * The PubSub uses replay = 1, matching `SubscriptionRef`: a new
+ * subscriber immediately sees the most recent value.
+ *
+ * Modeled on rivet's `rivetkit-typescript/packages/effect/src/State.ts`.
+ * Rivet's API is a DX target. Its runtime is not part of this module.
+ */
 import {
   Effect,
   Inspectable,
@@ -19,6 +44,14 @@ const Changes = Symbol.for("effect-encore/state/State/changes");
 const ChangesPubSub = Symbol.for("effect-encore/state/State/changesPubSub");
 const Lock = Symbol.for("effect-encore/state/State/lock");
 
+/**
+ * A view over a state cell with a subscribable change stream.
+ *
+ * - `A` — the value type
+ * - `E` — the read/write closures' failure type (e.g. a schema's
+ *         `SchemaError` when read/write decode/encode against a schema)
+ * - `R` — the read/write closures' service requirements
+ */
 export interface ReadableState<A, E = never, R = never>
   extends Pipeable.Pipeable, InspectableInterface {
   readonly [Read]: Effect.Effect<A, E, R>;
@@ -69,6 +102,13 @@ function makeReadableStateObject(): object {
   return Object.create(ReadableProto);
 }
 
+/**
+ * Creates a read-only state view over an existing source of truth.
+ *
+ * The constructor does not read or copy the current value. It preserves the
+ * supplied read and change stream, including their error and requirement
+ * channels. Use it when another service owns state mutation.
+ */
 export const makeReadable = <A, E, R>(
   read: Effect.Effect<A, E, R>,
   changes: Stream.Stream<A, E, R>,
@@ -81,6 +121,17 @@ export const makeReadable = <A, E, R>(
   return self;
 };
 
+/**
+ * Creates a `State` from `read` and `write` closures over the
+ * underlying store. The closures are responsible for any
+ * encoding/decoding; `State` itself is schema-agnostic.
+ *
+ * The current value (per `read()`) is published to the pubsub on
+ * construction so any subscription obtained later replays it.
+ *
+ * The PubSub is not explicitly shut down — it's reclaimed by GC when
+ * the `State` and any subscribers become unreachable.
+ */
 export const make = Effect.fnUntraced(function* <A, E, R>(
   read: Effect.Effect<A, E, R>,
   write: (value: A) => Effect.Effect<void, E, R>,
@@ -99,8 +150,15 @@ export const make = Effect.fnUntraced(function* <A, E, R>(
   return self;
 });
 
+/**
+ * Reads the current value.
+ */
 export const get = <A, E, R>(self: ReadableState<A, E, R>): Effect.Effect<A, E, R> => self[Read];
 
+/**
+ * Replaces the value, then publishes it to {@link changes}. Serialized
+ * with `update` / `modify` so writes happen in invocation order.
+ */
 export const set: {
   <A>(value: A): <E, R>(self: State<A, E, R>) => Effect.Effect<void, E, R>;
   <A, E, R>(self: State<A, E, R>, value: A): Effect.Effect<void, E, R>;
@@ -108,6 +166,11 @@ export const set: {
   Semaphore.withPermit(self[Lock], commit(self, value)),
 );
 
+/**
+ * Updates the value by applying `f` to the current value, then
+ * publishes the new value to {@link changes}. The read/apply/write
+ * triple is atomic across fibers.
+ */
 export const update: {
   <A>(fn: (a: A) => A): <E, R>(self: State<A, E, R>) => Effect.Effect<void, E, R>;
   <A, E, R>(self: State<A, E, R>, fn: (a: A) => A): Effect.Effect<void, E, R>;
@@ -118,6 +181,10 @@ export const update: {
   ),
 );
 
+/**
+ * Updates the value by applying `f`, publishes it, and returns the new
+ * value. The read/apply/write triple is atomic across fibers.
+ */
 export const updateAndGet: {
   <A>(fn: (a: A) => A): <E, R>(self: State<A, E, R>) => Effect.Effect<A, E, R>;
   <A, E, R>(self: State<A, E, R>, fn: (a: A) => A): Effect.Effect<A, E, R>;
@@ -131,6 +198,11 @@ export const updateAndGet: {
   ),
 );
 
+/**
+ * Atomically replaces the value with the second element of `f(prev)`,
+ * publishes it, and returns the first. The read/apply/write triple is
+ * atomic across fibers.
+ */
 export const modify: {
   <A, Output>(
     fn: (a: A) => readonly [Output, A],
@@ -154,9 +226,25 @@ export const modify: {
     ),
 );
 
+/**
+ * Stream of every value published to this `State`. New subscribers
+ * immediately see the most recent value (replay = 1), then every
+ * subsequent publish.
+ */
 export const changes = <A, E, R>(self: ReadableState<A, E, R>): Stream.Stream<A, E, R> =>
   self[Changes];
 
+/**
+ * Publish a value to the change stream as an `Effect`. Does not write
+ * the underlying store. Acquires the per-`State` semaphore so an
+ * external feed (e.g. a future durable-store change callback) can
+ * publish committed changes WITHOUT interleaving with an in-flight
+ * `set`/`update`/`modify` — the change-stream order then matches the
+ * write order. Mirrors Rivet's adapter, which serializes its
+ * `onStateChange` publication under the same lock
+ * (`ActorStateAdapter.ts`). Use {@link publishUnsafe} for the
+ * un-serialized fast path.
+ */
 export const publish: {
   <A>(value: A): <E, R>(self: State<A, E, R>) => Effect.Effect<boolean>;
   <A, E, R>(self: State<A, E, R>, value: A): Effect.Effect<boolean>;
@@ -164,11 +252,30 @@ export const publish: {
   Semaphore.withPermit(self[Lock], publishDirect(self, value)),
 );
 
+/**
+ * Synchronous, UN-serialized variant of {@link publish}. Returns `true`
+ * when the publish succeeded, `false` if the pubsub is shut down. Does
+ * not acquire the semaphore — callers are responsible for ordering.
+ */
 export const publishUnsafe = <A, E, R>(self: State<A, E, R>, value: A): boolean =>
   PubSub.publishUnsafe(self[ChangesPubSub], value);
 
+/**
+ * Publishes to the change stream WITHOUT acquiring the semaphore.
+ * Internal — every caller already holds the permit (`commit` holds it
+ * for the whole write/apply/write/publish sequence; `publish` acquires
+ * it before delegating here), so the change-stream order is consistent
+ * with the write order.
+ */
 const publishDirect = <A, E, R>(self: State<A, E, R>, value: A): Effect.Effect<boolean> =>
   PubSub.publish(self[ChangesPubSub], value);
 
+/**
+ * Writes the value to the backing store and, on success, publishes it
+ * to the change stream so {@link changes} observes every committed
+ * write. A failed `write` does not publish. Internal — callers hold the
+ * semaphore, so the write/publish pair is ordered with respect to other
+ * mutators (and to {@link publish}, which acquires the same lock).
+ */
 const commit = <A, E, R>(self: State<A, E, R>, value: A): Effect.Effect<void, E, R> =>
   Effect.flatMap(self[Write](value), () => Effect.asVoid(publishDirect(self, value)));

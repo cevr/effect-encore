@@ -114,6 +114,7 @@ const pendingForStep = (
     ),
   );
 
+/** Read the exact failed compensation attempt that awaits an operator decision. */
 export const pendingCompensation = <
   Name extends string,
   Payload extends Workflow.AnyStructSchema,

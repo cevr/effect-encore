@@ -110,6 +110,7 @@ export const PeekResultSchema = <Success extends Schema.Top, Error extends Schem
     Schema.TaggedStruct("Suspended", {}),
   ]);
 
+/** The success and error schema slots used to decode stored replies. */
 export interface ReplyDef {
   readonly success?: Schema.Top;
   readonly error?: Schema.Top;
@@ -126,6 +127,11 @@ function eraseSchemaDecodingServices(
   return effect;
 }
 
+/**
+ * Decode `value` through `schema` if present. On decode failure the raw value
+ * is returned unchanged (the reply was already validated on the wire; this is
+ * a best-effort typed-view, not a gate).
+ */
 export const decodeValue = <Input>(
   schema: Schema.Top | void,
   value: Input,
@@ -138,6 +144,10 @@ export const decodeValue = <Input>(
   );
 };
 
+/**
+ * Map the encoded reply Exit (entity path) to a `PeekResult`, decoding the
+ * success/error payload through the operation's schema slots when available.
+ */
 export const mapExitToPeekResult = (
   exit: RpcMessage.ExitEncoded<unknown, unknown>,
   def?: ReplyDef,
@@ -161,6 +171,11 @@ export const mapExitToPeekResult = (
   }
 };
 
+/**
+ * Map a real `Exit.Exit` (workflow poll path) to a `PeekResult` by walking its
+ * `Cause` tree. Unlike the entity path this Exit is not encoded, so the error
+ * is read straight off the cause rather than schema-decoded.
+ */
 export const mapExitToWorkflowPeekResult = <A, E>(exit: Exit.Exit<A, E>): PeekResult<A, E> => {
   if (Exit.isSuccess(exit)) {
     return Success(exit.value);
