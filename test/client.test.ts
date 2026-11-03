@@ -119,7 +119,6 @@ describe("OperationHandle.send", () => {
     Effect.gen(function* () {
       const execId = yield* CastActor.Process.send({ input: "data" });
       expect(execId).toBeTypeOf("string");
-      // entityId === primaryKey === "data" (from the id fn)
       expect(String(execId)).toBe("data\x00Process\x00data");
     }),
   );
@@ -148,12 +147,8 @@ describe("OperationHandle.watch", () => {
 
   it.scopedLive("emits Pending then Success when handler completes, then completes stream", () =>
     Effect.gen(function* () {
-      // Kick off the handler via the client to seed the persistence layer.
       const makeClient = yield* CastActor._meta.entity.client;
-      const client = makeClient(
-        // entityId === primaryKey === "watch-test" via the id fn
-        "watch-test",
-      );
+      const client = makeClient("watch-test");
       yield* client.Process({ input: "watch-test" }, { discard: true });
 
       const result = yield* CastActor.Process.watch(

@@ -40,7 +40,6 @@ describe("OperationHandle.peek", () => {
 
   it.scopedLive("returns Success with decoded value when handler succeeds", () =>
     Effect.gen(function* () {
-      // Seed via the lower-level cluster client to drive handler completion.
       const makeClient = yield* PeekableActor._meta.entity.client;
       const client = makeClient("hello");
       yield* client.Process({ input: "hello" });

@@ -16,7 +16,6 @@ const legacyCanonicalJsonString = (input: Schema.Json): string => {
 
 const value: Schema.Json = {
   z: -0,
-  // UTF-16 order puts the emoji surrogate before U+FFFF.
   a: { "\uffff": 2, "😀": 1, a: 3 },
   list: [{ b: 2, a: 1 }],
 };

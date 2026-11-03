@@ -1,12 +1,3 @@
-/**
- * Parity test: ActorAddressResolverLayer.fromConfig vs ActorAddressResolverLayer.fromSharding
- * MUST produce identical EntityAddress for the same (entityId, shardGroup).
- *
- * This pins the djb2 + bit-mix replication in `actor-address-resolver.ts`
- * against upstream's `Sharding.getShardId`. If they ever drift, producer-side
- * dispatch via ActorMailbox would land on a different shard than the consumer
- * expects.
- */
 import { describe, expect, it } from "effect-bun-test";
 import { Effect, Layer, Schema } from "effect";
 import { ShardingConfig, TestRunner } from "effect/cluster";
@@ -23,25 +14,19 @@ const TestActor = Actor.fromEntity("ParityActor", {
   },
 });
 
-// fromConfig only needs ShardingConfig — provide it directly. TestRunner.layer
-// consumes ShardingConfig internally and does not expose it outward, so we use
-// the plain ShardingConfig.layer() here. Both layers see the same default
-// config so shard math is identical.
 const FromConfigCluster = ActorAddressResolverLayer.fromConfig.pipe(
   Layer.provide(ShardingConfig.layer()),
 );
-// fromSharding delegates to live Sharding, which TestRunner.layer provides.
 const FromShardingCluster = ActorAddressResolverLayer.fromSharding.pipe(
   Layer.provideMerge(TestRunner.layer),
 );
 
-// Cover a spread of entityId shapes so a regression in djb2 surfaces.
 const entityIds = [
   "a",
   "abc",
   "order-12345",
   "tenant:42:org:abc",
-  "🌮", // multi-byte
+  "🌮",
   "x".repeat(64),
   "0",
   "00000000-0000-0000-0000-000000000000",

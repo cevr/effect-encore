@@ -3,13 +3,6 @@ import { Effect, Layer, Schema } from "effect";
 import { TestRunner } from "effect/cluster";
 import { Actor } from "../src/index.js";
 
-// `interrupt(entityId)` is wired to the same `clearAddress` semantics as
-// `flush` — it stops accepting new work for the entity by clearing the
-// pending mailbox. Programmatic in-flight fiber cancellation requires
-// upstream `Sharding.passivate`, which is not yet a public API. So:
-// - Pending/persisted messages are cleared.
-// - In-flight handlers run to completion (documented behavior).
-
 describe("Actor.interrupt", () => {
   it.scopedLive("clears pending persisted messages for the target entity", () => {
     const InterruptActor = Actor.fromEntity("InterruptActor", {
@@ -87,7 +80,6 @@ describe("Actor.interrupt", () => {
     return Effect.gen(function* () {
       yield* InterruptActor.interrupt("never-touched");
       yield* InterruptActor.interrupt("never-touched");
-      // No throw — idempotent.
       expect(true).toBe(true);
     }).pipe(Effect.provide(handlers));
   });

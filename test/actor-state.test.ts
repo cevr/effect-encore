@@ -89,9 +89,6 @@ const CoercedLayer = Layer.provide(
   Actor.toTestLayer(
     Coerced,
     Effect.gen(function* () {
-      // The registered state's `get` returns the pre-decode wire value
-      // ("42"); the registry decodes it through `state.schema`
-      // (`Schema.NumberFromString`) on read.
       // oxlint-disable-next-line effect/noAs, effect/noChainedTypeAssertions -- The encoded-state fixture must cross the registry's decoded number type to verify string decoding.
       const ref = yield* SubscriptionRef.make("42" as unknown as number);
       const state = yield* Actor.State.make(SubscriptionRef.get(ref), (value) =>
@@ -168,11 +165,6 @@ describe("Actor state protocol", () => {
 
   test("the state registry is reachable from the barrel without an actor client", () =>
     Effect.gen(function* () {
-      // A consumer that sits *beneath* an actor cannot yield that actor's
-      // `State` client to enumerate entities: the actor is built from the layer
-      // that would then depend on it. `ActorStateRegistry` is merged into the
-      // consumer's context by `toLayer`, so reading it directly is the
-      // cycle-free route — but only if the Tag is exported.
       const makeRef = yield* Stateful.Context;
       const ref = yield* makeRef("registry-direct");
       yield* ref.execute(Stateful.Increment.make({ id: "registry-direct", amount: 1 }));
@@ -184,9 +176,6 @@ describe("Actor state protocol", () => {
 
   test("reads registered state by entity type and id without a shard", () =>
     Effect.gen(function* () {
-      // The registry keys on type + id. A consumer that enumerated ids through
-      // `listStateEntityIds` holds no `ShardId`, so `stateOf` accepts the pair
-      // directly; a full `EntityAddress` still satisfies the same key.
       const makeRef = yield* Stateful.Context;
       const ref = yield* makeRef("keyed");
       yield* ref.execute(Stateful.Increment.make({ id: "keyed", amount: 7 }));

@@ -5,7 +5,6 @@ import * as DeliverAt from "effect/cluster/DeliverAt";
 import { Actor } from "../src/index.js";
 import { unwrapOpaquePayload } from "../src/internal/invocation-compiler.js";
 
-// Fixed instant: these cases assert DeliverAt/PrimaryKey wiring, not the clock.
 const FIXED_EPOCH_MS = 1_700_000_000_000;
 
 const TestShardingConfig = ShardingConfig.layer({
@@ -155,7 +154,6 @@ describe("Actor.fromEntity", () => {
     const allKeys = Object.keys(Counter);
     const infrastructureKeys = allKeys.filter((k) => !operationNames.has(k));
 
-    // Every infrastructure key should be blocked by the reserved check
     for (const key of infrastructureKeys) {
       expect(() =>
         // oxlint-disable-next-line effect/noAs -- The generated invalid reserved-name fixture must bypass the public definition type to verify the runtime guard.
@@ -187,7 +185,6 @@ describe("OperationHandle dispatch via toTestLayer", () => {
     Effect.gen(function* () {
       const execId = yield* Counter.Increment.send({ amount: 7 });
       expect(execId).toBeTypeOf("string");
-      // entityId === primaryKey === String(amount) === "7"
       expect(String(execId)).toBe("7\x00Increment\x007");
     }),
   );
@@ -586,8 +583,6 @@ describe("deliverAt", () => {
 });
 
 describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () => {
-  // An Invocation derives identity once from the original payload. The public
-  // Operation value also keeps the payload prototype for value dispatch.
   class RoutingKey extends Schema.Class<RoutingKey>("test/RoutingKey")({
     region: Schema.String,
     seq: Schema.Finite,
@@ -605,7 +600,6 @@ describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () 
       payload: RoutingKey,
       success: Schema.String,
       persisted: true,
-      // id depends on the class instance (prototype method), NOT a bare field.
       id: (p: RoutingKey) => p.routingKey(),
     },
   });
@@ -623,10 +617,7 @@ describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () 
     Effect.gen(function* () {
       const payload = RoutingKey.make({ region: "us", seq: 7 });
       const fromSend = yield* Routed.Process.send(payload);
-      // entityId === primaryKey === "us-7" (from routingKey()).
       expect(String(fromSend)).toBe("us-7\x00Process\x00us-7");
-      // `executionId` and `peek` share the same `execId(payload)` derivation, so
-      // matching `executionId` is exactly the parity `peek` relies on.
       const fromCompute = yield* Routed.Process.executionId(payload);
       expect(String(fromSend)).toBe(String(fromCompute));
     }),
@@ -638,7 +629,6 @@ describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () 
       Effect.gen(function* () {
         const payload = RoutingKey.make({ region: "us", seq: 7 });
         const makeRef = yield* Routed.Context;
-        // entityId === routingKey() === "us-7", so the ref binds to that entity.
         const ref = yield* makeRef("us-7");
         const op = Routed.Process.make(payload);
         expect(Object.getPrototypeOf(op)).toBe(RoutingKey.prototype);
@@ -658,9 +648,7 @@ describe("Actor.withProtocol", () => {
 
     expect(transformed._tag).toBe("EntityActor");
     expect(transformed._meta.name).toBe("Counter");
-    // New entity — not the same reference
     expect(transformed._meta.entity).not.toBe(original);
-    // Operations are preserved
     expect(Object.keys(transformed._meta.definitions)).toEqual(["Increment", "GetCount"]);
   });
 

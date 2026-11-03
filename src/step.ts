@@ -36,11 +36,7 @@ export type { CompensationDecisionError };
 export const CompensationDecision = CompensationDecisionSchema;
 export type CompensationDecision = CompensationDecisionType;
 
-// ── WorkflowSignalToken ─────────────────────────────────────────────────
-
 export type WorkflowSignalToken = UpstreamDeferred.Token;
-
-// ── WorkflowSignal ──────────────────────────────────────────────────────
 
 export interface WorkflowSignal<
   Payload extends UpstreamWorkflow.AnyStructSchema,
@@ -92,8 +88,6 @@ export interface WorkflowSignal<
   >;
 }
 
-// ── Signal definition types ────────────────────────────────────────────
-
 export interface SignalDef<
   S extends Schema.Top = typeof Schema.Void,
   E extends Schema.Top = typeof Schema.Never,
@@ -103,8 +97,6 @@ export interface SignalDef<
 }
 
 export type SignalDefs = Record<string, SignalDef<Schema.Top, Schema.Top>>;
-
-// ── Step run options ────────────────────────────────────────────────────
 
 export interface StepRunOptions<
   S extends Schema.Top = typeof Schema.Void,
@@ -173,13 +165,10 @@ function exposeStepRace(race: ErasedStepRace): ErasedStepRace {
   return race;
 }
 
-// ── WorkflowStepContext ─────────────────────────────────────────────────
-
 export interface WorkflowStepContext<WorkflowError extends Schema.Top> {
   readonly executionId: string;
 
   readonly run: {
-    // Full options
     <
       S extends Schema.Top = typeof Schema.Void,
       E extends Schema.Top = typeof Schema.Never,
@@ -199,7 +188,6 @@ export interface WorkflowStepContext<WorkflowError extends Schema.Top> {
       | WorkflowInstance
     >;
 
-    // Shorthand with undo — infallible only
     <A, R, R2>(
       id: string,
       execute: Effect.Effect<A, never, R>,
@@ -216,7 +204,6 @@ export interface WorkflowStepContext<WorkflowError extends Schema.Top> {
       | WorkflowInstance
     >;
 
-    // Shorthand — infallible only
     <A, R>(
       id: string,
       execute: Effect.Effect<A, never, R>,
@@ -303,8 +290,6 @@ const encodeSignalName = Schema.encodeSync(
   Schema.fromJsonString(Schema.Tuple([Schema.Literals(["Signal"]), Schema.String])),
 );
 
-// ── makeSignal ──────────────────────────────────────────────────────────
-
 export const makeSignal = <
   Name extends string,
   Payload extends UpstreamWorkflow.AnyStructSchema,
@@ -349,8 +334,6 @@ export const makeSignal = <
   };
 };
 
-// ── makeWorkflowExecution ───────────────────────────────────────────────
-
 export const makeWorkflowExecution = <
   Name extends string,
   Payload extends UpstreamWorkflow.AnyStructSchema,
@@ -366,7 +349,6 @@ export const makeWorkflowExecution = <
     second: Second,
     third?: Third,
   ): Effect.Effect<any, any, any> => {
-    // Arity 2 + second is plain object with `do` → full options
     if (Predicate.hasProperty(second, "do")) {
       const opts = restoreStepRunOptions<WorkflowError["Type"]>(second);
       const activity = UpstreamActivity.make({
@@ -389,7 +371,6 @@ export const makeWorkflowExecution = <
       return activity;
     }
 
-    // Arity 3 + third is function → shorthand with undo
     if (Predicate.isFunction(third)) {
       if (!Effect.isEffect(second)) {
         return Effect.die(new Error("effect-encore/step.run: execute must be an Effect"));
@@ -406,7 +387,6 @@ export const makeWorkflowExecution = <
       return compensation.add(id, activity, undo);
     }
 
-    // Arity 2 + second is Effect → shorthand
     if (!Effect.isEffect(second)) {
       return Effect.die(new Error("effect-encore/step.run: execute must be an Effect"));
     }

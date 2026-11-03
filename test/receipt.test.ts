@@ -163,8 +163,6 @@ describe("decodeValue", () => {
   });
 
   test("falls back to the raw value when the schema rejects it", () => {
-    // best-effort typed view: a decode failure surfaces the raw wire value,
-    // it does NOT throw (the reply was already validated on the wire).
     expect(Effect.runSync(decodeValue(Schema.Finite, "not-a-number"))).toBe("not-a-number");
   });
 });
@@ -241,8 +239,6 @@ describe("mapExitToWorkflowPeekResult (workflow — real Exit.Exit)", () => {
 });
 
 describe("entity vs workflow Exit-classification parity", () => {
-  // The two await paths classify the same logical outcome identically: the
-  // entity path off an encoded ExitEncoded, the workflow path off a real Exit.
   test("Success → Success on both paths", () => {
     const entity = Effect.runSync(mapExitToPeekResult({ _tag: "Success", value: 7 }));
     const workflow = mapExitToWorkflowPeekResult(Exit.succeed(7));
@@ -269,8 +265,6 @@ describe("entity vs workflow Exit-classification parity", () => {
   });
 });
 
-// Pin the stored-reply reader requirements. Actor layers must provide exactly
-// MessageStorage and ActorAddressResolver for this operation.
 type _PeekRIsStorageAndResolver =
   ReturnType<typeof peekStoredReply> extends Effect.Effect<
     PeekResult,

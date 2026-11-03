@@ -30,8 +30,6 @@ describe("ExecIdCodec", () => {
 
     test("empty segments", () => {
       const components = { entityId: "", tag: "", primaryKey: "" };
-      // empty execId has no separators → no-separator fallback, NOT a round-trip
-      // of all-empty; pin the actual encoded form's decode instead.
       const encoded = ExecIdCodec.encode(components);
       expect(String(encoded)).toBe("\x00\x00");
       expect(ExecIdCodec.decode(encoded)).toEqual({
@@ -42,8 +40,6 @@ describe("ExecIdCodec", () => {
     });
 
     test("primaryKey containing a separator splits at the first two seps only", () => {
-      // The decode slices primaryKey from after the SECOND separator to end, so a
-      // primaryKey carrying its own \x00 survives intact.
       const components = {
         entityId: "Order",
         tag: "Place",
@@ -85,8 +81,6 @@ describe("ExecIdCodec", () => {
 
   describe("single-separator fallback (2-segment id)", () => {
     test("tag takes the remainder; primaryKey falls back to the whole id", () => {
-      // No second separator: tag = everything after the first sep, primaryKey =
-      // the whole execId. Pins the legacy parseExecId behavior verbatim.
       const execId = "Order\x00Place";
       expect(ExecIdCodec.decode(execId)).toEqual({
         entityId: "Order",

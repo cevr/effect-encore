@@ -23,8 +23,6 @@ import type {
   WorkflowSignal,
 } from "../src/index.js";
 
-// ── Type-level tests for ExecId phantom brand inference ───────────────────
-
 class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
   message: Schema.String,
 }) {}
@@ -70,9 +68,6 @@ const Greeter = Actor.fromWorkflow("Greeter", {
   id: (p: { name: string }) => p.name,
 });
 
-// ── Compile-time type assertions ──────────────────────────────────────────
-
-// Helper: assert type equality at compile time
 type IsExact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
 
@@ -84,10 +79,8 @@ type _ActorIdlePolicyAcceptsDurationLiteral = Assert<
   "5 minutes" extends NonNullable<HandlerOptions["maxIdleTime"]> ? true : false
 >;
 
-// ExecId is a string at runtime
 type _ExecIdIsString = Assert<ExecId extends string ? true : false>;
 
-// PeekResult carries generic types
 type _PeekResultHasSuccess = Assert<
   IsExact<Extract<PeekResult<string, OrderError>, { _tag: "Success" }>["value"], string>
 >;
@@ -95,19 +88,11 @@ type _PeekResultHasError = Assert<
   IsExact<Extract<PeekResult<string, OrderError>, { _tag: "Failure" }>["error"], OrderError>
 >;
 
-// PeekResult includes Suspended
 type _PeekResultHasSuspended = Assert<
   PeekResult extends { _tag: "Suspended" } | unknown ? true : false
 >;
 
 describe("type-level tests", () => {
-  // E5: the `.send` requirement collapses from the former
-  // `ActorMailbox | ActorAddressResolver | Snowflake.Generator` triad to the
-  // single deep `Client` transport Tag (ADR-0002). The
-  // wire-builder + mailbox/resolver/snowflake strategy are pulled INSIDE the
-  // seam, so a producer composes the one `Client` Tag into its `R`. We pin the
-  // exact E/R contract once (here); the remaining `.send` tests stay loose with
-  // `unknown` to avoid noise on signature-level changes elsewhere.
   type SendError =
     | MailboxError
     | PersistenceError
@@ -121,8 +106,6 @@ describe("type-level tests", () => {
     void _check;
   });
 
-  // Looser assertions for the remaining call sites — they exercise success-type
-  // inference (the phantom) without re-asserting the boundary every time.
   test("Place.send returns ExecId<success, error> with correct phantom types", () => {
     const _check = (): Effect.Effect<ExecId<string, OrderError>, unknown, unknown> =>
       Order.Place.send({ item: "widget" });
@@ -216,23 +199,16 @@ describe("type-level tests", () => {
   });
 
   test("workflow actor has resume but entity does not", () => {
-    // Workflow has resume
     const _resume: (executionId: string) => Effect.Effect<void, never, unknown> = Greeter.resume;
     void _resume;
-
-    // Entity does NOT have resume — this would be a compile error if uncommented:
-    // const _noResume = Order.resume; // Property 'resume' does not exist
   });
 
   test("ExecId phantom types flow through send → peek through op handle", () => {
-    // send produces ExecId<S, E>; peek consumes payload and returns PeekResult<S, E>
     const _pipeline = Effect.gen(function* () {
       const execId = yield* Order.Place.send({ item: "widget" });
-      // execId: ExecId<string, OrderError>
       void execId;
 
       const result = yield* Order.Place.peek({ item: "widget" });
-      // result: PeekResult<string, OrderError>
 
       if (result._tag === "Success") {
         const _value: string = result.value;
@@ -254,7 +230,6 @@ describe("type-level tests", () => {
 
   test("make returns the underlying OperationValue for the tag", () => {
     const _op = Order.Place.make({ item: "widget" });
-    // The OperationValue carries the _tag discriminator
     type _hasTag = (typeof _op)["_tag"];
     void _op;
   });
@@ -278,9 +253,6 @@ describe("type-level tests", () => {
     void _direct;
   });
 
-  // `registerState` consumes a `State<A>` (ADR-0002), not
-  // a `{get, watch}` handle. `ActorStateHandle` is registry-internal and left
-  // the public barrel — only `State<A>` is the public state vocabulary.
   test("registerState consumes a State<A> built via Actor.State.make", () => {
     const _check = Effect.gen(function* () {
       const state = yield* Actor.State.make(
@@ -323,8 +295,6 @@ describe("type-level tests", () => {
   });
 });
 
-// ── Workflow Step DSL type tests ─────────────────────────────────────────
-
 const FailableWorkflow = Actor.fromWorkflow("Failable", {
   payload: { id: Schema.String },
   success: Schema.String,
@@ -348,7 +318,6 @@ describe("step DSL type-level tests", () => {
     const _check = Actor.toTestLayer(FailableWorkflow, (_payload, step) =>
       Effect.gen(function* () {
         yield* step.run("typed-undo", Effect.succeed("ok"), (_value, cause) => {
-          // cause should be Cause<OrderError>, not Cause<unknown>
           const _typed: Cause.Cause<OrderError> = cause;
           void _typed;
           return Effect.void;
@@ -366,7 +335,6 @@ describe("step DSL type-level tests", () => {
           do: Effect.succeed("ok"),
           success: Schema.String,
           undo: (_value, cause) => {
-            // cause should be Cause<OrderError>, not Cause<unknown>
             const _typed: Cause.Cause<OrderError> = cause;
             void _typed;
             return Effect.void;
@@ -407,8 +375,6 @@ describe("step DSL type-level tests", () => {
     void _check;
   });
 });
-
-// ── Declarative signal type tests ──────────────────────────────────────────
 
 class ApprovalDecision extends Schema.TaggedClass<ApprovalDecision>()("ApprovalDecision", {
   approved: Schema.Boolean,
@@ -459,7 +425,6 @@ describe("declarative signal type-level tests", () => {
   });
 
   test("workflow without signals has no extra properties", () => {
-    // NoSignalWorkflow should not have Approval or Cancel
     // @ts-expect-error — no signals defined
     const _bad = NoSignalWorkflow.Approval;
     void _bad;
@@ -476,16 +441,6 @@ describe("declarative signal type-level tests", () => {
   });
 });
 
-// ── Workflow toLayer requirements exclusion ───────────────────────────────
-//
-// Regression test: `Actor.toLayer(workflow, handler)` must mirror upstream
-// `Workflow.toLayer` and exclude `WorkflowEngine | WorkflowInstance |
-// Execution<Name> | Scope.Scope` from the handler's `R` so they don't leak
-// into the resulting Layer's `RIn`. Without these excludes, a handler that
-// calls `step.run(...)` (which uses `Workflow.intoResult` internally and
-// requires `WorkflowInstance`) produces a Layer that's unsatisfiable from
-// user code.
-
 const RegressionWorkflow = Actor.fromWorkflow("Regression", {
   payload: { id: Schema.String },
   success: Schema.String,
@@ -496,8 +451,6 @@ describe("workflow toLayer regression — context exclusion", () => {
   test("toLayer with step.run handler does NOT leak WorkflowInstance / Execution / Scope into RIn", () => {
     const layer = Actor.toLayer(RegressionWorkflow, (payload, step) =>
       Effect.gen(function* () {
-        // step.run injects WorkflowInstance into the inner Effect's R; the
-        // outer toLayer signature must Exclude it from the Layer's RIn.
         yield* step.run("step-1", { do: Effect.succeed(payload.id) });
         return payload.id;
       }),
@@ -507,7 +460,6 @@ describe("workflow toLayer regression — context exclusion", () => {
     type _NoWorkflowInstance = Assert<IsExact<Extract<RIn, WorkflowInstance>, never>>;
     type _NoExecution = Assert<IsExact<Extract<RIn, Execution<"Regression">>, never>>;
     type _NoScope = Assert<IsExact<Extract<RIn, Scope.Scope>, never>>;
-    // WorkflowEngine SHOULD remain — it's required by the runner.
     type _HasWorkflowEngine = Assert<WorkflowEngine extends RIn ? true : false>;
     void layer;
   });

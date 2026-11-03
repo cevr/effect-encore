@@ -81,7 +81,6 @@ describe("Actor.toTestLayer", () => {
       TestShardingConfig,
     );
 
-    // Provide around the full usage so the client layer is in scope
     return Effect.gen(function* () {
       const result = yield* Tracker.Track.execute({ item: "widget" });
       expect(result).toBe("tracked: widget");

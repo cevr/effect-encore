@@ -3,8 +3,6 @@ import { Effect, Exit, Option, Result, Schedule, Schema } from "effect";
 import { Activity } from "effect/workflow";
 import { Actor, PendingCompensation } from "../src/index.js";
 
-// ── Basic workflow with step.run shorthand ─────────────────────────────
-
 const Greeter = Actor.fromWorkflow("Greeter", {
   payload: { name: Schema.String },
   success: Schema.String,
@@ -17,8 +15,6 @@ const GreeterTest = Actor.toTestLayer(Greeter, (payload, step) =>
     return greeting;
   }),
 );
-
-// ── Workflow with step.run full options ─────────────────────────────────
 
 const Calculator = Actor.fromWorkflow("Calculator", {
   payload: { x: Schema.Finite, y: Schema.Finite },
@@ -35,8 +31,6 @@ const CalculatorTest = Actor.toTestLayer(Calculator, (payload, step) =>
     return result;
   }),
 );
-
-// ── Workflow with step.run 3-arg (undo) shorthand ──────────────────────
 
 const WithUndo = Actor.fromWorkflow("WithUndo", {
   payload: { input: Schema.String },
@@ -55,8 +49,6 @@ const WithUndoTest = Actor.toTestLayer(WithUndo, (payload, step) =>
   }),
 );
 
-// ── Workflow with step.sleep ───────────────────────────────────────────
-
 const Sleeper = Actor.fromWorkflow("Sleeper", {
   payload: { ms: Schema.Finite },
   success: Schema.String,
@@ -69,8 +61,6 @@ const SleeperTest = Actor.toTestLayer(Sleeper, (payload, step) =>
     return "awake";
   }),
 );
-
-// ── Workflow with errors ──────────────────────────────────────────────
 
 class StepError extends Schema.TaggedError<StepError>()("StepError", {
   reason: Schema.String,
@@ -98,8 +88,6 @@ const FailableTest = Actor.toTestLayer(Failable, (payload, step) =>
     return result;
   }),
 );
-
-// ── Workflow with retry ───────────────────────────────────────────────
 
 let retryAttempts: number[] = [];
 
@@ -129,8 +117,6 @@ const RetrierTest = Actor.toTestLayer(Retrier, (payload, step) =>
   }),
 );
 
-// ── Workflow with executionId + attempt ────────────────────────────────
-
 const Inspector = Actor.fromWorkflow("Inspector", {
   payload: { id: Schema.String },
   success: Schema.String,
@@ -143,8 +129,6 @@ const InspectorTest = Actor.toTestLayer(Inspector, (_payload, step) =>
     return `execId=${step.executionId},attempt=${attempt}`;
   }),
 );
-
-// ── Workflow with nullary actor + waitFor ──────────────────────────────
 
 const WaitTarget = Actor.fromWorkflow("WaitTarget", {
   payload: { id: Schema.String },
@@ -159,8 +143,6 @@ const WaitTargetTest = Actor.toTestLayer(WaitTarget, (payload, step) =>
   }),
 );
 
-// ── Workflow with annotations ─────────────────────────────────────────
-
 const Annotated = Actor.fromWorkflow("Annotated", {
   payload: { id: Schema.String },
   success: Schema.String,
@@ -168,8 +150,6 @@ const Annotated = Actor.fromWorkflow("Annotated", {
   captureDefects: false,
   suspendOnFailure: true,
 });
-
-// ── Tests ─────────────────────────────────────────────────────────────
 
 describe("step.run — shorthand", () => {
   it.scopedLive.layer(GreeterTest)("executes and returns result", () =>
@@ -268,8 +248,6 @@ describe("WorkflowDef annotations", () => {
   });
 });
 
-// ── Declarative signals ─────────────────────────────────────────────
-
 const SignalWorkflow = Actor.fromWorkflow("SignalWorkflow", {
   payload: { id: Schema.String },
   success: Schema.String,
@@ -324,8 +302,6 @@ describe("declarative signals", () => {
     ).toThrow(/collides with reserved/);
   });
 });
-
-// ── Durable compensation ───────────────────────────────────────────────
 
 const DurableCompensation = Actor.fromWorkflow("DurableCompensation", {
   payload: { id: Schema.String },
@@ -612,8 +588,6 @@ describe("step.run — durable compensation", () => {
   );
 });
 
-// ── Signal round-trip inside workflow ─────────────────────────────────
-
 const SignalTest = Actor.toTestLayer(SignalWorkflow, (_payload, _step) =>
   Effect.gen(function* () {
     const result = yield* SignalWorkflow.Approval.await;
@@ -632,8 +606,6 @@ describe("signal — inside handler", () => {
     }),
   );
 });
-
-// ── step.race ─────────────────────────────────────────────────────────
 
 const RaceWorkflow = Actor.fromWorkflow("RaceWorkflow", {
   payload: { id: Schema.String },
@@ -660,8 +632,6 @@ describe("step.race", () => {
   );
 });
 
-// ── waitFor with custom filter/schedule ───────────────────────────────
-
 describe("waitFor — custom options", () => {
   it.scopedLive.layer(WaitTargetTest)("waitFor with custom filter and schedule", () =>
     Effect.gen(function* () {
@@ -677,8 +647,6 @@ describe("waitFor — custom options", () => {
     }),
   );
 });
-
-// ── step.executionId ──────────────────────────────────────────────────
 
 const IdKeyWorkflow = Actor.fromWorkflow("IdKeyWorkflow", {
   payload: { id: Schema.String },

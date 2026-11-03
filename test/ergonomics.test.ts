@@ -9,8 +9,6 @@ const TestShardingConfig = ShardingConfig.layer({
   entityTerminationTimeout: 0,
 });
 
-// ── Same-id ergonomics: execute / send / executionId all agree ─────────────
-
 const SameIdActor = Actor.fromEntity("SameId", {
   Run: {
     payload: { key: Schema.String },
@@ -53,8 +51,6 @@ describe("ergonomics: execId derivation is consistent across surfaces", () => {
   });
 });
 
-// ── Divergent id ergonomics: object-form id ────────────────────────────────
-
 const DivergentActor = Actor.fromEntity("Divergent", {
   Trigger: {
     payload: { dedup: Schema.String, action: Schema.String },
@@ -91,8 +87,6 @@ describe("ergonomics: divergent id (object-form) produces stable execIds", () =>
   });
 });
 
-// ── Per-op handle surface ──────────────────────────────────────────────────
-
 describe("ergonomics: per-op handle surface", () => {
   test("handle exposes the full set of methods", () => {
     const h = SameIdActor.Run;
@@ -111,7 +105,6 @@ describe("ergonomics: per-op handle surface", () => {
   test("make() is the escape hatch for raw OperationValue construction", () => {
     const op = SameIdActor.Run.make({ key: "abc" });
     expect(op._tag).toBe("Run");
-    // Struct payload is spread onto the value
     expect(op.key).toBe("abc");
   });
 });

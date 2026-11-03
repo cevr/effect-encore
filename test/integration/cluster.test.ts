@@ -12,7 +12,6 @@ const OrderActor = Actor.fromEntity("Order", {
     payload: { item: Schema.String, qty: Schema.Finite },
     success: Schema.String,
     persisted: true,
-    // entityId === primaryKey === "${item}-${qty}"
     id: (p: { item: string; qty: number }) => `${p.item}-${p.qty}`,
   },
   Cancel: {

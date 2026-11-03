@@ -83,9 +83,6 @@ export const unwrapOpaquePayload = (input: unknown): unknown => {
 const unwrapOpaquePayloadForEncoding = (input: unknown): unknown => {
   const unwrapped = unwrapOpaquePayload(input);
   if (unwrapped !== input) return unwrapped;
-  // Schema encoding validates the target class before it invokes the
-  // transformation. That validation can produce a plain object, so retain a
-  // structural fallback for the encode-side value.
   return Predicate.isObject(input) && Predicate.hasProperty(input, "value")
     ? input["value"]
     : input;
@@ -201,10 +198,6 @@ const makeOpaquePayloadSchema = (
     encode: SchemaGetter.transform((input) => unwrapOpaquePayloadForEncoding(input)),
   })(payload);
 
-  // The public constructor accepts the decoded user payload. The transformed
-  // schema itself stores the internal carrier so Envelope.primaryKey can read
-  // the cluster protocol before the original codec encodes the wire value.
-  // Schemas inherit `make` as a lazy getter, so the override is an own property.
   const make: Schema.Top["make"] = (input, options) => payloadClass.make({ value: input }, options);
   Object.defineProperty(wrapped, "make", { value: make, enumerable: true });
   return wrapped;
@@ -244,11 +237,6 @@ const compileSchemaPayload = (
     return payloadClass;
   }
 
-  // Opaque payloads (for example Schema.String) have no object prototype on
-  // on which the cluster protocol can be attached. This also covers
-  // transformed schemas whose decoded value is an object or class: the
-  // original decoded value stays inside the carrier and reaches user code
-  // unchanged after the transport unwraps it.
   return makeOpaquePayloadSchema(actorName, tag, payload, primaryKeyOf, deliverAt);
 };
 

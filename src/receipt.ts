@@ -5,8 +5,6 @@ import type { MalformedMessage, PersistenceError } from "effect/cluster/ClusterE
 import type { RpcMessage } from "effect/rpc";
 import { ActorAddressResolver } from "./actor-address-resolver.js";
 
-// ── ExecId — branded execution identifier ────────────────────────────────
-
 declare const ExecIdBrand: unique symbol;
 
 export type ExecId<Success = unknown, Error = unknown> = string & {
@@ -21,16 +19,6 @@ export function makeExecId(id: string): string {
   return id;
 }
 
-// ── ExecIdCodec — single mint/parse boundary ─────────────────────────────
-//
-// The entity ExecId wire format is `${entityId}\x00${tag}\x00${primaryKey}`.
-// This 3-tuple is persisted into `cluster_messages` dedup identity, so the
-// byte layout is a FROZEN wire contract — centralizing construction here must
-// not normalize/escape segments. `encode` is the single mint; `decode` is the
-// verbatim parse (single-separator and no-separator fallbacks preserved), so a
-// no-separator id (single-segment workflow `makeExecId(executionId)`) decodes
-// to `entityId == tag == primaryKey == execId`.
-
 export interface ExecIdComponents {
   readonly entityId: string;
   readonly tag: string;
@@ -42,8 +30,6 @@ export const ExecIdCodec = {
     makeExecId<S, E>(`${components.entityId}\x00${components.tag}\x00${components.primaryKey}`),
 
   decode: (execId: string): ExecIdComponents => {
-    // Degenerate forms are load-bearing: a bare id with no separators maps to
-    // entityId == tag == primaryKey == execId (see the module header).
     const firstSep = execId.indexOf("\x00");
     if (firstSep < 0) {
       return { entityId: execId, tag: execId, primaryKey: execId };
@@ -63,8 +49,6 @@ export const ExecIdCodec = {
     };
   },
 };
-
-// ── PeekResult ───────────────────────────────────────────────────────────
 
 export type PeekResult<A = unknown, E = unknown> =
   | { readonly _tag: "Pending" }
@@ -113,8 +97,6 @@ export const isSuspended = <A, E>(result: PeekResult<A, E>): result is { _tag: "
 export const isTerminal = <A, E>(result: PeekResult<A, E>): boolean =>
   result._tag !== "Pending" && result._tag !== "Suspended";
 
-// ── PeekResult Schema ───────────────────────────────────────────────────
-
 export const PeekResultSchema = <Success extends Schema.Top, Error extends Schema.Top>(
   success: Success,
   error: Error,
@@ -128,15 +110,6 @@ export const PeekResultSchema = <Success extends Schema.Top, Error extends Schem
     Schema.TaggedStruct("Suspended", {}),
   ]);
 
-// ── Exit → PeekResult classification (pure, unit-testable) ────────────────
-//
-// Lifted out of `actor.ts` so the Exit-classification logic is unit-testable
-// without a live cluster. The encoded-vs-real Exit asymmetry is preserved
-// exactly: the **entity** await path maps an `RpcMessage.ExitEncoded` (the
-// shape persisted in `cluster_replies`), while the **workflow** poll path maps
-// a real `Exit.Exit` by walking its `Cause` tree.
-
-/** The success and error schema slots used to decode stored replies. */
 export interface ReplyDef {
   readonly success?: Schema.Top;
   readonly error?: Schema.Top;
@@ -153,19 +126,11 @@ function eraseSchemaDecodingServices(
   return effect;
 }
 
-/**
- * Decode `value` through `schema` if present. On decode failure the raw value
- * is returned unchanged (the reply was already validated on the wire; this is
- * a best-effort typed-view, not a gate).
- */
 export const decodeValue = <Input>(
   schema: Schema.Top | void,
   value: Input,
 ): Effect.Effect<unknown> => {
   if (!schema) return Effect.succeed(value);
-  // Decoding is best-effort: an undecodable value falls back to the raw input.
-  // The schema is type-erased here, so its decoding services are unknown; the
-  // assertion drops them because callers never supply them.
   const decode = eraseSchemaDecodingServices(Schema.decodeUnknownEffect(schema)(value));
   return Effect.map(
     Effect.option(decode),
@@ -173,10 +138,6 @@ export const decodeValue = <Input>(
   );
 };
 
-/**
- * Map the encoded reply Exit (entity path) to a `PeekResult`, decoding the
- * success/error payload through the operation's schema slots when available.
- */
 export const mapExitToPeekResult = (
   exit: RpcMessage.ExitEncoded<unknown, unknown>,
   def?: ReplyDef,
@@ -200,11 +161,6 @@ export const mapExitToPeekResult = (
   }
 };
 
-/**
- * Map a real `Exit.Exit` (workflow poll path) to a `PeekResult` by walking its
- * `Cause` tree. Unlike the entity path this Exit is not encoded, so the error
- * is read straight off the cause rather than schema-decoded.
- */
 export const mapExitToWorkflowPeekResult = <A, E>(exit: Exit.Exit<A, E>): PeekResult<A, E> => {
   if (Exit.isSuccess(exit)) {
     return Success(exit.value);
@@ -221,8 +177,6 @@ export const mapExitToWorkflowPeekResult = <A, E>(exit: Exit.Exit<A, E>): PeekRe
 
   return Pending;
 };
-
-// ── Stored reply lookup ────────────────────────────────────────────────────
 
 export const peekStoredReply = (
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- Entity protocols are type-erased here.

@@ -1,17 +1,3 @@
-/**
- * MessageDeletion owns the invocation deletion that Effect does not provide.
- *
- * Effect owns normal message storage, including address cleanup. Encore only
- * resolves and deletes one invocation for entity rerun operations.
- *
- * Adapters provide BOTH tags:
- * - upstream `MessageStorage.MessageStorage` is still required by the runner
- *   (effect-cluster owns it for normal entity routing).
- * - internal `MessageDeletion` is required by Encore rerun methods.
- *
- * Use `fromMessageStorage(storage, ext)` to build the deletion service.
- * Use `layer(upstream, ext)` to provide both services.
- */
 import { ClusterError, MessageStorage, ShardingConfig, SqlMessageStorage } from "effect/cluster";
 import { SqlClient } from "effect/sql";
 import type { PersistenceError } from "effect/cluster/ClusterError";
@@ -19,8 +5,6 @@ import type { EntityAddress } from "effect/cluster";
 import type * as Snowflake from "effect/cluster/Snowflake";
 import { Context, Effect, Layer } from "effect";
 import type { Digest } from "effect/crypto";
-
-// ─── Shape ──────────────────────────────────────────────────────────────────
 
 export interface MessageDeletionService {
   readonly deleteInvocation: (input: {
@@ -44,17 +28,10 @@ const sqlTables = (options?: SqlMessageStorageOptions) => {
   };
 };
 
-// ─── Tag ────────────────────────────────────────────────────────────────────
-
 export class MessageDeletion extends Context.Service<MessageDeletion, MessageDeletionService>()(
   "effect-encore/storage/MessageDeletion",
 ) {}
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/**
- * Build deletion operations from Effect storage and one adapter method.
- */
 export const fromMessageStorage = (
   storage: MessageStorage.MessageStorage["Service"],
   ext: {
@@ -71,16 +48,6 @@ export const fromMessageStorage = (
     }),
 });
 
-/**
- * Layer composer: takes a Layer providing upstream `MessageStorage` and the
- * encore-specific extension, and produces a Layer providing BOTH the upstream
- * tag and the internal deletion service.
- *
- * Adapters that haven't implemented `deleteEnvelope` should pass an `ext`
- * that fails loud (e.g. `Effect.die("not implemented")`) rather than silently
- * coarsening to `flush` — the goal is to surface unimplemented capability
- * immediately, not paper over it.
- */
 export const layer = <RIn, E>(
   upstream: Layer.Layer<MessageStorage.MessageStorage, E, RIn>,
   ext: {

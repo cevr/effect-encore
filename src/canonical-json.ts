@@ -116,7 +116,6 @@ const orderJsonObject = (value: Schema.Json, state: JsonOrderingState): Schema.J
   return ordered;
 };
 
-/** Encodes JSON with recursive UTF-16 object-key ordering. */
 export const canonicalJsonString = (value: Schema.Json): string => {
   if (isJsonObject(value) && hasNativeKeyOrderConflict(value)) {
     return canonicalJsonStringExact(value);
@@ -130,7 +129,6 @@ export const canonicalJsonString = (value: Schema.Json): string => {
   return encoded;
 };
 
-/** Computes the full lowercase SHA-256 digest of canonical JSON. */
 export const canonicalJsonSha256 = Effect.fn("effect-encore/canonicalJsonSha256")(function* (
   value: Schema.Json,
 ) {

@@ -31,8 +31,6 @@ const CounterTest = Layer.provide(
 
 const test = it.scopedLive.layer(CounterTest);
 
-// ── GenActor for deferred construction test ─────────────────────────────
-
 const GenActor = Actor.fromEntity("GenActor", {
   Compute: {
     payload: { x: Schema.Finite },
@@ -50,8 +48,6 @@ const GenActorTest = Layer.provide(
   ),
   TestShardingConfig,
 );
-
-// ── ErrActor for error test ─────────────────────────────────────────────
 
 class HandlerError extends Schema.TaggedError<HandlerError>()("HandlerError", {
   reason: Schema.String,
@@ -71,8 +67,6 @@ const ErrActorTest = Layer.provide(
   }),
   TestShardingConfig,
 );
-
-// ── InspectActor for operation inspection test ──────────────────────────
 
 const InspectActor = Actor.fromEntity("InspectActor", {
   Inspect: {

@@ -57,8 +57,6 @@ const encodeCompensationFailureName = Schema.encodeSync(
 const compensationActivityName = (stepId: string): string =>
   encodeCompensationActivityName(["Compensate", stepId]);
 
-// Activity storage adds CurrentAttempt to its key. Durable Deferred storage
-// does not. The decision name must carry the attempt.
 const compensationDecision = (stepId: string, attempt: number) =>
   DurableDeferred.make(encodeCompensationDecisionName(["CompensationDecision", stepId, attempt]), {
     success: CompensationDecision,
@@ -116,7 +114,6 @@ const pendingForStep = (
     ),
   );
 
-/** Read the exact failed compensation attempt that awaits an operator decision. */
 export const pendingCompensation = <
   Name extends string,
   Payload extends Workflow.AnyStructSchema,

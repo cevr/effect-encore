@@ -5,11 +5,6 @@ import { ActorAddressResolverLayer } from "../src/actor-address-resolver.js";
 import { Actor, ClientLayer, fromMessageStorage } from "../src/index.js";
 import { MessageDeletion } from "../src/storage.js";
 
-// ── Test deletion layer on top of TestRunner ───────────────────────────────
-
-// Wire deletion by reading the MemoryDriver to get access to the
-// underlying requests map, then building a deleteEnvelope that surgically
-// removes one envelope by requestId.
 const MessageDeletionTest = L.effect(
   MessageDeletion,
   Effect.gen(function* () {
@@ -22,14 +17,12 @@ const MessageDeletionTest = L.effect(
           if (!entry) return;
           driver.unprocessed.delete(entry.envelope);
           driver.requests.delete(id);
-          // Also remove from journal so re-send is allowed
           for (let i = driver.journal.length - 1; i >= 0; i--) {
             const env = driver.journal[i]!;
             if (env._tag === "Request" && env.requestId === id) {
               driver.journal.splice(i, 1);
             }
           }
-          // Drop the primaryKey index pointing at this entry so re-send dedups fresh
           for (const [pk, e] of driver.requestsByPrimaryKey.entries()) {
             if (e === entry) driver.requestsByPrimaryKey.delete(pk);
           }
@@ -38,12 +31,6 @@ const MessageDeletionTest = L.effect(
   }),
 );
 
-// ── Actor under test ────────────────────────────────────────────────────────
-
-// MessageDeletionTest needs MemoryDriver, which TestRunner.layer provides.
-// `provideMerge` keeps the upstream tags in the result alongside the new one.
-// ActorAddressResolverLayer.fromSharding is wired so .rerun has the resolver
-// alongside the storage shape.
 const TestSupport = ActorAddressResolverLayer.fromSharding.pipe(
   L.provideMerge(MessageDeletionTest),
   L.provideMerge(TestRunner.layer),
@@ -63,7 +50,6 @@ describe("OperationHandle.rerun", () => {
       });
 
       yield* RerunActor.Process.rerun({ input: "never-sent" });
-      // No throw, no error — idempotent.
       expect(true).toBe(true);
     }).pipe(Effect.provide(TestCluster)),
   );
@@ -123,8 +109,6 @@ describe("OperationHandle.rerun", () => {
 
       yield* RerunActor.Process.rerun({ input: "once" });
 
-      // Re-send via the same client — dedup index should be cleared, allowing
-      // a fresh handler invocation.
       yield* client.Process({ input: "once" });
 
       const second = yield* RerunActor.Process.peek({ input: "once" });
@@ -134,8 +118,6 @@ describe("OperationHandle.rerun", () => {
   });
 
   it.scopedLive("rerun with divergent id clears only the target execId", () => {
-    // entity id is the dedup bucket; primaryKey diverges so two execIds
-    // share a single entityId.
     const RerunActor = Actor.fromEntity("RerunDiverge", {
       Trigger: {
         payload: {

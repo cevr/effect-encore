@@ -9,7 +9,6 @@ const FlushActor = Actor.fromEntity("FlushActor", {
     payload: { input: Schema.String },
     success: Schema.String,
     persisted: true,
-    // entityId === primaryKey === input
     id: (p: { input: string }) => p.input,
   },
 });
@@ -82,28 +81,15 @@ describe("Actor.redeliver", () => {
       const result = yield* RedeliverActor.Process.peek({ input: "test" });
       expect(result._tag).toBe("Success");
 
-      // Redeliver resets read leases on unprocessed messages
       yield* RedeliverActor.redeliver("test");
 
-      // Already-processed message should still show Success
       const after = yield* RedeliverActor.Process.peek({ input: "test" });
       expect(after._tag).toBe("Success");
     }).pipe(Effect.provide(redeliverHandlersLayer)),
   );
 });
 
-// Regression for the type-vs-runtime divergence on the public `EntityActor`
-// control ops: after `flush`/`redeliver`/`interrupt` were repointed through
-// `Client.use(...)`, they REQUIRE the deep `Client` Tag at runtime. The
-// declared R-channel must say so — providing exactly the DECLARED deps must
-// make `flush` succeed. Before the fix the declared R omitted `Client`, so a
-// host satisfying the type without `Client` crashed with
-// `Service not found: effect-encore/client`.
 describe("Actor.flush declared R-channel", () => {
-  // Type-level probe: the declared requirement of `flush`/`redeliver`/
-  // `interrupt` is EXACTLY `Client` — annotating with `Client` typechecks, and
-  // (by exhaustiveness of the single-Tag union) nothing else leaks. If the old
-  // storage+resolver union were still declared, this annotation would fail.
   const _flushR: Effect.Effect<void, unknown, Client> = FlushActor.flush("x");
   const _redeliverR: Effect.Effect<void, unknown, Client> = FlushActor.redeliver("x");
   const _interruptR: Effect.Effect<void, unknown, Client> = FlushActor.interrupt("x");
@@ -113,9 +99,6 @@ describe("Actor.flush declared R-channel", () => {
 
   it.scopedLive("succeeds when provided only the declared `Client` dependency", () =>
     Effect.gen(function* () {
-      // Provide EXACTLY the declared R (`Client`) via the self-contained memory
-      // adapter — no handler layer, no TestCluster. This is the probe that
-      // previously died with `Service not found: effect-encore/client`.
       const result = yield* FlushActor.flush("declared-deps-only").pipe(Effect.exit);
       expect(result._tag).toBe("Success");
     }).pipe(Effect.provide(ClientLayer.memory)),

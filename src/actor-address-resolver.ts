@@ -1,31 +1,3 @@
-/**
- * ActorAddressResolver — pure address resolution, decoupled from full Sharding.
- *
- * **Why this exists.** Encore's ops impls (`flush`, `redeliver`, `rerun`,
- * `peek`) and the producer-side mailbox path only need address computation —
- * `(entityType, entityId, shardId)`. Today they all require the full
- * `Sharding` Tag, which transitively requires `Runners` +
- * `RunnerStorage` and registers an entity manager as a side effect. That
- * forces ops-only hosts (e.g. an admin UI) to spin up entity managers they
- * don't want, and it forces producer-only hosts to host the consumer side of
- * `Sharding.makeClient` (which deadlocks on `notifyLocal` when no handler is
- * registered).
- *
- * **What this does.** A narrow Tag with three address-computation methods
- * (`resolveEntity`, `resolveWorkflow`, `resolveWorkflowClock`). Two factories:
- *
- * - `fromConfig` requires only `ShardingConfig` — pure data, no runners, no
- *   entity managers, no message processing. Identical math to upstream's
- *   `Sharding.getShardId`. Use this in producer-only and ops-only hosts.
- * - `fromSharding` requires full `Sharding` — adapter for hosts that
- *   already host the cluster runtime (consumer processes that DO process
- *   mailboxes). Delegates to `sharding.getShardId`.
- *
- * Both factories MUST produce identical addresses for the same
- * `(entityId, shardGroup)` — otherwise producer-side dispatch via
- * `ActorMailbox` would land on a different shard than the consumer expects.
- * This invariant is pinned by `address-resolver.test.ts`.
- */
 import type { Entity as ClusterEntity } from "effect/cluster";
 import {
   ClusterSchema,
@@ -38,8 +10,6 @@ import {
 } from "effect/cluster";
 import type { Workflow as UpstreamWorkflow } from "effect/workflow";
 import { Context, Effect, Layer } from "effect";
-
-// ─── Service ────────────────────────────────────────────────────────────────
 
 /* eslint-disable typescript-eslint/no-explicit-any -- entity Rpcs type-erased at runtime */
 export interface ActorAddressResolverService {
@@ -58,18 +28,10 @@ export interface ActorAddressResolverService {
 }
 /* eslint-enable typescript-eslint/no-explicit-any */
 
-// ─── Tag ────────────────────────────────────────────────────────────────────
-
 export class ActorAddressResolver extends Context.Service<
   ActorAddressResolver,
   ActorAddressResolverService
 >()("effect-encore/actor-address-resolver/ActorAddressResolver") {}
-
-// ─── Internal: hash math (mirror of effect/cluster's internal hash) ──
-//
-// djb2 + bit-mix, copied from upstream's internal hash function.
-// Replicated rather than imported because the upstream module is internal.
-// Pinned to upstream behavior by `address-resolver.test.ts` parity test.
 
 const hashOptimize = (n: number): number => (n & 0xbfffffff) | ((n >>> 1) & 0x40000000);
 
@@ -114,14 +76,6 @@ const makeWorkflowResolvers = (getShardId: ResolveShardId) => {
   };
 };
 
-// ─── Layers ─────────────────────────────────────────────────────────────────
-
-/**
- * Pure-data resolver built from `ShardingConfig` alone.
- *
- * Use in producer-only and ops-only hosts that must NOT spin up entity
- * managers as a side effect of needing addresses.
- */
 const fromConfig: Layer.Layer<ActorAddressResolver, never, ShardingConfig.ShardingConfig> =
   Layer.effect(
     ActorAddressResolver,
@@ -155,11 +109,6 @@ const fromConfig: Layer.Layer<ActorAddressResolver, never, ShardingConfig.Shardi
     }),
   );
 
-/**
- * Adapter for hosts that already provide full `Sharding`. Delegates
- * `getShardId` to the live runtime so config drift between producer and
- * consumer is impossible.
- */
 const fromSharding: Layer.Layer<ActorAddressResolver, never, Sharding.Sharding> = Layer.effect(
   ActorAddressResolver,
   Effect.gen(function* () {
@@ -189,20 +138,6 @@ const fromSharding: Layer.Layer<ActorAddressResolver, never, Sharding.Sharding> 
   }),
 );
 
-/**
- * Layer factories. Layers are exposed as a namespace alongside the Tag.
- *
- * @example
- * ```ts
- * import { ActorAddressResolver, ActorAddressResolverLayer } from "effect-encore";
- *
- * // producer-only / ops-only host:
- * Layer.provide(ActorAddressResolverLayer.fromConfig)
- *
- * // consumer host with full Sharding:
- * Layer.provide(ActorAddressResolverLayer.fromSharding)
- * ```
- */
 export const ActorAddressResolverLayer = {
   fromConfig,
   fromSharding,

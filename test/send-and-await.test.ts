@@ -12,10 +12,6 @@ import {
 import { ActorAddressResolverLayer } from "../src/actor-address-resolver.js";
 import { ClientLayer, Actor, SendAndAwaitTimeout } from "../src/index.js";
 
-// A sender-only host: the deep `Client` transport seam (`Client.layer.fromConfig`)
-// over a SHARED in-memory storage, plus the `ActorAddressResolver` + `MessageStorage`
-// the `peek` loop requires directly — all over the SAME memory driver so the
-// dispatched envelope and the peek read the same storage.
 const senderOnlyStorage = MessageStorage.layerMemory.pipe(
   Layer.provideMerge(ShardingConfig.layer()),
 );
@@ -28,7 +24,6 @@ class ProcessError extends Schema.TaggedError<ProcessError>()("ProcessError", {
   message: Schema.String,
 }) {}
 
-// A shared invocation counter so the dedup case can assert the handler runs once.
 const Counter = Ref.makeUnsafe(0);
 
 const SendAwaitActor = Actor.fromEntity("SendAwaitActor", {
@@ -67,13 +62,6 @@ const sendAwaitHandlers = Actor.toLayer(SendAwaitActor, {
 
 const TestCluster = TestRunner.layer;
 
-// Regression for the --deep finding: `OperationHandle.send` must derive its
-// ExecId from the ORIGINAL payload, not the reconstructed `opValue`. For a
-// `Schema.Class` payload whose `id` reads a PROTOTYPE METHOD, the struct-spread
-// reconstruction inside `buildOpValue` drops the method — so re-deriving the id
-// from `opValue` would throw or mint a divergent ExecId, and the `sendAndAwait`
-// send→peek round-trip would never reconcile. Exercises send + peek end-to-end
-// over a real cluster host (not the test-mailbox shortcut).
 class RoutedKey extends Schema.Class<RoutedKey>("send-await/RoutedKey")({
   region: Schema.String,
   seq: Schema.Finite,
@@ -91,24 +79,14 @@ const ClassPayloadActor = Actor.fromEntity("ClassPayloadActor", {
     payload: RoutedKey,
     success: Schema.String,
     persisted: true,
-    // id depends on the class instance (prototype method), NOT a bare field.
     id: (p: RoutedKey) => p.routingKey(),
   },
 });
 
 const classPayloadHandlers = Actor.toLayer(ClassPayloadActor, {
-  // Read plain fields: the decoded operation delivered to the handler is a
-  // schema-decoded value, so reconstruct the routing key from its fields rather
-  // than relying on the class prototype method surviving the wire round-trip.
   Process: ({ operation }) => Effect.succeed(`routed: ${operation.region}-${operation.seq}`),
 });
 
-// The timeout case hosts a `Hang` handler that runs `Effect.never`. When the
-// test scope closes, the entity must terminate; the default
-// `entityTerminationTimeout` (15s) would block scope finalization past the
-// 5s framework timeout. We replicate `TestRunner.layer` here with a short
-// `entityTerminationTimeout` so the never-completing entity is reaped quickly
-// on teardown instead of hanging.
 const FastTerminationCluster = Sharding.layer.pipe(
   Layer.provideMerge(Runners.layerNoop),
   Layer.provideMerge(MessageStorage.layerMemory),
@@ -181,14 +159,10 @@ describe("OperationHandle.sendAndAwait", () => {
     () =>
       Effect.gen(function* () {
         const payload = RoutedKey.make({ region: "us", seq: 7 });
-        // send and executionId (which peek shares) must agree on the ExecId.
         const fromSend = yield* ClassPayloadActor.Process.send(payload);
         const fromCompute = yield* ClassPayloadActor.Process.executionId(payload);
         expect(String(fromSend)).toBe("us-7\x00Process\x00us-7");
         expect(String(fromSend)).toBe(String(fromCompute));
-        // End-to-end send→peek: sendAndAwait dispatches then polls peek under the
-        // SAME ExecId. If send had derived a divergent id, this would time out
-        // instead of resolving the handler value.
         const value = yield* ClassPayloadActor.Process.sendAndAwait(payload, {
           timeout: "5 seconds",
         });
@@ -196,16 +170,6 @@ describe("OperationHandle.sendAndAwait", () => {
       }).pipe(Effect.provide(classPayloadHandlersLayer)),
   );
 
-  // Regression: a sender-only host that wires `Client.layer.memory` (the deep
-  // Client transport seam over in-memory storage — NO `toLayer`, NO local
-  // Sharding) must be able to call `sendAndAwait` without another reply service.
-  // With no consumer hosting the entity, the reply never becomes terminal, so
-  // the call resolves to a typed `SendAndAwaitTimeout` — a clean failure that
-  // proves the Client owns the stored-reply read.
-  //
-  // `Client.layer.memory` provides the `Client` Tag but the `peek` loop still
-  // requires `MessageStorage | ActorAddressResolver` directly, so those are
-  // provided alongside via the same in-memory bundle.
   it.scopedLive(
     "sender-only Client.layer.memory host can sendAndAwait without another reply service",
     () =>
@@ -214,8 +178,6 @@ describe("OperationHandle.sendAndAwait", () => {
           { input: "sender-only" },
           { timeout: "300 millis" },
         ).pipe(Effect.flip);
-        // The seam resolved via the default fallback: we reach the poll timeout,
-        // NOT a missing internal reply reader.
         expect(error).toBeInstanceOf(SendAndAwaitTimeout);
         if (error instanceof SendAndAwaitTimeout) {
           expect(error.entityType).toBe("SendAwaitActor");

@@ -88,13 +88,6 @@ import type {
 
 export type { WorkflowActor, WorkflowDef } from "./internal/workflow-actor.js";
 
-// ── Errors ─────────────────────────────────────────────────────────────────
-
-/**
- * Raised by `Op.sendAndAwait` when the entity's reply does not become terminal
- * within the required `timeout`. Carries the `entityType` + `execId` of the
- * awaited operation and the normalized `timeout` that elapsed.
- */
 export class SendAndAwaitTimeout extends Data.TaggedError(
   "effect-encore/actor/SendAndAwaitTimeout",
 )<{
@@ -103,9 +96,6 @@ export class SendAndAwaitTimeout extends Data.TaggedError(
   readonly timeout: Duration.Duration;
 }> {}
 
-// ── Layer passthrough ─────────────────────────────────────────────────────
-// Adds the layer's input requirements to its output so provided services
-// flow through to program code.
 const layerPassthrough = <ROut, E, RIn>(
   layer: Layer.Layer<ROut, E, RIn>,
 ): Layer.Layer<ROut | RIn, E, RIn> =>
@@ -124,40 +114,9 @@ const assembleActorRuntime = <Base, State, Control, E, R, StateR, ControlR>(
 ): Layer.Layer<Base | State | Control, E, R | Exclude<StateR, Base> | Exclude<ControlR, Base>> =>
   Layer.mergeAll(base, Layer.provide(state, base), Layer.provide(control, base));
 
-// Payload classification and identity rules live in the internal Invocation
-// compiler. Actor and Client consume the same compiled facts.
-
-// ── Operation DSL ──────────────────────────────────────────────────────────
-
-/**
- * Result of an entity operation's `id` fn. Either:
- * - `string` — entityId AND primaryKey use this value (the common case).
- * - `{entityId, primaryKey?}` — divergent case where the dedup key differs
- *   from the mailbox address (e.g., PagerDuty: dedup_key for routing, but
- *   `${dedup_key}:${event_action}` for dedup so distinct event actions on
- *   the same key get distinct execIds). primaryKey defaults to entityId
- *   when omitted.
- *
- * Defined in the internal Operation module and re-exported here.
- */
 export type { EntityIdReturn, OperationDef, OperationDefs };
 
-/**
- * Requirement bundle for hosts that send messages to actors.
- *
- * Producer-side `.send` composes into a single transport Tag — the deep
- * `Client` seam (ADR-0002) — which owns the
- * wire-envelope builder and the mailbox/resolver/snowflake strategy internally.
- * Use `Actor.SenderContext` in `R` instead of re-listing the former
- * `MessageStorage | ActorAddressResolver | Sharding` triad at every producer-op
- * signature.
- *
- * Wire ONE `Client.layer.*` adapter (`fromConfig` / `fromSharding` / `memory` /
- * `test`) at the host boundary to satisfy it.
- */
 export type SenderContext = Client;
-
-// ── Reserved key guard ─────────────────────────────────────────────────────
 
 type ReservedKeys =
   | "_tag"
@@ -216,8 +175,6 @@ const ActivateOperation = {
   }),
 } satisfies OperationDef;
 
-// ── Type-level Rpc mirror ──────────────────────────────────────────────────
-
 type PayloadOf<C extends OperationDef> = C extends {
   readonly payload: infer P extends Schema.Top;
 }
@@ -249,8 +206,6 @@ type DefRpcs<Defs extends OperationDefs> = {
   readonly [Tag in keyof Defs & string]: DefRpc<Tag, Defs[Tag]>;
 }[keyof Defs & string];
 
-// ── OperationValue brand ───────────────────────────────────────────────────
-
 declare const OperationBrandId: unique symbol;
 
 export interface OperationBrand<Name extends string, Tag extends string, Output, Error> {
@@ -274,14 +229,11 @@ export type OperationError<V> = V extends {
   ? E
   : never;
 
-// ── OperationValue types ───────────────────────────────────────────────────
-
 type OperationValue<Name extends string, Tag extends string, C extends OperationDef> = {
   readonly _tag: Tag;
 } & PayloadFieldsType<C> &
   OperationBrand<Name, Tag, Schema.Schema.Type<SuccessOf<C>>, Schema.Schema.Type<ErrorOf<C>>>;
 
-// Fieldful schema (Schema.Class) has a `fields` property
 type FieldfulSchema = Schema.Top & { readonly fields: Schema.Struct.Fields };
 
 type PayloadFieldsType<C extends OperationDef> = C extends {
@@ -294,13 +246,9 @@ type PayloadFieldsType<C extends OperationDef> = C extends {
       ? { readonly _payload: Schema.Schema.Type<P> }
       : {};
 
-// ── Union of all OperationValues for an actor ──────────────────────────────
-
 type OperationUnion<Name extends string, Defs extends OperationDefs> = {
   [Tag in keyof Defs & string]: OperationValue<Name, Tag, Defs[Tag]>;
 }[keyof Defs & string];
-
-// ── ActorRef — value-dispatch ref ──────────────────────────────────────────
 
 export interface ActorRef<Name extends string, Defs extends OperationDefs> {
   readonly execute: <V extends OperationUnion<Name, Defs>>(
@@ -310,8 +258,6 @@ export interface ActorRef<Name extends string, Defs extends OperationDefs> {
     op: V,
   ) => Effect.Effect<ExecId<OperationOutput<V>, OperationError<V>>>;
 }
-
-// ── Handler types ──────────────────────────────────────────────────────────
 
 type HandlerRequest<Tag extends string, C extends OperationDef> = {
   readonly operation: { readonly _tag: Tag } & PayloadFieldsType<C>;
@@ -335,26 +281,11 @@ export interface HandlerOptions {
   readonly mailboxCapacity?: number | "unbounded";
 }
 
-/**
- * Options for `Actor.toLayer` / `Actor.toTestLayer` that extend
- * `HandlerOptions` with a per-call scope builder.
- *
- * `withScope` runs before every handler invocation. It receives the resolved
- * `EntityAddress` for the activation and returns a `Context` that is merged
- * into the handler's runtime via `Effect.provide`. Tags declared in that
- * Context become available to handlers via `yield* Tag`.
- *
- * Use this to derive per-entity services from the entity id (e.g. parse a
- * tuple key, then build a workspace-scoped Context) without threading them
- * as handler parameters or polluting the actor's outer Layer requirements.
- */
 export interface ToLayerOptions<S = never, ES = never, RS = never> extends HandlerOptions {
   readonly withScope?: (
     address: EntityAddress.EntityAddress,
   ) => Effect.Effect<Context.Context<S>, ES, RS>;
 }
-
-// ── ActorMeta — internal metadata ──────────────────────────────────────────
 
 export interface ActorMeta<
   Name extends string,
@@ -366,8 +297,6 @@ export interface ActorMeta<
   readonly internalDefinitions?: OperationDefs;
   readonly entity: ClusterEntity.Entity<Name, Rpcs>;
 }
-
-// ── ActorClientService — phantom type for Context tag ──────────────────────
 
 declare const ActorClientServiceId: unique symbol;
 
@@ -432,18 +361,8 @@ export interface ActorControlClientService<Name extends string> {
 }
 
 export interface ActorControlClient {
-  /**
-   * Stop accepting more pending work for this actor id by clearing its mailbox.
-   * In-flight handler cancellation depends on cluster passivation support.
-   */
   readonly interrupt: (entityId: string) => Effect.Effect<void, PersistenceError>;
-  /**
-   * Clear pending persisted work for this actor id.
-   */
   readonly flush: (entityId: string) => Effect.Effect<void, PersistenceError>;
-  /**
-   * Mark persisted pending work for this actor id as redeliverable.
-   */
   readonly redeliver: (entityId: string) => Effect.Effect<void, PersistenceError>;
 }
 
@@ -477,14 +396,6 @@ export const provideLayerBuildContext = <A, E, R>(
     ),
   );
 
-/**
- * The layer-build context is captured wherever the actor layer is built. When
- * that happens inside another actor's handler (a nested composition root), the
- * fiber context carries that outer actor's `CurrentAddress`, runner address,
- * state registry, and scope. Those must not shadow the values the entity
- * manager provides to the handler build, or the inner actor would read the
- * outer entity's identity.
- */
 function omitLayerBuildContextExclusions<R>(
   context: Context.Context<Exclude<R, ActorLayerBuildContextExclusions>>,
 ): Context.Context<Exclude<R, ActorLayerBuildContextExclusions>>;
@@ -499,17 +410,6 @@ function omitLayerBuildContextExclusions<R>(
   )(context);
 }
 
-/**
- * Typed state declaration for an entity. When supplied via `fromEntity`'s
- * options, `getState` / `watchState` / `waitForState` infer their return
- * State and Error channels — callers no longer pass `<State>` generics at
- * every call site.
- *
- * The `schema` is type-only — it is not used at runtime to validate the
- * registered handle's emissions. Encore relies on the handle returning the
- * declared type honestly; treat the schema as a typing contract, not a
- * boundary parse.
- */
 export interface ActorStateDef {
   readonly schema?: Schema.Top;
   readonly error?: Schema.Top;
@@ -531,13 +431,6 @@ export interface FromEntityOptions<S extends ActorStateDef | void = void> {
   readonly state?: S;
 }
 
-// ── OperationHandle — per-op payload-only dispatch surface ─────────────────
-
-/**
- * `PayloadInput<C>` is the user-facing payload type for an operation. For
- * struct fields, it's the readonly struct; for opaque/scalar payload, it's
- * the raw scalar; for empty payload, it's `void`.
- */
 export type PayloadInput<C extends OperationDef> = C extends {
   readonly payload: infer F extends Schema.Struct.Fields;
 }
@@ -550,12 +443,6 @@ export type PayloadInput<C extends OperationDef> = C extends {
       ? Schema.Schema.Type<P>
       : void;
 
-/**
- * Per-operation handle. The dispatch surface for a single tag — replaces the
- * old `Actor.ref(id)` + `Actor.Op({...})` value-construction pattern with a
- * payload-only API. The `id` fn on the OperationDef is invoked internally to
- * derive `{entityId, primaryKey}` for routing and dedup.
- */
 export interface OperationHandle<
   Name extends string,
   Tag extends string,
@@ -582,32 +469,10 @@ export interface OperationHandle<
     | EntityNotAssignedToRunner,
     Client
   >;
-  /**
-   * Fire a durable `send` and then poll the persisted reply until it becomes
-   * terminal, returning the applied result. Composes `send` + `peek` so a
-   * sender-only host can block on an entity's outcome.
-   *
-   * Semantics:
-   * 1. Works **without local Sharding** — usable from a `Client.layer.memory` /
-   *    `Client.layer.fromConfig` sender host (the `Client` transport seam +
-   *    `MessageStorage` for the `peek` loop), unlike `.execute` which requires
-   *    `ActorClientService`.
-   * 2. Dedup: if a prior `send` with the same `primaryKey` already has a
-   *    terminal persisted reply, the mailbox dedups and `sendAndAwait` returns
-   *    that persisted result immediately (matches `send`/`peek` semantics).
-   * 3. Ops with a future `deliverAt` poll until delivery + processing — the
-   *    `timeout` must exceed the `deliverAt` delay.
-   * 4. The default poll interval is 200ms;
-   *    override via `schedule`.
-   *
-   * A persisted `Failure` reply surfaces in the error channel; `Defect` and
-   * `Interrupted` replies die; exceeding the (required) `timeout` fails with
-   * `SendAndAwaitTimeout`.
-   */
   readonly sendAndAwait: (
     payload: PayloadInput<C>,
     options: {
-      readonly timeout: Duration.Input; // REQUIRED — unbounded sender-side polling in a request-scoped host is a foot-gun
+      readonly timeout: Duration.Input;
       // eslint-disable-next-line typescript-eslint/no-explicit-any
       readonly schedule?: Schedule.Schedule<any, unknown>;
     },
@@ -659,8 +524,6 @@ export interface OperationHandle<
   readonly make: (payload: PayloadInput<C>) => OperationValue<Name, Tag, C>;
 }
 
-// ── EntityActor — the unified return type ──────────────────────────────────
-
 type ActorOperationHandles<Name extends string, Defs extends OperationDefs> = {
   readonly [Tag in keyof Defs & string]: OperationHandle<Name, Tag, Defs[Tag], Defs>;
 };
@@ -686,16 +549,6 @@ export type EntityActor<
       ActorStateClientService<Name>,
       ActorStateClient<State, StateError>
     >;
-    /**
-     * Stop accepting more work for this entity — clears the pending mailbox.
-     * Distinct intent from `flush` ("clean slate"): use `interrupt` when you
-     * want the entity to stop processing new messages but want to preserve
-     * the conceptual "I asked the actor to stop" semantics.
-     *
-     * Programmatic in-flight fiber cancellation requires `Sharding.passivate`,
-     * which is not yet a public API in effect-cluster. In practice, in-flight
-     * handlers run to completion; only queued/pending work is cleared.
-     */
     readonly interrupt: (entityId: string) => Effect.Effect<void, PersistenceError, Client>;
     readonly flush: (actorId: string) => Effect.Effect<void, PersistenceError, Client>;
     readonly redeliver: (actorId: string) => Effect.Effect<void, PersistenceError, Client>;
@@ -744,20 +597,7 @@ export type EntityActor<
     ) => <Value>(value: Value) => value is Value & OperationValue<Name, Tag, Defs[Tag]>;
   };
 
-// ── Compile runtime ────────────────────────────────────────────────────────
-
 /* oxlint-disable effect/noAs, effect/noChainedTypeAssertions, effect/noKnownValueWidening, effect/noUnknownParameters, effect/noUnsafeDictionaryType -- This compiler erases schema-specific RPC types once and restores the public generic actor interface through overloads. */
-
-// ── peek — internal implementation ───────────────────────────────────────
-//
-// The outgoing request compiler, the test-mailbox
-// router (`makeTestMailboxImpl`), the address helper (`resolveEntityAddress`),
-// and the `flush`/`redeliver` storage ops all moved INSIDE the `Client` seam
-// (`client.ts`, ADR-0002). `actor.ts` imports the ones it still needs
-// directly (`resolveEntityAddress` for the state/rerun ops) and routes
-// dispatch + control through the `Client` Tag.
-
-// ── rerun — surgical per-invocation deletion ──────────────────────────────
 
 const peekImpl = (
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased
@@ -767,8 +607,6 @@ const peekImpl = (
 ): Effect.Effect<PeekResult, PersistenceError | MalformedMessage, Client> =>
   Client.use((client) => client.peek(entity, execId, definitions));
 
-// ── watch — internal implementation ──────────────────────────────────────
-
 const watchImpl = (
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- entity Rpcs type erased
   entity: ClusterEntity.Entity<string, any>,
@@ -777,8 +615,6 @@ const watchImpl = (
   options?: { readonly interval?: Duration.Input },
 ): Stream.Stream<PeekResult, PersistenceError | MalformedMessage, Client> =>
   watchExecution(peekImpl(entity, execId, definitions), options);
-
-// ── Actor.fromEntity ──────────────────────────────────────────────────────
 
 const fromEntity = <
   const Name extends string,
@@ -807,8 +643,6 @@ const fromEntity = <
 
   const entity = Entity.make(name, rpcs as Array<DefRpcs<Defs>>);
 
-  // Build the raw OperationValue for a given tag/payload — used by `make`
-  // escape hatch and internally by execute/send to feed buildActorRef.
   const buildOpValue = (tag: string, payload: unknown) =>
     makeOperationValue(internalDefinitions[tag], tag, payload);
 
@@ -849,17 +683,10 @@ const fromEntity = <
   // eslint-disable-next-line typescript-eslint/no-explicit-any -- Entity<Name> → Entity<string> widening
   const entityAny = entity as unknown as ClusterEntity.Entity<string, any>;
 
-  // flush/redeliver/interrupt route through the deep `Client` seam (decision
-  // #1: the control ops moved inside the Client). The host wires ONE
-  // `Client.layer.*` adapter; the requirement collapses to the single `Client`
-  // Tag.
   const flushFn = (actorId: string) => Client.use((client) => client.flush(entityAny, actorId));
   const redeliverFn = (actorId: string) =>
     Client.use((client) => client.redeliver(entityAny, actorId));
 
-  // interrupt — rewired from Effect.die to flush. Distinct intent from
-  // flush ("stop accepting more work" vs "clean slate"). Programmatic
-  // in-flight cancellation requires Sharding.passivate (not yet public).
   const interruptFn = (entityId: string) =>
     Client.use((client) => client.flush(entityAny, entityId));
 
@@ -880,7 +707,6 @@ const fromEntity = <
     return Schema.decodeUnknownEffect(stateSchema.value)(raw) as Effect.Effect<unknown, unknown>;
   };
   const decodeFailure = (cause: unknown): Effect.Effect<never, unknown> => {
-    // No error schema, or a nullish cause, passes straight through undecoded.
     if (Option.isNone(errorSchema) || Option.isNone(Option.fromNullishOr(cause))) {
       return Effect.fail(cause);
     }
@@ -937,9 +763,6 @@ const fromEntity = <
 
   const listStateEntityIdsFn = () => listStateEntityIds(String(entityAny.type));
 
-  // Build per-op handles. Each handle derives entityId/primaryKey from
-  // payload via resolveId, and composes execute/send/peek/watch/waitFor/
-  // executionId/rerun/make on top of the existing impls.
   const handles: Record<string, OperationHandle<Name, string, OperationDef>> = {};
   for (const tag of Object.keys(definitions)) {
     const def = definitions[tag] as OperationDef;
@@ -979,8 +802,6 @@ const fromEntity = <
   return actor as EntityActor<Name, Defs, StateOf<StateDef>, StateErrorOf<StateDef>>;
 };
 
-// ── makeOperationHandle — build a single OperationHandle ─────────────────
-
 const makeOperationHandle = <
   Name extends string,
   Tag extends string,
@@ -1001,13 +822,6 @@ const makeOperationHandle = <
 
   const invocationOf = (payload: unknown) => compileInvocation(entityAny, tag, def, payload);
 
-  // .send dispatches through the deep `Client` seam (ADR-0002). The Client
-  // owns the wire-envelope builder + the mailbox/resolver/snowflake strategy
-  // internally, so the producer-side requirement collapses from the former
-  // `ActorMailbox | ActorAddressResolver | Snowflake.Generator` triad to a
-  // single `Client` Tag. The host wires ONE `Client.layer.*` adapter
-  // (`fromConfig` producer / `fromSharding` consumer / `memory` / `test`).
-  // Extracted as a local so `sendAndAwait` can reuse it.
   const sendFn = (payload: unknown) =>
     Effect.gen(function* () {
       const client = yield* Client;
@@ -1097,15 +911,9 @@ const makeOperationHandle = <
     make: ((payload: unknown) => invocationOf(payload).operation as never) as never,
   };
 
-  // Reference name to avoid unused warnings in some flows
   void name;
   return handle;
 };
-
-// ── Actor.toLayer ──────────────────────────────────────────────────────────
-
-// Client-only layer (producer): Actor.toLayer(actor)
-// Consumer + producer layer: Actor.toLayer(actor, handlers)
 
 function toLayer<
   Name extends string,
@@ -1162,14 +970,6 @@ function toLayer<
   | Rpc.MiddlewareClient<Rpcs>
 >;
 
-// Workflow overload
-//
-// Mirrors upstream `Workflow.toLayer`: excludes `WorkflowEngine | WorkflowInstance |
-// Execution<Name> | Scope.Scope` from the handler's `R`, so callers don't see
-// internal context tags injected by `step.run` leak into the layer's
-// requirements. Without these excludes, a handler that calls `step.run(...)`
-// causes the resulting Layer's `RIn` to include `WorkflowInstance`, which is
-// unsatisfiable from user code.
 function toLayer<
   Name extends string,
   Payload extends Schema.Struct.Fields,
@@ -1220,30 +1020,12 @@ function toLayer(
     }),
   );
 
-  // Consumer hosts already have full `Sharding.Sharding` from
-  // `ClusterRunnerSocket.layer` / similar — wire ActorMailbox + ActorAddressResolver
-  // from that. Producer-only hosts must wire `Client.layer.fromConfig` explicitly
-  // at the runtime root.
-  //
-  // `Snowflake.layerGenerator` is needed by `Client.send` to build the
-  // `OutgoingRequest`. `Sharding.layer` consumes it internally but doesn't
-  // expose it, so we provide a fresh generator at this surface.
-  //
-  // The deep `Client` Tag is composed over those same transport siblings
-  // (`clientServiceLayer` requires `ActorMailbox | ActorAddressResolver |
-  // Snowflake | MessageStorage`; the first three come from this merge, the last
-  // from the consumer's Sharding stack), AND the raw transport Tags stay
-  // exposed because `peek`/`getState`/`rerun` still require
-  // `MessageStorage | ActorAddressResolver` directly.
   const transportSupportLayers = Layer.mergeAll(
     ActorMailboxLayer.fromSharding,
     ActorAddressResolverLayer.fromSharding,
     ActorStateRegistry.Live,
     Snowflake.layerGenerator,
   );
-  // `Layer.fresh` for the same reason as in `toTestLayer`: the shared
-  // module-level `clientServiceLayer` must be rebuilt per-actor over THIS
-  // actor's transport, not memoized to the first build.
   const consumerSupportLayers = attachFreshService(transportSupportLayers, clientServiceLayer);
 
   const stateLayer = makeActorStateLayer(actor);
@@ -1270,9 +1052,6 @@ function toLayer(
   return assembleActorRuntime(baseLayer, stateLayer, controlLayer);
 }
 
-// ── Actor.toTestLayer ─────────────────────────────────────────────────────
-
-// Entity overload
 function toTestLayer<
   Name extends string,
   Defs extends OperationDefs,
@@ -1304,7 +1083,6 @@ function toTestLayer<
   | ShardingConfig.ShardingConfig
 >;
 
-// Workflow overload
 function toTestLayer<
   Name extends string,
   Payload extends Schema.Struct.Fields,
@@ -1350,13 +1128,6 @@ function toTestLayer(
     MessageStorage.layerMemory,
     Snowflake.layerGenerator,
   );
-  // Build the test rpcClient factory once and use it for BOTH the
-  // ActorClientService (.execute path) AND the test ActorMailbox (.send path).
-  // `Entity.makeTestClient` is a scoped resource — `Layer.scopedContext` hosts
-  // it in the layer's build scope and we expose two services from one closure.
-  //
-  // Pure-data resolver + a fresh Snowflake.Generator complete the wiring so
-  // OperationHandle.send can build OutgoingRequests.
   const factoryAndMailboxLayer = Layer.effectContext(
     Effect.gen(function* () {
       const registry = yield* ActorStateRegistry;
@@ -1383,21 +1154,10 @@ function toTestLayer(
     }),
   );
 
-  // The injected test `ActorMailbox` (`factoryAndMailboxLayer`) plus the
-  // pure-data resolver/storage/snowflake in `supportLayers` satisfy the deep
-  // `Client`'s requirements — so `.send` (now `Client`-channeled) resolves
-  // through the test mailbox, routing the prebuilt request back through the
-  // per-entity test rpcClient with `{ discard: true }`.
   const transportSupportLayers = Layer.merge(
     Layer.provide(factoryAndMailboxLayer, supportLayers),
     supportLayers,
   );
-  // `Layer.fresh`: `clientServiceLayer` is a shared module-level Layer, so
-  // without `fresh` Effect's identity-based memoization would build the deep
-  // `Client` ONCE and reuse that build (capturing the FIRST actor's test
-  // mailbox) across every `toTestLayer` in the same runtime — routing a
-  // second actor's `.send` to the wrong per-entity rpcClient. `fresh` forces a
-  // per-actor build over this actor's own transport.
   const baseLayer = attachFreshService(transportSupportLayers, clientServiceLayer);
   const stateLayer = makeActorStateLayer(actor);
   const controlLayer = makeActorControlLayer(actor);
@@ -1411,11 +1171,6 @@ const makeActorControlLayer = <Name extends string, Defs extends OperationDefs>(
   Layer.effect(
     actor.Control,
     Effect.gen(function* () {
-      // The control ops route through the deep `Client` seam (ADR-0002), so
-      // the layer captures the single `Client` Tag at build time and closes it
-      // over each op — collapsing the requirement to `never` per method, in
-      // lockstep with the rewired `actor.interrupt/flush/redeliver` (which now
-      // require exactly `Client`).
       const client = yield* Client;
 
       const provideSupport = <A, E, R>(
@@ -1489,8 +1244,6 @@ const makeActorStateLayer = <Name extends string, Defs extends OperationDefs, St
     }),
   );
 
-// ── Transform handlers from operation-first to request-first ───────────────
-
 const provideHandlerContext = <A, E, R>(
   body: Effect.Effect<A, E, R>,
   context: Context.Context<R>,
@@ -1539,8 +1292,6 @@ const transformHandlers = (
     transformHandlers(b, definitions, withScope),
   );
 };
-
-// ── buildActorRef — value-dispatch ref ─────────────────────────────────────
 
 const buildActorRef = <Name extends string, Defs extends OperationDefs>(
   _actorName: Name,
@@ -1617,8 +1368,6 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
 
 /* oxlint-enable effect/noAs, effect/noChainedTypeAssertions, effect/noKnownValueWidening, effect/noUnknownParameters, effect/noUnsafeDictionaryType */
 
-// ── Escape hatch: raw Rpc definitions ──────────────────────────────────────
-
 /* oxlint-disable effect/noAs, effect/noChainedTypeAssertions, effect/noKnownValueWidening -- Raw Rpc and protocol transforms preserve upstream generic evidence through this explicit escape hatch. */
 
 export const fromRpcs = <const Name extends string, const Rpcs extends ReadonlyArray<Rpc.Any>>(
@@ -1633,8 +1382,6 @@ export const fromRpcs = <const Name extends string, const Rpcs extends ReadonlyA
   name,
   entity: Entity.make(name, rpcs as unknown as Array<Rpcs[number]>),
 });
-
-// ── Protocol transform ────────────────────────────────────────────────────
 
 type WithProtocolDataLast = {
   (
@@ -1684,8 +1431,6 @@ export const withProtocol: WithProtocol = dual(2, withProtocolImpl);
 
 export { CurrentAddress };
 
-// ── Any types + Type Guards ───────────────────────────────────────────────
-
 // eslint-disable-next-line typescript-eslint/no-explicit-any
 export type AnyEntityActor = EntityActor<any, any, any, any, any>;
 // eslint-disable-next-line typescript-eslint/no-explicit-any
@@ -1695,8 +1440,6 @@ export type AnyActor = AnyEntityActor | AnyWorkflowActor;
 const isEntity = (actor: AnyActor): actor is AnyEntityActor => actor._tag === "EntityActor";
 
 const isWorkflow = (actor: AnyActor): actor is AnyWorkflowActor => actor._tag === "WorkflowActor";
-
-// ── Public API ─────────────────────────────────────────────────────────────
 
 export const Actor = {
   CurrentAddress,

@@ -113,8 +113,6 @@ describe("Actor.fromWorkflow — execute/send", () => {
   );
 });
 
-// ── Workflow with error ────────────────────────────────────────────────────
-
 const FailingWorkflow = Actor.fromWorkflow("FailingWorkflow", {
   payload: { input: Schema.String },
   error: OrderError,
@@ -143,14 +141,11 @@ describe("Actor.fromWorkflow — errors", () => {
         const result = yield* FailingWorkflow.peek({ input: "peek-fail" });
         expect(result._tag).toBe("Failure");
         if (result._tag === "Failure") {
-          // Should be the user's OrderError, not a raw Cause tree
           expect(result.error).toBeInstanceOf(OrderError);
         }
       }),
   );
 });
-
-// ── Workflow with defect ────────────────────────────────────────────────────
 
 const DefectWorkflow = Actor.fromWorkflow("DefectWorkflow", {
   payload: { input: Schema.String },
@@ -175,8 +170,6 @@ describe("Actor.fromWorkflow — defects", () => {
   );
 });
 
-// ── Workflow lifecycle ────────────────────────────────────────────────────
-
 describe("Actor.fromWorkflow — lifecycle", () => {
   test("resume method exists", () => {
     expect(ProcessOrder.resume).toBeDefined();
@@ -191,8 +184,6 @@ describe("Actor.fromWorkflow — lifecycle", () => {
   });
 });
 
-// ── Idempotency ─────────────────────────────────────────────────────────
-
 describe("Actor.fromWorkflow — idempotency", () => {
   it.scopedLive.layer(GreeterTest)("same payload yields same ExecId", () =>
     Effect.gen(function* () {
@@ -202,8 +193,6 @@ describe("Actor.fromWorkflow — idempotency", () => {
     }),
   );
 });
-
-// ── Production layer pattern (Actor.toLayer + external WorkflowEngine) ──
 
 describe("Actor.fromWorkflow — production layer", () => {
   const ProductionLayer = Actor.toLayer(Greeter, (payload) =>

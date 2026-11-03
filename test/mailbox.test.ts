@@ -1,19 +1,3 @@
-/**
- * ActorMailboxLayer.fromConfig behavior coverage.
- *
- * codex (2026-05-05) called out that the mailbox path was under-tested: most
- * `.send` coverage went through `Actor.toTestLayer`, which bypasses storage
- * by invoking the test rpc client directly. This file pins:
- *
- * 1. Persisted gate — non-persisted requests fail loudly (mirror of upstream
- *    `Sharding.sendOutgoing`'s persisted check).
- * 2. Success enqueues to `MessageStorage.saveRequest`.
- * 3. Duplicate primaryKey is treated as enqueued (no error), per codex's
- *    correction to handle both `SaveResult.Success` and `SaveResult.Duplicate`.
- * 4. Cross-process delivery — a producer using `fromConfig` writes to the same
- *    storage that a consumer's poll loop reads from, exercising the path that
- *    motivated this work.
- */
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { BunCrypto } from "@effect/platform-bun";
 import { describe, expect, it } from "effect-bun-test";
@@ -37,8 +21,6 @@ import { ActorAddressResolver, ActorAddressResolverLayer } from "../src/actor-ad
 import { ActorMailbox, ActorMailboxLayer, MailboxError } from "../src/actor-mailbox.js";
 import { Actor, fromSqlClient } from "../src/index.js";
 
-// Two actors: one persisted, one not. The persisted one round-trips through
-// fromConfig; the non-persisted one MUST be rejected.
 const PersistedActor = Actor.fromEntity("MailboxPersistedActor", {
   Place: {
     payload: { item: Schema.String },
@@ -58,7 +40,6 @@ const SchemaPayloadActor = Actor.fromEntity("MailboxSchemaPayloadActor", {
 });
 
 const LiveOnlyActor = Actor.fromEntity("MailboxLiveOnlyActor", {
-  // No `persisted: true` — live-only.
   Ping: {
     payload: { input: Schema.String },
     success: Schema.String,
@@ -66,9 +47,6 @@ const LiveOnlyActor = Actor.fromEntity("MailboxLiveOnlyActor", {
   },
 });
 
-// Build a minimal OutgoingRequest by hand so the test does not depend on the
-// internal `OperationHandle.send` plumbing. Mirrors the Invocation compiler
-// in actor.ts but inlined here for unit-test clarity.
 const buildRequest = (
   actor: typeof PersistedActor | typeof SchemaPayloadActor | typeof LiveOnlyActor,
   tag: string,
@@ -116,9 +94,6 @@ const buildRequest = (
     });
   });
 
-// MessageStorage (memory) + Snowflake.Generator. fromConfig consumes only
-// MessageStorage; the test layer adds Snowflake for the test's own request
-// builder, plus ShardingConfig for layerMemory.
 const StorageLayer = MessageStorage.layerMemory.pipe(Layer.provideMerge(ShardingConfig.layer()));
 const TestStack = ActorMailboxLayer.fromConfig.pipe(
   Layer.provideMerge(StorageLayer),
@@ -157,8 +132,6 @@ describe("ActorMailboxLayer.fromConfig", () => {
       const storage = yield* MessageStorage.MessageStorage;
       const request = yield* buildRequest(PersistedActor, "Place", { item: "widget" });
       yield* mailbox.send(request);
-      // Read back via the same storage handle: there should be at least one
-      // unprocessed envelope addressed to the entity.
       const unprocessed = yield* storage.unprocessedMessages([request.envelope.address.shardId]);
       expect(unprocessed.length).toBeGreaterThan(0);
     }).pipe(Effect.provide(TestStack)),
@@ -170,8 +143,6 @@ describe("ActorMailboxLayer.fromConfig", () => {
       const a = yield* buildRequest(PersistedActor, "Place", { item: "dup" });
       const b = yield* buildRequest(PersistedActor, "Place", { item: "dup" });
       yield* mailbox.send(a);
-      // Second send same primaryKey — saveRequest returns Duplicate. Mailbox
-      // must NOT propagate that as an error.
       const exit = yield* mailbox.send(b).pipe(Effect.exit);
       expect(Exit.isSuccess(exit)).toBe(true);
     }).pipe(Effect.provide(TestStack)),
@@ -213,10 +184,6 @@ describe("ActorMailboxLayer.fromConfig", () => {
   );
 });
 
-// Producer (fromConfig) -> consumer (full Sharding) cross-runtime check.
-// Verifies the design invariant: a producer that ONLY has MessageStorage can
-// drop a persisted envelope into the same MemoryDriver that the consumer's
-// poll loop reads from.
 // eslint-disable-next-line typescript-eslint/no-explicit-any -- Entity name param is invariant; production casts the same way at actor.ts
 // oxlint-disable-next-line effect/noAs -- the resolver seam erases the invariant entity name and RPC union
 const persistedEntity = PersistedActor._meta.entity as ClusterEntity.Entity<string, any>;

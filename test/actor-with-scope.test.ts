@@ -80,8 +80,6 @@ const Nested = Actor.fromEntity("Nested", {
   },
 });
 
-// Models an actor layer built inside another actor's handler: the fiber
-// context at layer-build time already carries an outer `CurrentAddress`.
 const outerAddress = EntityAddress.make({
   shardId: ShardId.make("default", 1),
   entityType: EntityType.make("Outer"),
