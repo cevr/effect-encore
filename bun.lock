@@ -17,7 +17,7 @@
         "lefthook": "^2.1.12",
         "oxfmt": "^0.66.0",
         "oxlint": "^1.81.0",
-        "oxlint-plugin-effect": "^0.32.0",
+        "oxlint-plugin-effect": "^0.32.1",
         "tsdown": "^0.23.0",
         "typescript": "^7.0.2",
       },
@@ -415,7 +415,7 @@
 
     "oxlint": ["oxlint@1.81.0", "", { "optionalDependencies": { "@oxlint/binding-android-arm-eabi": "1.81.0", "@oxlint/binding-android-arm64": "1.81.0", "@oxlint/binding-darwin-arm64": "1.81.0", "@oxlint/binding-darwin-x64": "1.81.0", "@oxlint/binding-freebsd-x64": "1.81.0", "@oxlint/binding-linux-arm-gnueabihf": "1.81.0", "@oxlint/binding-linux-arm-musleabihf": "1.81.0", "@oxlint/binding-linux-arm64-gnu": "1.81.0", "@oxlint/binding-linux-arm64-musl": "1.81.0", "@oxlint/binding-linux-ppc64-gnu": "1.81.0", "@oxlint/binding-linux-riscv64-gnu": "1.81.0", "@oxlint/binding-linux-riscv64-musl": "1.81.0", "@oxlint/binding-linux-s390x-gnu": "1.81.0", "@oxlint/binding-linux-x64-gnu": "1.81.0", "@oxlint/binding-linux-x64-musl": "1.81.0", "@oxlint/binding-openharmony-arm64": "1.81.0", "@oxlint/binding-win32-arm64-msvc": "1.81.0", "@oxlint/binding-win32-ia32-msvc": "1.81.0", "@oxlint/binding-win32-x64-msvc": "1.81.0" }, "peerDependencies": { "oxlint-tsgolint": ">=7.0.2001", "vite-plus": "*" }, "optionalPeers": ["oxlint-tsgolint", "vite-plus"], "bin": { "oxlint": "bin/oxlint" } }, "sha512-HyrJYqeoOCL0iqaLEzGewGT48ZX99P3hxYh8udAF9RGGIghSamkXE4ClUyBpEDNqasamThgmlPbuMOe7SAZmHg=="],
 
-    "oxlint-plugin-effect": ["oxlint-plugin-effect@0.32.0", "", { "dependencies": { "@oxlint/plugins": "^1.64.0" }, "peerDependencies": { "effect": ">=4.1.0 <5" } }, "sha512-yLHCjXzGnY3rJwgE6C8aBRqfQya4hyaA1FFRMmpkNzP9HWmwvMoiq4bfI5nk5Hznd9pnkuH5FqbS7kMG0Q//NQ=="],
+    "oxlint-plugin-effect": ["oxlint-plugin-effect@0.32.1", "", { "dependencies": { "@oxlint/plugins": "^1.64.0" }, "peerDependencies": { "effect": ">=4.1.0 <5" } }, "sha512-nqCPTaU2yX0VJ4yoIvsIQJos4hJdGvGKbartR3dpX8UkQY7+5wJQkaRNwKZyWeKZnfr0V2rZxaLOF8mOE9LKfQ=="],
 
     "package-manager-detector": ["package-manager-detector@1.8.0", "", {}, "sha512-yQA4H19AmPEoMUeavPMDIe1higySl/gH/yaQrkT/s07Qp+7pp2hYz30N3z2l5BkjVkF9Ow6o0wjJamm2y7Sn0A=="],
 
