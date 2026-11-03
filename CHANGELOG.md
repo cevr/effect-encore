@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.34.1
+
+### Patch Changes
+
+- [`2297807`](https://github.com/cevr/effect-encore/commit/2297807cc745047e25d072cb925f72b3cc5a86a7) Thanks [@cevr](https://github.com/cevr)! - Restore doc comments on the public API, so editors show them again.
+
 ## 0.34.0
 
 ### Minor Changes
