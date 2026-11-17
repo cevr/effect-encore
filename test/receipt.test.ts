@@ -25,9 +25,12 @@ import {
 } from "../src/receipt.js";
 import type { ActorAddressResolver } from "../src/actor-address-resolver.js";
 
-class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
-  message: Schema.String,
-}) {}
+class OrderError extends Schema.TaggedError<OrderError, { readonly brand: unique symbol }>()(
+  "OrderError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 describe("ExecId", () => {
   test("is a branded string", () => {

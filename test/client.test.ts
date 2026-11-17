@@ -9,7 +9,10 @@ const TestShardingConfig = ShardingConfig.layer({
   entityTerminationTimeout: 0,
 });
 
-class ValidationError extends Schema.TaggedError<ValidationError>()("ValidationError", {
+class ValidationError extends Schema.TaggedError<
+  ValidationError,
+  { readonly brand: unique symbol }
+>()("ValidationError", {
   message: Schema.String,
 }) {}
 

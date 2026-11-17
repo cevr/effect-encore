@@ -3,9 +3,12 @@ import { Effect, Layer, Schema } from "effect";
 import { TestRunner } from "effect/cluster";
 import { Actor } from "../src/index.js";
 
-class ProcessError extends Schema.TaggedError<ProcessError>()("ProcessError", {
-  message: Schema.String,
-}) {}
+class ProcessError extends Schema.TaggedError<ProcessError, { readonly brand: unique symbol }>()(
+  "ProcessError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 const PeekableActor = Actor.fromEntity("PeekableActor", {
   Process: {

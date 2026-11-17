@@ -33,7 +33,7 @@ This ADR reproduces them verbatim and records the design choices around them.
 ### Seam 1 — `Client` (the unified transport seam)
 
 > **Client** — the unified transport seam. One Tag owning `send / resolve / peek /
-flush / redeliver` plus the wire-envelope builder, with adapters
+> flush / redeliver` plus the wire-envelope builder, with adapters
 > `Client.layer.{fromConfig, fromSharding, memory, test}`. Supersedes the
 > hand-assembled mailbox+resolver+Snowflake triad. Address resolution
 > (`fromConfig`/`fromSharding`, carrying the shard-parity invariant) survives as an

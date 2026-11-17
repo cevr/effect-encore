@@ -62,9 +62,12 @@ const SleeperTest = Actor.toTestLayer(Sleeper, (payload, step) =>
   }),
 );
 
-class StepError extends Schema.TaggedError<StepError>()("StepError", {
-  reason: Schema.String,
-}) {}
+class StepError extends Schema.TaggedError<StepError, { readonly brand: unique symbol }>()(
+  "StepError",
+  {
+    reason: Schema.String,
+  },
+) {}
 
 const Failable = Actor.fromWorkflow("Failable", {
   payload: { input: Schema.String },

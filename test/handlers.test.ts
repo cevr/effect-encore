@@ -49,9 +49,12 @@ const GenActorTest = Layer.provide(
   TestShardingConfig,
 );
 
-class HandlerError extends Schema.TaggedError<HandlerError>()("HandlerError", {
-  reason: Schema.String,
-}) {}
+class HandlerError extends Schema.TaggedError<HandlerError, { readonly brand: unique symbol }>()(
+  "HandlerError",
+  {
+    reason: Schema.String,
+  },
+) {}
 
 const ErrActor = Actor.fromEntity("ErrActor", {
   Fail: {

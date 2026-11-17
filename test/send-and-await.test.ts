@@ -20,9 +20,12 @@ const senderOnlyHost = Layer.mergeAll(
   ActorAddressResolverLayer.fromConfig,
 ).pipe(Layer.provideMerge(senderOnlyStorage));
 
-class ProcessError extends Schema.TaggedError<ProcessError>()("ProcessError", {
-  message: Schema.String,
-}) {}
+class ProcessError extends Schema.TaggedError<ProcessError, { readonly brand: unique symbol }>()(
+  "ProcessError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 const Counter = Ref.makeUnsafe(0);
 
@@ -62,7 +65,9 @@ const sendAwaitHandlers = Actor.toLayer(SendAwaitActor, {
 
 const TestCluster = TestRunner.layer;
 
-class RoutedKey extends Schema.Class<RoutedKey>("send-await/RoutedKey")({
+class RoutedKey extends Schema.Class<RoutedKey, { readonly brand: unique symbol }>(
+  "send-await/RoutedKey",
+)({
   region: Schema.String,
   seq: Schema.Finite,
 }) {

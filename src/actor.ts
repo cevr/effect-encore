@@ -1475,7 +1475,7 @@ const buildActorRef = <Name extends string, Defs extends OperationDefs>(
       const pkInput = payloadFromOperation(def, op);
       const { primaryKey } = resolveId(def, pkInput, tag);
       const execId = ExecIdCodec.encode({ entityId: _entityId, tag, primaryKey });
-      return bind(Effect.map(discardCall, () => execId));
+      return bind(Effect.as(discardCall, execId));
     },
   } as ActorRef<Name, Defs>;
 };

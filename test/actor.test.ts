@@ -381,7 +381,9 @@ describe("deliverAt", () => {
   });
 
   it.scopedLive("preserves transformed Schema.Class methods while adding identity", () => {
-    class DecodedPayload extends Schema.Class<DecodedPayload>("test/DecodedPayload")({
+    class DecodedPayload extends Schema.Class<DecodedPayload, { readonly brand: unique symbol }>(
+      "test/DecodedPayload",
+    )({
       id: Schema.String,
     }) {
       key(): string {
@@ -514,7 +516,9 @@ describe("deliverAt", () => {
   });
 
   test("accepts pre-built Schema.Class as input — uses it directly", () => {
-    class CustomPayload extends Schema.Class<CustomPayload>("test/CustomPayload")({
+    class CustomPayload extends Schema.Class<CustomPayload, { readonly brand: unique symbol }>(
+      "test/CustomPayload",
+    )({
       id: Schema.String,
       value: Schema.Finite,
     }) {
@@ -540,9 +544,10 @@ describe("deliverAt", () => {
   });
 
   test("preserves Schema.Class methods while adding identity protocols", () => {
-    class ClassWithoutProtocols extends Schema.Class<ClassWithoutProtocols>(
-      "test/ClassWithoutProtocols",
-    )({
+    class ClassWithoutProtocols extends Schema.Class<
+      ClassWithoutProtocols,
+      { readonly brand: unique symbol }
+    >("test/ClassWithoutProtocols")({
       id: Schema.String,
     }) {
       describe(): string {
@@ -571,7 +576,10 @@ describe("deliverAt", () => {
   });
 
   test("pre-built Schema.Class with DeliverAt works", () => {
-    class ScheduledPayload extends Schema.Class<ScheduledPayload>("test/ScheduledPayload")({
+    class ScheduledPayload extends Schema.Class<
+      ScheduledPayload,
+      { readonly brand: unique symbol }
+    >("test/ScheduledPayload")({
       id: Schema.String,
       when: Schema.DateTimeUtc,
     }) {
@@ -604,7 +612,9 @@ describe("deliverAt", () => {
 });
 
 describe("send ExecId parity with executionId/peek (Schema.Class payloads)", () => {
-  class RoutingKey extends Schema.Class<RoutingKey>("test/RoutingKey")({
+  class RoutingKey extends Schema.Class<RoutingKey, { readonly brand: unique symbol }>(
+    "test/RoutingKey",
+  )({
     region: Schema.String,
     seq: Schema.Finite,
   }) {

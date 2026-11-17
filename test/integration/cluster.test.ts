@@ -3,9 +3,12 @@ import { Effect, Exit, Layer, Schema } from "effect";
 import { TestRunner } from "effect/cluster";
 import { Actor } from "../../src/index.js";
 
-class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
-  message: Schema.String,
-}) {}
+class OrderError extends Schema.TaggedError<OrderError, { readonly brand: unique symbol }>()(
+  "OrderError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 const OrderActor = Actor.fromEntity("Order", {
   Place: {

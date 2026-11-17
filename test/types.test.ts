@@ -23,13 +23,19 @@ import type {
   WorkflowSignal,
 } from "../src/index.js";
 
-class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
-  message: Schema.String,
-}) {}
+class OrderError extends Schema.TaggedError<OrderError, { readonly brand: unique symbol }>()(
+  "OrderError",
+  {
+    message: Schema.String,
+  },
+) {}
 
-class ForeignError extends Schema.TaggedError<ForeignError>()("ForeignError", {
-  message: Schema.String,
-}) {}
+class ForeignError extends Schema.TaggedError<ForeignError, { readonly brand: unique symbol }>()(
+  "ForeignError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 class StateRequirement extends Context.Service<StateRequirement, { readonly value: number }>()(
   "effect-encore/test/types.test/StateRequirement",
@@ -376,7 +382,10 @@ describe("step DSL type-level tests", () => {
   });
 });
 
-class ApprovalDecision extends Schema.TaggedClass<ApprovalDecision>()("ApprovalDecision", {
+class ApprovalDecision extends Schema.TaggedClass<
+  ApprovalDecision,
+  { readonly brand: unique symbol }
+>()("ApprovalDecision", {
   approved: Schema.Boolean,
 }) {}
 

@@ -11,9 +11,12 @@ import { Actor, Client, ClientLayer, fromSqlClient } from "../src/index.js";
 import { makeTestMailboxImpl } from "../src/client.js";
 import { compileInvocation } from "../src/internal/invocation-compiler.js";
 
-class ProcessError extends Schema.TaggedError<ProcessError>()("ProcessError", {
-  message: Schema.String,
-}) {}
+class ProcessError extends Schema.TaggedError<ProcessError, { readonly brand: unique symbol }>()(
+  "ProcessError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 const ClientActor = Actor.fromEntity("ClientLayerActor", {
   Process: {

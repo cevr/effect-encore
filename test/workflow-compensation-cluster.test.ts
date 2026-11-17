@@ -3,7 +3,10 @@ import { Effect, Layer, Result, Schema } from "effect";
 import { ClusterWorkflowEngine, TestRunner } from "effect/cluster";
 import { Actor } from "../src/index.js";
 
-class CompensationError extends Schema.TaggedError<CompensationError>()("CompensationError", {
+class CompensationError extends Schema.TaggedError<
+  CompensationError,
+  { readonly brand: unique symbol }
+>()("CompensationError", {
   message: Schema.String,
 }) {}
 

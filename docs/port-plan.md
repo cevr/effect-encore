@@ -28,7 +28,7 @@ The three seams are the **ALREADY-MADE decisions** recorded in `CONTEXT.md` §Se
 This plan honors them verbatim; it does **not** relitigate them:
 
 1. **Client** (`CONTEXT.md:21-25`) — ONE Tag owning `send / resolve / peek / flush /
-redeliver` **plus the wire-envelope builder**, pulled INSIDE the seam. Adapters
+   redeliver` **plus the wire-envelope builder**, pulled INSIDE the seam. Adapters
    `Client.layer.{fromConfig, fromSharding, memory, test}`. Address resolution stays
    an **internal strategy** (not a public Tag), carrying the shard-parity invariant
    (`actor-address-resolver.ts:24-27`). This is the Bite `Client.layer` work
@@ -41,7 +41,7 @@ redeliver` **plus the wire-envelope builder**, pulled INSIDE the seam. Adapters
 3. **ReplySource** (`CONTEXT.md:31-38`) — lift the await ENGINE out of `actor.ts`
    into `receipt.ts`: an `ExecIdCodec` (collapse the triplicated
    `entityId\x00tag\x00primaryKey` format), a `ReplySource = (ExecId) =>
-Effect<PeekResult>` Tag, and the Exit→PeekResult mapping. Default adapter =
+   Effect<PeekResult>` Tag, and the Exit→PeekResult mapping. Default adapter =
    `MessageStorage` (existing `peekImpl`). Makes Exit-classification unit-testable.
 
 ### The central synthesis decision
@@ -208,7 +208,7 @@ Bite's `client.ts` is **reference only** — E5 is a deeper design than Bite shi
   translation** needed when porting the reshape into `src/`; (e)
   the deferred items (durable `State` backing via `cluster_states`+CAS; the gated
   `fromWorkflow` split); (f) the **frozen ExecId wire contract** (`entityId\x00tag\x00
-primaryKey` is persisted into `cluster_messages` dedup identity — centralizing
+  primaryKey` is persisted into `cluster_messages` dedup identity — centralizing
   construction must not change bytes). NO DIVERGENCE.md (encore is not a vendor). Leave
   a "Status: proposed → accepted on publish" marker that E7 ticks. Docs-only.
 - **Gate:** `bun run gate` unchanged (docs + tracking only; no TS). Typecheck baseline
@@ -223,12 +223,12 @@ primaryKey` is persisted into `cluster_messages` dedup identity — centralizing
   `ExecIdCodec.encode({ entityId, tag, primaryKey }): ExecId` and
   `ExecIdCodec.decode(execId): { entityId, tag, primaryKey }`. The encode produces
   exactly `makeExecId(\`${entityId}\x00${tag}\x00${primaryKey}\`)`; the decode is the
-current `parseExecId`body (verbatim from`actor.ts:817-830`, including the
-single-separator and no-separator fallbacks). **Byte-identical** — this is
-centralizing CONSTRUCTION, not changing the format. Rewire the three entity sites:
-mint @1385 (`makeOperationHandle.execId`), mint @1956 (`buildActorRef.send`), and
-delete the local `parseExecId`@817 (its only callers are`peekImpl`@994; repoint
-to`ExecIdCodec.decode`). Export `ExecIdCodec`from`index.ts`.
+  current `parseExecId`body (verbatim from`actor.ts:817-830`, including the
+  single-separator and no-separator fallbacks). **Byte-identical** — this is
+  centralizing CONSTRUCTION, not changing the format. Rewire the three entity sites:
+  mint @1385 (`makeOperationHandle.execId`), mint @1956 (`buildActorRef.send`), and
+  delete the local `parseExecId`@817 (its only callers are`peekImpl`@994; repoint
+  to`ExecIdCodec.decode`). Export `ExecIdCodec`from`index.ts`.
   - **Single-segment workflow ids must round-trip:** `ExecIdCodec.decode` on a
     no-separator id (workflow `makeExecId(executionId)`) must reproduce the current
     `parseExecId` fallback exactly (`entityId == tag == primaryKey == execId`). The
@@ -349,7 +349,7 @@ to`ExecIdCodec.decode`). Export `ExecIdCodec`from`index.ts`.
   - DEMOTE the public `ActorStateHandle` interface (`actor-state.ts:13-16`) to
     registry-internal: drop its `export`. **SPLIT `index.ts:41`** (verified: today it
     is `export type { ActorStateHandle, ActorStateRegistryShape } from
-"./actor-state.js"` on ONE line) — remove only `ActorStateHandle`, **KEEP**
+    "./actor-state.js"` on ONE line) — remove only `ActorStateHandle`, **KEEP**
     `export type { ActorStateRegistryShape } from "./actor-state.js"`. (`package.json`
     has no `./*` wildcard, so the barrel removal is the complete de-export.)
     `actor.ts:79` still `import type { ActorStateHandle }` internally — that import
@@ -363,14 +363,14 @@ to`ExecIdCodec.decode`). Export `ExecIdCodec`from`index.ts`.
     namespace). This requires TWO edits, not one: 1. `export * as State from "./state.js"` in `index.ts` (top-level `State` namespace
     for direct importers). 2. **ADD `State` to the `Actor` const object at `actor.ts:2572`** (verified: it
     currently has `CurrentAddress, registerState, entityIdCodec, fromEntity,
-fromWorkflow, fromRpcs, ...` but **no `State`**). Import the `state.js` module
+    fromWorkflow, fromRpcs, ...` but **no `State`**). Import the `state.js` module
     namespace at the top of `actor.ts` (`import * as State from "./state.js"`) and
     add `State,` to the const so `Actor.State.make(...)` / `Actor.State.updateAndGet(...)`
     resolve. Without this edit, E4's own test migration (which writes
     `Actor.State.make(...)`, see Gate below) would NOT compile.
   - **Update the `Actor.registerState` annotation @2575** (verified: the cast is
     `registerState as <State, Error, Requirements>(handle: ActorStateHandle<...>) =>
-...`). Change its parameter type from `ActorStateHandle<...>` to
+    ...`). Change its parameter type from `ActorStateHandle<...>` to
     `State.State<...>` to match the new `registerState(State)` signature.
   - **BREAKING:** `registerState({get,watch})` → `registerState(State)` and
     `ActorStateHandle` leaves the public barrel. This is the agreed reshape (decision
@@ -431,10 +431,10 @@ fromWorkflow, fromRpcs, ...` but **no `State`**). Import the `state.js` module
     (the line-93 `_check` assertion then pins the new public contract). 2. **Re-point the public `SenderContext` type (`actor.ts:155`, doc-comment
     @146-150).** It is a public union users put in their `R` for producer-op
     composition; it currently lists `MessageStorage | ActorAddressResolver |
-Sharding`. Re-point it to `Client` (the producer-op union is now the single
+    Sharding`. Re-point it to `Client` (the producer-op union is now the single
     Client Tag) and update its doc-comment @146-150 to say so. Re-export stays at
     `index.ts:39` (`SenderContext`, part of the `export type { ... } from
-"./actor.js"` block), so the symbol survives — only its definition changes. (Do NOT silently keep the three-Tag union: that would leave
+    "./actor.js"` block), so the symbol survives — only its definition changes. (Do NOT silently keep the three-Tag union: that would leave
     `SenderContext` describing a transport that no longer exists post-seam.) 3. This is a **type-level public break** — recorded in the Risks table (new risk)
     and the E7 changeset (new BREAKING bullet).
   - **Adapters — all four (decision #1):**
@@ -450,8 +450,8 @@ Sharding`. Re-point it to `Client` (the producer-op union is now the single
   - **The two send paths are architecturally DISTINCT — repoint ONLY the triad
     one (verified `actor.ts`):** - **(a) `makeOperationHandle.sendFn` (`actor.ts:1393-1410`) IS the Client-seam
     dispatch.** It hand-assembles the triad verbatim: `const mailbox = yield*
-ActorMailbox; const resolver = yield* ActorAddressResolver; const snowflakeGen
-= yield* Snowflake.Generator;` then resolves the address and calls
+    ActorMailbox; const resolver = yield* ActorAddressResolver; const snowflakeGen
+    = yield* Snowflake.Generator;` then resolves the address and calls
     `buildOutgoingRequestForSend(...)` then `mailbox.send(request)`. **Repoint this
     to `const client = yield* Client; ... yield* client.send(request)`** and pull
     `buildOutgoingRequestForSend` (`actor.ts:841-904`, byte-identical incl. the
@@ -459,12 +459,12 @@ ActorMailbox; const resolver = yield* ActorAddressResolver; const snowflakeGen
     what "supersedes the hand-assembled triad" (CONTEXT.md:24) means concretely. - **(b) `buildActorRef.send` (`actor.ts:1943-1958`) does NOT assemble the triad
     and is NOT repointed through the Client's `send`.** Verified: it dispatches via
     the closed-over per-entity `rpcClient` — `const fn = client[tag]; ... fn(arg,
-{ discard: true })` (`actor.ts:1945/1953`) — and touches neither mailbox,
+    { discard: true })` (`actor.ts:1945/1953`) — and touches neither mailbox,
     resolver, nor `buildOutgoingRequestForSend`. Its only Client-relevant work is
     MINTING the execId locally @1956 (`\`${_entityId}\x00${tag}\x00${primaryKey}\``),
-which **E1's `ExecIdCodec`already centralizes** (E1 rewires @1956 to`ExecIdCodec.encode`). **Leave `buildActorRef.send`'s dispatch on the per-entity
-`rpcClient`; do NOT route it through `Client.send`.** (The `client`local @1945
-is the entity's RPC client, a different thing from the`Client` transport Tag —
+    which **E1's `ExecIdCodec`already centralizes** (E1 rewires @1956 to`ExecIdCodec.encode`). **Leave `buildActorRef.send`'s dispatch on the per-entity
+    `rpcClient`; do NOT route it through `Client.send`.** (The `client`local @1945
+    is the entity's RPC client, a different thing from the`Client` transport Tag —
     do not conflate them.)
 - **Barrel de-export decision (resolving A-vs-B tension AND the shard-parity-test
   contradiction):** De-export **only `ActorSenderLayer`** (`index.ts:82`) — it is the
@@ -522,7 +522,7 @@ is the entity's RPC client, a different thing from the`Client` transport Tag —
   `mailbox.test.ts:106` / `rerun.test.ts:50` away from the layer factories** — they
   stay exported precisely so these isolation tests keep working. Only repoint a direct
   `ActorSenderLayer` import (if any) to `Actor.Client.layer.{memory,fromConfig,
-fromSharding,test}`. v3 untouched-green.
+  fromSharding,test}`. v3 untouched-green.
 - **Deps:** E2 (Client.peek composes the ReplySource), E4 (clean barrel before the
   Client de-export). Practically E5 is the heaviest actor.ts churn and lands after the
   await-engine and state seams are stable.
@@ -564,7 +564,7 @@ fromSharding,test}`. v3 untouched-green.
   `registerState` now consumes `State<A>` **[BREAKING for `{get,watch}` callers — note
   it + the rejected `State.isState` overload and why]**, `ActorStateHandle` left the
   public barrel **[BREAKING — note it]**, `Client.layer.{fromConfig,fromSharding,
-memory,test}` deep transport Tag (only `ActorSenderLayer` de-exported
+  memory,test}` deep transport Tag (only `ActorSenderLayer` de-exported
   **[BREAKING — note it]**; `ActorMailboxLayer`/`ActorAddressResolverLayer` stay
   exported as the internal resolution strategy), the public **`.send` R-channel
   collapses from `ActorMailbox|ActorAddressResolver|Snowflake.Generator` to `Client`,

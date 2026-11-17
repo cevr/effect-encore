@@ -17,7 +17,7 @@ names the load-bearing concepts so architecture reviews and AI navigation use on
   operation execution, returned by `send` and consumed by `peek` / `waitFor`. Carries phantom
   `Success`/`Error` types. **The wire/dedup identity** — its format is a persisted contract.
 - **PeekResult** — the terminal-or-not state of an execution: `Pending | Success | Failure |
-Interrupted | Defect | Suspended`. What `peek(execId)` returns and `waitFor` polls to terminal.
+  Interrupted | Defect | Suspended`. What `peek(execId)` returns and `waitFor` polls to terminal.
 
 ## Seams (where behaviour is swapped without editing in place)
 

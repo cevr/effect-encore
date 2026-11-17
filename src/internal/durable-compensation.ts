@@ -8,26 +8,27 @@ export type CompensationDecision = "Retry" | "Stop";
 
 export const CompensationDecision = Schema.Literals(["Retry", "Stop"]);
 
-export class PendingCompensation extends Schema.Class<PendingCompensation>(
-  "effect-encore/PendingCompensation",
-)({
+export class PendingCompensation extends Schema.Class<
+  PendingCompensation,
+  { readonly brand: unique symbol }
+>("effect-encore/PendingCompensation")({
   stepId: Schema.String,
   attempt: Schema.Int.check(Schema.isGreaterThan(0)),
 }) {}
 
-export class CompensationNotPendingError extends Schema.TaggedError<CompensationNotPendingError>()(
-  "CompensationNotPendingError",
-  {},
-) {}
+export class CompensationNotPendingError extends Schema.TaggedError<
+  CompensationNotPendingError,
+  { readonly brand: unique symbol }
+>()("CompensationNotPendingError", {}) {}
 
-export class CompensationDecisionConflictError extends Schema.TaggedError<CompensationDecisionConflictError>()(
-  "CompensationDecisionConflictError",
-  {
-    stepId: Schema.String,
-    attempt: Schema.Int.check(Schema.isGreaterThan(0)),
-    acceptedDecision: Schema.Option(CompensationDecision),
-  },
-) {}
+export class CompensationDecisionConflictError extends Schema.TaggedError<
+  CompensationDecisionConflictError,
+  { readonly brand: unique symbol }
+>()("CompensationDecisionConflictError", {
+  stepId: Schema.String,
+  attempt: Schema.Int.check(Schema.isGreaterThan(0)),
+  acceptedDecision: Schema.Option(CompensationDecision),
+}) {}
 
 export type CompensationDecisionError =
   | CompensationNotPendingError

@@ -3,9 +3,12 @@ import { Context, Effect, Exit, Layer, Schema } from "effect";
 import { WorkflowEngine } from "effect/workflow";
 import { Actor } from "../src/index.js";
 
-class OrderError extends Schema.TaggedError<OrderError>()("OrderError", {
-  message: Schema.String,
-}) {}
+class OrderError extends Schema.TaggedError<OrderError, { readonly brand: unique symbol }>()(
+  "OrderError",
+  {
+    message: Schema.String,
+  },
+) {}
 
 const OrderResult = Schema.Struct({
   orderId: Schema.String,
