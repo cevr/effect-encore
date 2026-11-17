@@ -1,5 +1,11 @@
 # effect-encore
 
+## 0.34.2
+
+### Patch Changes
+
+- [`b930078`](https://github.com/cevr/effect-encore/commit/b9300787403d68f2ec8bb6e1283b89990201642b) Thanks [@cevr](https://github.com/cevr)! - Brand `EntityIdDecodeError` so structurally similar values no longer satisfy its type; built and tested against effect 4.1.4.
+
 ## 0.34.1
 
 ### Patch Changes
